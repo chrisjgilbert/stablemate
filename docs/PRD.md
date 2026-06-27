@@ -1,8 +1,13 @@
 # Checkmate — Product Requirements Document (V1)
 
-> Cron monitoring for Rails / Solid Queue developers.
+> **Dead simple cron monitoring for Rails applications.**
 > A hosted, multi-tenant Rails 8 SaaS + a companion Ruby gem that auto-registers
 > heartbeat monitors from `config/recurring.yml`.
+>
+> **Positioning:** Dead simple. The whole product is one promise — *if a
+> scheduled job stops running, we email you.* Every V1 decision is filtered
+> against that: if a feature doesn't serve "a Rails dev's cron job went quiet and
+> they found out fast," it waits for V2.
 >
 > **Hosting model:** Checkmate is a single hosted instance that *we* operate.
 > Customers sign up on the public site and never touch infrastructure. We deploy
@@ -18,10 +23,11 @@
 
 ## 1. Summary
 
-Checkmate is a self-hosted cron/background-job monitoring tool. A monitored job
-sends a lightweight "ping" to a unique URL each time it runs; if no ping arrives
-within the expected interval plus a grace period, Checkmate alerts the owner by
-email. Each monitor has a public status page showing uptime history.
+Checkmate is a hosted cron/background-job monitoring tool for Rails developers.
+A monitored job sends a lightweight "ping" to a unique URL each time it runs; if
+no ping arrives within the expected interval plus a grace period, Checkmate
+emails the owner. The owner sees each monitor's status and uptime history in
+their authenticated dashboard. That's the whole product.
 
 The product's wedge is the **companion gem**: Rails/Solid Queue apps drop it in,
 and it auto-registers a heartbeat monitor for every recurring job in
@@ -57,7 +63,8 @@ instrumentation.
 2. Detect a missed/late job run within one detection cycle of
    `expected_interval + grace_period` elapsing, and email the owner.
 3. Email a recovery notice when a previously-down monitor pings again.
-4. Provide a per-monitor **public status page** with uptime history.
+4. Show the owner each monitor's current status and **90-day uptime history** in
+   the authenticated dashboard.
 5. Ship a **companion gem** that auto-registers heartbeats from
    `config/recurring.yml` and pings on successful Solid Queue job completion via
    `ActiveSupport::Notifications`, requiring no manual code in jobs.
@@ -72,11 +79,14 @@ instrumentation.
 
 - **HTTP/uptime monitoring** (polling URLs, response-time charts, TLS-expiry
   checks). → V2.
+- **Public / shareable status pages.** → V2, bundled with HTTP uptime
+  monitoring, where a *public service* status page is a coherent story. Internal
+  cron jobs have no external audience, so V1 keeps uptime history inside the
+  owner's authenticated dashboard only. (See §9 for the rationale.)
 - **Webhook / Slack alert channels.** → V2 (architected for, not built).
 - **Teams, organisations, shared ownership, roles/permissions.** → later.
 - **Billing, plans, quotas, usage limits.**
-- **Aggregated multi-monitor status sites, custom domains / CNAMEs** for status
-  pages. → V2.
+- **Aggregated multi-monitor status sites, custom domains / CNAMEs.** → V2.
 - **Cron-expression schedule parsing** (e.g. validating that pings line up with
   a `* * * *` spec). V1 uses a simple expected-interval model.
 - **SMS/phone/PagerDuty escalation, on-call rotations.**
@@ -132,25 +142,23 @@ monitors can join later.
 | `user_id` | bigint FK | Owner / tenant scope |
 | `monitor_type` | string, not null | `"heartbeat"` only in V1 |
 | `name` | string, not null | |
-| `slug` | string, unique, not null | Public status-page identifier (random) |
 | `ping_token` | string, unique, not null | Secret; embedded in the ping URL |
 | `expected_interval_seconds` | integer, not null | How often a ping is expected |
 | `grace_period_seconds` | integer, not null | Lateness tolerated before `down` |
 | `status` | string, not null | `up` / `down` / `paused` / `pending` |
-| `public_status_page` | boolean, default false | Status page 404s when off |
 | `last_ping_at` | datetime, null | Drives detection |
 | `next_due_at` | datetime, null | `last_ping_at + interval` (indexed) |
 | `registration_key` | string, null | Stable key for gem idempotent upsert |
 | `created_at` / `updated_at` | datetime | |
 
 Notes:
-- **`slug` (public) and `ping_token` (secret) are distinct.** The slug can be
-  shared freely; the ping token must stay private. Status pages are not
-  enumerable.
+- The **`ping_token` is secret** — it is the only credential on the ping path,
+  so it must stay private. There is no public identifier in V1 (public status
+  pages are deferred to V2, so no shareable `slug` is needed yet).
 - `registration_key` is the recurring job's key/name from `config/recurring.yml`,
   scoped per `(user, app)` — used by the gem to upsert without duplicating.
 - `pending` = created but never pinged yet (don't alert until first ping seen).
-- Indexes: `slug` (unique), `ping_token` (unique),
+- Indexes: `ping_token` (unique),
   `(user_id, registration_key)` (unique, where present), `next_due_at`,
   `(status, next_due_at)`.
 
@@ -221,10 +229,10 @@ Audit log of every alert dispatched. Channel-agnostic so V2 channels reuse it.
 | `Incident` | Indefinite |
 | `Notification` | Indefinite (audit) |
 
-Status page shows **90 days of uptime history** plus **recent ping events**.
-(Response-time charts are deferred with HTTP monitoring; `duration_ms` is
-captured opportunistically but not a V1 surface.) Retention is a global constant
-in V1, not user-configurable.
+The authenticated monitor detail view shows **90 days of uptime history** plus
+**recent ping events**. (Response-time charts are deferred with HTTP monitoring;
+`duration_ms` is captured opportunistically but not a V1 surface.) Retention is a
+global constant in V1, not user-configurable.
 
 ---
 
@@ -301,14 +309,13 @@ On ping receipt for a monitor:
 3. Job recovers and pings; monitor flips `up`, incident resolves, recovery email
    sent.
 
-### 5.4 Public status page
-- Anyone with the URL (`/status/:slug`) sees current status, 90-day uptime
-  history, and recent ping events — **only if** `public_status_page` is on.
-- Off → 404. Slugs are random and non-enumerable.
+### 5.4 Review status & history (authenticated)
+- The owner opens a monitor's detail page and sees current status, the 90-day
+  uptime bar, and recent ping events. This is owner-only; there is no public
+  view in V1.
 
 ### 5.5 Manage monitors
-- List / edit / pause / resume / delete; rotate `ping_token`; toggle the public
-  page; manage API keys.
+- List / edit / pause / resume / delete; rotate `ping_token`; manage API keys.
 
 ---
 
@@ -380,7 +387,7 @@ GET|POST /ping/:ping_token        →  200 {"ok": true}
 ### 6.4 Convenience read endpoints (optional, same bearer auth)
 ```
 GET /api/v1/monitors            → list caller's monitors
-GET /api/v1/monitors/:slug      → single monitor + recent status
+GET /api/v1/monitors/:id        → single monitor + recent status
 ```
 
 ### 6.5 Transport & security
@@ -412,11 +419,10 @@ travels end-to-end before any feature breadth is added.
 - **Exit:** create a monitor, stop pinging, receive a down email; resume pinging,
   receive recovery.
 
-### Phase 2 — Public status page + retention
-- `/status/:slug` (gated by `public_status_page`); current status + recent pings.
-- `UptimeDayStat` rollup job; 90-day `PingEvent` pruning job; 90-day history on
-  the page.
-- **Exit:** public page renders real uptime history; old raw pings pruned.
+### Phase 2 — Uptime history (authenticated) + retention
+- Monitor detail view: 90-day uptime bar + recent ping events, owner-only.
+- `UptimeDayStat` rollup job; 90-day `PingEvent` pruning job.
+- **Exit:** the detail page renders real uptime history; old raw pings pruned.
 
 ### Phase 3 — API + companion gem
 - `/api/v1` with bearer auth; `ApiKey` management UI; `POST /monitors/sync`.
@@ -432,10 +438,10 @@ travels end-to-end before any feature breadth is added.
 - **Exit:** documented, deployable, dog-fooded on Checkmate's own jobs.
 
 ### Deferred to V2 (explicitly)
-HTTP/uptime monitoring (polling, response-time charts, TLS-expiry); webhook
-channels; teams/roles; "still down" reminders; status-page custom
-domains & aggregated status sites; gem `prune`/reconciliation deletes; richer
-run-state (`start`/`fail`) pings.
+HTTP/uptime monitoring (polling, response-time charts, TLS-expiry); public /
+shareable status pages (with custom domains & aggregated status sites); webhook
+channels; teams/roles; "still down" reminders; gem `prune`/reconciliation
+deletes; richer run-state (`start`/`fail`) pings.
 
 ---
 
@@ -451,3 +457,36 @@ run-state (`start`/`fail`) pings.
 4. **Gem ping reliability** — fire-and-forget vs. a small retry/queue in the gem
    when Checkmate is briefly unreachable (a missed ping could false-alarm). Lean
    fire-and-forget for V1; flag if you want bounded retry.
+
+---
+
+## 9. Design rationale: why no public status pages in V1
+
+The positioning is **"dead simple cron monitoring for Rails applications."** The
+one promise is: *a scheduled job stops running → you get an email.* Features earn
+their place only by serving that promise.
+
+A *public, shareable* status page does not:
+
+- **The audience doesn't exist for V1's subject.** Public status pages come from
+  the uptime-monitoring playbook, where external users of a *public service* want
+  to know "is it down, or just me?" V1 monitors **internal background jobs**
+  (`nightly-db-backup`, `stripe-webhook-sync`). Nobody outside the team needs —
+  or should have — a public page about whether a backup cron ran.
+- **It's the orphaned half of a feature we already cut.** Public pages pair
+  naturally with HTTP/uptime monitoring of public services, which is deferred to
+  V2. Shipping the public display surface in V1 means building the front end for
+  a capability that isn't there yet.
+- **The valuable part is kept, just scoped correctly.** Uptime history (90-day
+  bar, incident timeline, recent pings) is genuinely useful — *to the owner*. It
+  lives in the authenticated dashboard, which we build regardless. Only the
+  unauthenticated, shareable wrapper is cut.
+
+**What we give up:** the "Powered by Checkmate" growth loop from shared pages.
+That loop only spins if owners actually share these pages, which is unlikely for
+internal jobs — speculative virality, and a weak reason to carry a whole feature
+in the thinnest possible V1.
+
+**When it returns:** V2, bundled with HTTP/uptime monitoring, where "show the
+world your *service* is up" is a coherent story. (The deferred `slug` /
+public-toggle fields slot back onto `Monitor` then, non-destructively.)
