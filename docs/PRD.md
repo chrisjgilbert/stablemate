@@ -31,8 +31,8 @@ instrumentation.
 ### Confirmed scope decisions (from discovery)
 
 - **Heartbeat monitors only in V1.** HTTP/uptime monitoring is deferred to V2.
-- **Email-only alerting in V1**, architected so webhook and Telegram channels
-  are additive in V2.
+- **Email-only alerting in V1**, architected so webhook channels are additive in
+  V2.
 - **Multi-tenant from day one**, single owner per monitor. No teams, no billing,
   no plan limits in V1.
 - The `Monitor` model uses a `monitor_type` discriminator (`heartbeat` only for
@@ -72,8 +72,7 @@ instrumentation.
 
 - **HTTP/uptime monitoring** (polling URLs, response-time charts, TLS-expiry
   checks). → V2.
-- **Webhook / Telegram / Slack alert channels.** → V2 (architected for, not
-  built).
+- **Webhook / Slack alert channels.** → V2 (architected for, not built).
 - **Teams, organisations, shared ownership, roles/permissions.** → later.
 - **Billing, plans, quotas, usage limits.**
 - **Aggregated multi-monitor status sites, custom domains / CNAMEs** for status
@@ -208,7 +207,7 @@ Audit log of every alert dispatched. Channel-agnostic so V2 channels reuse it.
 | `id` | bigint PK | |
 | `monitor_id` | bigint FK | |
 | `incident_id` | bigint FK, null | |
-| `channel` | string | `email` (V1); future: `webhook`, `telegram` |
+| `channel` | string | `email` (V1); future: `webhook` |
 | `event` | string | `down` / `recovered` |
 | `delivered_at` | datetime, null | |
 | `created_at` | datetime | |
@@ -433,8 +432,8 @@ travels end-to-end before any feature breadth is added.
 - **Exit:** documented, deployable, dog-fooded on Checkmate's own jobs.
 
 ### Deferred to V2 (explicitly)
-HTTP/uptime monitoring (polling, response-time charts, TLS-expiry); webhook &
-Telegram channels; teams/roles; "still down" reminders; status-page custom
+HTTP/uptime monitoring (polling, response-time charts, TLS-expiry); webhook
+channels; teams/roles; "still down" reminders; status-page custom
 domains & aggregated status sites; gem `prune`/reconciliation deletes; richer
 run-state (`start`/`fail`) pings.
 
