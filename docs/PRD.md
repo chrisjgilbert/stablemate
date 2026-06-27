@@ -1,8 +1,14 @@
 # Checkmate — Product Requirements Document (V1)
 
 > Cron monitoring for Rails / Solid Queue developers.
-> Self-hosted Rails 8 app + a companion Ruby gem that auto-registers heartbeat
-> monitors from `config/recurring.yml`.
+> A hosted, multi-tenant Rails 8 SaaS + a companion Ruby gem that auto-registers
+> heartbeat monitors from `config/recurring.yml`.
+>
+> **Hosting model:** Checkmate is a single hosted instance that *we* operate.
+> Customers sign up on the public site and never touch infrastructure. We deploy
+> and run the app on our own Hetzner box via Kamal — that is our internal ops
+> choice, not part of the product. Customers do **not** self-host their own
+> copies in V1.
 
 **Status:** Draft for V1
 **Last updated:** 2026-06-27
@@ -55,8 +61,10 @@ instrumentation.
 5. Ship a **companion gem** that auto-registers heartbeats from
    `config/recurring.yml` and pings on successful Solid Queue job completion via
    `ActiveSupport::Notifications`, requiring no manual code in jobs.
-6. Be cleanly **self-hostable on Hetzner via Kamal** with PostgreSQL + Solid
-   Queue and no external service dependencies beyond outbound SMTP.
+6. Run as a single **hosted, multi-tenant SaaS** that we operate and deploy to
+   our own Hetzner box via Kamal (PostgreSQL + Solid Queue), with no external
+   service dependencies beyond outbound SMTP. Customers sign up; they do not
+   deploy anything.
 7. Keep the alerting layer **channel-agnostic internally** so V2 channels are
    purely additive.
 
@@ -74,6 +82,8 @@ instrumentation.
   a `* * * *` spec). V1 uses a simple expected-interval model.
 - **SMS/phone/PagerDuty escalation, on-call rotations.**
 - **Periodic "still down" reminder emails.** → fast-follow.
+- **Customer self-hosting / on-prem distribution.** Checkmate is a single hosted
+  instance we operate; we do not ship a deployable copy for customers to run.
 
 ---
 
