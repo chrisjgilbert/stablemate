@@ -1,4 +1,4 @@
-# Checkmate — Product Requirements Document (V1)
+# Stablemate — Product Requirements Document (V1)
 
 > **Dead simple cron monitoring for Rails applications.**
 > A hosted, multi-tenant Rails 8 SaaS + a companion Ruby gem that auto-registers
@@ -9,7 +9,7 @@
 > against that: if a feature doesn't serve "a Rails dev's cron job went quiet and
 > they found out fast," it waits for V2.
 >
-> **Hosting model:** Checkmate is a single hosted instance that *we* operate.
+> **Hosting model:** Stablemate is a single hosted instance that *we* operate.
 > Customers sign up on the public site and never touch infrastructure. We deploy
 > and run the app on our own Hetzner box via Kamal — that is our internal ops
 > choice, not part of the product. Customers do **not** self-host their own
@@ -23,9 +23,9 @@
 
 ## 1. Summary
 
-Checkmate is a hosted cron/background-job monitoring tool for Rails developers.
+Stablemate is a hosted cron/background-job monitoring tool for Rails developers.
 A monitored job sends a lightweight "ping" to a unique URL each time it runs; if
-no ping arrives within the expected interval plus a grace period, Checkmate
+no ping arrives within the expected interval plus a grace period, Stablemate
 emails the owner. The owner sees each monitor's status and uptime history in
 their authenticated dashboard. That's the whole product.
 
@@ -33,6 +33,23 @@ The product's wedge is the **companion gem**: Rails/Solid Queue apps drop it in,
 and it auto-registers a heartbeat monitor for every recurring job in
 `config/recurring.yml` and pings on each successful run — with zero manual
 instrumentation.
+
+The gem is built in **two layers** (see §6.6):
+
+- **Execution tracking** subscribes to ActiveJob's `perform.active_job`
+  `ActiveSupport::Notifications` event — *not* a Solid-Queue-specific hook. Since
+  Solid Queue is an ActiveJob backend, Solid Queue users get the identical
+  result, but the same code makes the gem portable to any ActiveJob backend
+  (Sidekiq, GoodJob, Resque, Delayed Job). Same effort, free portability.
+- **Auto-registration** (schedule discovery) is inherently scheduler-specific and
+  ships **Solid Queue `config/recurring.yml` only** in V1, behind a registrar
+  adapter seam so other sources (`sidekiq-cron`, `good_job.cron`, the `whenever`
+  gem) are additive in V2 without touching the core.
+
+A consequence worth stating: even in V1, a non-Solid-Queue Rails app can create a
+monitor manually and still get **automatic execution pings by job class** via the
+ActiveJob layer — they just don't get the zero-config auto-registration magic
+yet.
 
 ### Confirmed scope decisions (from discovery)
 
@@ -43,6 +60,13 @@ instrumentation.
   no plan limits in V1.
 - The `Monitor` model uses a `monitor_type` discriminator (`heartbeat` only for
   now) so HTTP monitors slot in later without a destructive migration.
+- **Gem execution tracking is built on ActiveJob**, not Solid Queue directly —
+  portable to any ActiveJob backend at no extra cost. **Auto-registration is
+  Solid Queue (`recurring.yml`) only in V1**, behind an adapter seam; other
+  schedulers are V2.
+- **Incident acknowledgement is out of V1.** Incidents open on `down` and resolve
+  on recovery — no manual "acknowledge" step or `acknowledged_at` state. (The
+  design comp included an Acknowledge action; it is cut.)
 
 ### Default decisions taken where discovery left them open
 
@@ -91,7 +115,7 @@ instrumentation.
   a `* * * *` spec). V1 uses a simple expected-interval model.
 - **SMS/phone/PagerDuty escalation, on-call rotations.**
 - **Periodic "still down" reminder emails.** → fast-follow.
-- **Customer self-hosting / on-prem distribution.** Checkmate is a single hosted
+- **Customer self-hosting / on-prem distribution.** Stablemate is a single hosted
   instance we operate; we do not ship a deployable copy for customers to run.
 
 ---
@@ -130,7 +154,7 @@ Long-lived bearer token used by the companion gem. A user may have several
 | `last_used_at` | datetime, null | |
 | `created_at` / `updated_at` | datetime | |
 
-Raw token format: `cm_live_<random>`. Stored hashed; never recoverable.
+Raw token format: `sm_live_<random>`. Stored hashed; never recoverable.
 
 ### 3.3 `Monitor`
 A single monitored thing. One table, discriminated by `monitor_type` so HTTP
@@ -291,16 +315,19 @@ On ping receipt for a monitor:
 ### 5.1 Sign up & first monitor (manual)
 1. User registers (email + password); verification email sent (non-blocking).
 2. Creates a monitor: name, expected interval, grace period.
-3. Checkmate shows the **unique ping URL** and a `curl` snippet.
+3. Stablemate shows the **unique ping URL** and a `curl` snippet.
 4. User wires the URL into their cron/job. First ping flips `pending → up`.
 
 ### 5.2 Adopt the companion gem (the wedge)
 1. User generates an **API key** in the UI (shown once).
-2. Adds the gem, sets `CHECKMATE_API_KEY` + endpoint.
-3. On boot, the gem reads `config/recurring.yml` and **syncs** one heartbeat per
-   recurring job (idempotent upsert by `registration_key`).
-4. On each successful Solid Queue job run, the gem pings that monitor's URL via
-   an `ActiveSupport::Notifications` subscriber. No per-job code.
+2. Adds the gem, sets `STABLEMATE_API_KEY` + endpoint.
+3. On boot, the gem's **Solid Queue registrar adapter** reads
+   `config/recurring.yml` and **syncs** one heartbeat per recurring job
+   (idempotent upsert by `registration_key`).
+4. On each successful job run, the gem's ActiveJob subscriber
+   (`perform.active_job`) pings the matching monitor's URL. No per-job code, and
+   it works for any ActiveJob backend — Solid Queue users just also get step 3's
+   auto-registration for free.
 
 ### 5.3 Outage & recovery
 1. Job fails to run / hangs; no ping arrives.
@@ -322,19 +349,19 @@ On ping receipt for a monitor:
 ## 6. API Design (companion-gem facing)
 
 Versioned JSON API under `/api/v1`. **Bearer auth** (`Authorization: Bearer
-cm_live_…`) for management endpoints; the per-monitor **ping URL is
+sm_live_…`) for management endpoints; the per-monitor **ping URL is
 self-authenticating** via its secret token (no API key on pings — keeps the hot
 path trivial and dependency-free in the gem).
 
 ### 6.1 Authentication
 ```
-Authorization: Bearer cm_live_xxxxxxxxxxxx
+Authorization: Bearer sm_live_xxxxxxxxxxxx
 ```
 Resolved by hashing and matching `ApiKey.token_digest`; identifies the tenant.
 `last_used_at` is touched. Invalid/missing → `401`.
 
 ### 6.2 Sync monitors (idempotent bulk upsert)
-The gem's core call — reconciles `config/recurring.yml` with Checkmate.
+The gem's core call — reconciles `config/recurring.yml` with Stablemate.
 
 ```
 POST /api/v1/monitors/sync
@@ -364,7 +391,7 @@ Behaviour: upsert by `(user, registration_key)`. Returns each monitor with its
 {
   "monitors": [
     { "registration_key": "daily_digest",
-      "ping_url": "https://checkmate.example.com/ping/<ping_token>",
+      "ping_url": "https://stablemate.dev/ping/<ping_token>",
       "status": "pending" },
     ...
   ]
@@ -396,6 +423,42 @@ GET /api/v1/monitors/:id        → single monitor + recent status
   option if abuse appears).
 - Ping endpoint is rate-limited per token to absorb misconfiguration.
 
+### 6.6 Companion gem architecture (two layers + adapter seam)
+
+The gem deliberately separates *how jobs run* from *how jobs are discovered*:
+
+**Layer 1 — Execution tracking (backend-agnostic, V1).**
+A single subscriber to ActiveJob's `ActiveSupport::Notifications` event
+`perform.active_job`. On a successful `perform`, it looks up the monitor for that
+job (by `registration_key`, derived from the job class) and fires a ping to
+`/ping/:ping_token`. Because every mainstream Rails queue (Solid Queue, Sidekiq,
+GoodJob, Resque, Delayed Job) runs jobs through ActiveJob, this one subscriber
+covers them all. Failed/errored performs do **not** ping (a missed beat is the
+signal). The hot ping path stays dependency-free (see §6.3).
+
+**Layer 2 — Registration (scheduler-specific, adapter seam).**
+A `Registrar` interface that produces `{registration_key, name,
+expected_interval_seconds, grace_period_seconds}` tuples and calls
+`POST /api/v1/monitors/sync` (§6.2):
+
+| Adapter | Source of truth | Ships |
+|---|---|---|
+| `SolidQueueRecurring` | `config/recurring.yml` (`schedule:` → interval) | **V1** |
+| `SidekiqCron` | `sidekiq-cron` schedule | V2 |
+| `GoodJobCron` | `config.good_job.cron` | V2 |
+| `Whenever` | `config/schedule.rb` | V2 |
+
+Only the V1 adapter is built; the seam means a V2 adapter is a new class, not a
+refactor. Cron schedules are converted to an `expected_interval_seconds` (the
+gap between consecutive runs) with a default grace; manual override remains
+possible in the UI.
+
+**Mapping execution to registration.** Both layers key on `registration_key`
+(stable, derived from the job/task identity), so a ping from Layer 1 finds the
+monitor Layer 2 created. A non-Solid-Queue app that skips Layer 2 can still use
+Layer 1 against a manually-created monitor whose `registration_key` matches the
+job class.
+
 ---
 
 ## 7. Phased Delivery Plan
@@ -426,22 +489,27 @@ travels end-to-end before any feature breadth is added.
 
 ### Phase 3 — API + companion gem
 - `/api/v1` with bearer auth; `ApiKey` management UI; `POST /monitors/sync`.
-- Companion gem: read `config/recurring.yml`, call sync on boot, subscribe to
-  Solid Queue via `ActiveSupport::Notifications`, ping on success. Idempotent.
-- **Exit:** add the gem to a sample Rails app → monitors auto-appear; a real job
-  run pings automatically; stopping the job alerts.
+- Companion gem, two layers (§6.6): the ActiveJob `perform.active_job` execution
+  subscriber (backend-agnostic) + the Solid Queue `recurring.yml` registrar
+  adapter behind a `Registrar` seam. Idempotent.
+- **Exit:** add the gem to a sample Solid Queue app → monitors auto-appear; a
+  real job run pings automatically; stopping the job alerts. Verify the execution
+  subscriber also fires on a non-Solid-Queue ActiveJob backend against a
+  manually-created monitor.
 
 ### Phase 4 — Hardening & polish
 - Ping rate-limiting; abuse/opaque-error review; mailer deliverability
   (SPF/DKIM); dashboards/empty states; docs + install guide; backup/restore
   runbook for the Hetzner box.
-- **Exit:** documented, deployable, dog-fooded on Checkmate's own jobs.
+- **Exit:** documented, deployable, dog-fooded on Stablemate's own jobs.
 
 ### Deferred to V2 (explicitly)
 HTTP/uptime monitoring (polling, response-time charts, TLS-expiry); public /
-shareable status pages (with custom domains & aggregated status sites); webhook
-channels; teams/roles; "still down" reminders; gem `prune`/reconciliation
-deletes; richer run-state (`start`/`fail`) pings.
+shareable status pages (with custom domains & aggregated status sites);
+registrar adapters for other schedulers (`sidekiq-cron`, `good_job.cron`,
+`whenever`); webhook channels; teams/roles; "still down" reminders; incident
+acknowledgement; gem `prune`/reconciliation deletes; richer run-state
+(`start`/`fail`) pings.
 
 ---
 
@@ -455,8 +523,18 @@ deletes; richer run-state (`start`/`fail`) pings.
 3. **Email verification** — leave non-blocking (current assumption) or gate
    monitor creation on a verified address?
 4. **Gem ping reliability** — fire-and-forget vs. a small retry/queue in the gem
-   when Checkmate is briefly unreachable (a missed ping could false-alarm). Lean
+   when Stablemate is briefly unreachable (a missed ping could false-alarm). Lean
    fire-and-forget for V1; flag if you want bounded retry.
+5. **Cron → expected-interval conversion.** The registrar derives
+   `expected_interval_seconds` from a recurring task's cron `schedule:` (the gap
+   between consecutive runs). Irregular crons (e.g. `0 9,17 * * *` — uneven gaps)
+   don't have a single interval. V1 proposal: use the *largest* gap as the
+   interval (avoids false alarms) and let the user override in the UI. Confirm.
+6. **ActiveJob job → monitor mapping key.** Execution pings match a monitor by
+   `registration_key` derived from the job class. Need to settle the exact
+   derivation (class name vs. Solid Queue task key) so a recurring task and its
+   ActiveJob `perform` resolve to the *same* monitor. Low risk, but pin it before
+   the gem work in Phase 3.
 
 ---
 
@@ -482,7 +560,7 @@ A *public, shareable* status page does not:
   lives in the authenticated dashboard, which we build regardless. Only the
   unauthenticated, shareable wrapper is cut.
 
-**What we give up:** the "Powered by Checkmate" growth loop from shared pages.
+**What we give up:** the "Powered by Stablemate" growth loop from shared pages.
 That loop only spins if owners actually share these pages, which is unlikely for
 internal jobs — speculative virality, and a weak reason to carry a whole feature
 in the thinnest possible V1.
