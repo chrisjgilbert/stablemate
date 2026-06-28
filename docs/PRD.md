@@ -446,10 +446,13 @@ need to raise their plan (later) or trim monitored jobs.
 
 ### 6.3 Ping (hot path, self-authenticating)
 ```
-GET|POST /ping/:ping_token        →  200 {"ok": true}
+GET|POST /ping/:ping_token        →  200 {"ok": true}   # success check-in
+GET|POST /ping/:ping_token/fail   →  200 {"ok": true}   # failure check-in (V2)
 ```
-- Optional query/body: `duration_ms`, `kind` (`success` default; `start`/`fail`
-  reserved for richer run-state in a later gem version).
+- Optional `duration_ms` on the success ping.
+- **Failure reporting (V2, deferred):** a sibling `/fail` URL (Dead Man's Snitch
+  pattern) marks the run as failed and may carry `error_class` / `error_message`
+  for alert context — see §10. V1 ships success pings only; absence is the signal.
 - Unknown token → `404` (opaque; no tenant leakage).
 - Designed to be callable by a bare `curl` for the manual flow too.
 
@@ -559,7 +562,9 @@ acknowledgement; gem `prune`/reconciliation deletes; richer run-state
 message and surfacing it as alert context** (deferred but intended; the exception
 is already available in the ActiveJob `perform.active_job` payload). Full stack
 traces stay out of scope — that's Mission Control / an error tracker's job; see
-§10.
+§10. Also from the Dead Man's Snitch playbook: **scheduled pause / maintenance
+windows** (mute a monitor over a known deploy/downtime window) and a **periodic
+digest email** (weekly health summary of all a user's monitors).
 
 ---
 
@@ -584,6 +589,15 @@ Recorded so future scope decisions don't drift into a neighbour's lane.
   the alert/detail (intended, deferred); keep full backtraces out. Staying in the
   "detect the absence, tell you, give just enough to know where to look" lane is
   what keeps the product *dead simple*.
+- **Intended mechanism — a `/fail` check-in (Dead Man's Snitch pattern).** When
+  the error feature lands, a job reports failure by hitting a sibling of its ping
+  URL — `POST /ping/:ping_token/fail` — optionally carrying `error_class` and
+  `error_message` in the body. Success pings the normal URL; a raised exception
+  pings `/fail`. The gem's ActiveJob subscriber does this automatically (success
+  vs. rescued exception on `perform.active_job`); a hand-rolled job can `curl` the
+  `/fail` URL just as simply. This keeps the hot path trivial, stays curl-able,
+  and captures just enough context (class + message) without a backtrace. It
+  supersedes the earlier `kind=fail` query-param sketch in §6.3.
 
 ---
 

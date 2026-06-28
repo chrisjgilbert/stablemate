@@ -195,3 +195,16 @@ A Free user who already has 5 monitors can't create a 6th. Please design the
 
 Still **not** wanted in V1: pricing tables, plan-comparison UI, checkout, or any
 "upgrade" flow. One Free plan, one cap, one waitlist gate — nothing more.
+
+---
+
+# Round 3 addendum (cont.) — new-monitor interval presets
+
+One small UX request for the **new-monitor / edit form** (R2 §5c), borrowed from
+Dead Man's Snitch: don't make people type raw seconds. Offer **human-friendly
+interval presets** — e.g. a segmented control or select with *Every 5 min /
+Hourly / Daily / Weekly* and a "Custom…" escape hatch for an arbitrary value.
+Same for the grace period (sensible presets + custom). Keep the mono styling for
+the resulting value. Gem-managed monitors derive their interval from
+`recurring.yml` automatically, so this is specifically to make **manual** monitor
+creation feel dead simple. Low priority, but it's a cheap, on-brand polish.
