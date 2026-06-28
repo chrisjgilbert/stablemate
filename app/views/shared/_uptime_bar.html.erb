@@ -1,0 +1,19 @@
+<%#
+  UptimeBar (design-system.md §2): up to 90 day-status bars, server-rendered from
+  a passed array, no JS. Phase 1 only builds the component; real 90-day data
+  arrives in Phase 2 — callers pass whatever status array they have.
+  Locals: days (array of status strings: "up"/"down"/"partial"/"no-data").
+%>
+<% fills = {
+     "up"      => "bg-[#22c55e]",
+     "partial" => "bg-[#f59e0b]",
+     "down"    => "bg-[#ef4444]",
+     "no-data" => "bg-[#e4e4e7]"
+   } %>
+<div class="flex items-end gap-[2px] h-[34px]" role="img" aria-label="Uptime, last <%= days.size %> days">
+  <% days.each_with_index do |status, i| %>
+    <% ago = days.size - 1 - i %>
+    <span class="flex-1 h-full rounded-[2px] <%= fills.fetch(status, fills["no-data"]) %>"
+          title="<%= ago.zero? ? "today" : "#{ago}d ago" %>"></span>
+  <% end %>
+</div>

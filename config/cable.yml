@@ -5,8 +5,12 @@
 development:
   adapter: async
 
+# System tests drive a real browser that subscribes over a websocket to the
+# in-process Puma test server; the async adapter actually pushes Turbo Stream
+# broadcasts to it (the `test` adapter only captures them in-process and never
+# reaches the browser, so live-update system tests can't see them).
 test:
-  adapter: test
+  adapter: async
 
 production:
   adapter: solid_cable

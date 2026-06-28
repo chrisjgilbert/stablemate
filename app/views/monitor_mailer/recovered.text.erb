@@ -1,0 +1,7 @@
+Your monitor has recovered
+
+<%= @monitor.name %> pinged again and is back UP.
+<% if @monitor.last_ping_at %>
+Last ping <%= @monitor.last_ping_at.utc.strftime("%Y-%m-%d %H:%M UTC") %>.
+<% end %>
+View monitor: <%= monitor_url(@monitor) %>

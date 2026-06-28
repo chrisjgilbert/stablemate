@@ -22,3 +22,16 @@ up:
   last_ping_at: <%= 10.minutes.ago.utc.iso8601 %>
   next_due_at: <%= 50.minutes.from_now.utc.iso8601 %>
   source: manual
+
+# Owned by bob — used to prove tenant isolation (alice must get a 404).
+bobs:
+  user: bob
+  monitor_type: heartbeat
+  name: Bobs job
+  ping_token: fixture_bobs_token_cccccccccccccccc
+  expected_interval_seconds: 3600
+  grace_period_seconds: 300
+  status: up
+  last_ping_at: <%= 10.minutes.ago.utc.iso8601 %>
+  next_due_at: <%= 50.minutes.from_now.utc.iso8601 %>
+  source: manual

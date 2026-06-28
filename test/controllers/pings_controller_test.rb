@@ -1,7 +1,24 @@
 require "test_helper"
 
 class PingsControllerTest < ActionDispatch::IntegrationTest
+  include ActiveJob::TestHelper
+
   setup { @monitor = monitors(:pending) }
+
+  # Scenario 24 (request) — a ping recovers a down monitor and sends recovery mail.
+  test "a ping recovers a down monitor, resolves its incident, sends one recovery email" do
+    down = monitors(:up)
+    down.flag_missed!
+    assert down.down?
+
+    assert_enqueued_emails 1 do
+      get ping_path(down.ping_token)
+    end
+
+    assert_response :success
+    assert down.reload.up?
+    refute down.incidents.open.exists?
+  end
 
   # Scenario 1 — 200 {"ok":true} + a PingEvent is created.
   test "GET /ping/:token returns 200 ok and records a PingEvent" do

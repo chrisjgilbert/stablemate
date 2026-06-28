@@ -1,0 +1,7 @@
+Your monitor is down
+
+<%= @monitor.name %> has missed its expected check-in and is now marked DOWN.
+<% if @expected_by %>
+Expected by <%= @expected_by.utc.strftime("%Y-%m-%d %H:%M UTC") %>, but no ping arrived.
+<% end %>
+View monitor: <%= monitor_url(@monitor) %>

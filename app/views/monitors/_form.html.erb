@@ -1,0 +1,36 @@
+<%= form_with model: monitor, class: "space-y-6" do |form| %>
+  <% if monitor.errors.any? %>
+    <div class="rounded-lg border border-down-bg bg-down-bg/60 px-3 py-2 text-[12px] text-down-text">
+      <ul class="list-disc list-inside">
+        <% monitor.errors.full_messages.each do |msg| %><li><%= msg %></li><% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :name, "Name", class: "block text-[13px] font-medium text-secondary mb-1" %>
+    <%= form.text_field :name, required: true,
+          class: "w-full h-[38px] px-3 rounded-lg border border-border font-mono text-[13px] focus:outline-brand" %>
+  </div>
+
+  <%= render "monitors/preset_field",
+        form: form,
+        field: :expected_interval_seconds,
+        label: "Expected interval",
+        presets: interval_presets,
+        current: monitor.expected_interval_seconds %>
+
+  <%= render "monitors/preset_field",
+        form: form,
+        field: :grace_period_seconds,
+        label: "Grace period",
+        presets: grace_presets,
+        current: monitor.grace_period_seconds %>
+
+  <div class="flex items-center gap-3">
+    <%= form.submit (monitor.persisted? ? "Save changes" : "Create monitor"),
+          class: "h-9 px-4 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
+    <%= link_to "Cancel", (monitor.persisted? ? monitor_path(monitor) : monitors_path),
+          class: "h-9 px-4 inline-flex items-center rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+  </div>
+<% end %>

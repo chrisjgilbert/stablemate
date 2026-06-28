@@ -1,0 +1,22 @@
+<%#
+  MiniTicks (design-system.md §2): 16-bar sparkline of the most recent checks,
+  trailed by an uptime %. Server-rendered.
+  Locals: checks (array of "up"/"down"), shows the last 16 in order.
+%>
+<% recent = checks.last(16) %>
+<% pct = checks.empty? ? nil : (100.0 * checks.count { |c| c == "up" } / checks.size).round %>
+<div class="flex items-center gap-2">
+  <div class="flex items-end gap-[2px] h-4" role="img" aria-label="Recent checks">
+    <% recent.each do |c| %>
+      <% fill = case c
+                when "up"   then "bg-[#3ec06a]"
+                when "down" then "bg-[#e5484d]"
+                else "bg-[#e4e4e9]"
+                end %>
+      <span class="w-[5px] h-4 rounded-[1.5px] <%= fill %>"></span>
+    <% end %>
+  </div>
+  <% if pct %>
+    <span class="font-mono text-[11px] text-muted"><%= pct %>%</span>
+  <% end %>
+</div>

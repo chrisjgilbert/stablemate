@@ -1,0 +1,89 @@
+<% content_for :title, @monitor.name %>
+<% open_incident = @monitor.incidents.open.first %>
+
+<%# Live status: subscribe to the monitor's stream so broadcast_status_update's
+    :badge replace lands on the header badge without a reload (mirrors _row.html.erb). %>
+<%= turbo_stream_from @monitor %>
+
+<div class="max-w-3xl mx-auto space-y-6">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <%= link_to "← Monitors", monitors_path, class: "text-[13px] text-muted hover:text-ink" %>
+      <h1 class="font-mono text-lg text-ink"><%= @monitor.name %></h1>
+      <%= render "monitors/badge", monitor: @monitor %>
+      <%= render "shared/gem_chip", monitor: @monitor, variant: :full %>
+    </div>
+    <div class="flex items-center gap-2">
+      <% if @monitor.paused? %>
+        <%= button_to "Resume", monitor_pause_path(@monitor), method: :delete,
+              class: "h-8 px-3 rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+      <% else %>
+        <%= button_to "Pause", monitor_pause_path(@monitor), method: :post,
+              class: "h-8 px-3 rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+      <% end %>
+      <%= link_to "Edit", edit_monitor_path(@monitor),
+            class: "h-8 px-3 inline-flex items-center rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+      <%= button_to "Delete", monitor_path(@monitor), method: :delete,
+            form: { data: { turbo_confirm: "Delete this monitor and all its data?" } },
+            class: "h-8 px-3 rounded-lg text-[13px] font-semibold text-down-text hover:bg-down-bg/60" %>
+    </div>
+  </div>
+
+  <% if open_incident %>
+    <div class="rounded-xl border border-[#f6d6d6] bg-[#fef4f4] p-5" data-testid="incident-banner">
+      <div class="flex items-center gap-2 text-[#a01e23] font-semibold">
+        <span class="w-2 h-2 rounded-full bg-down-dot status-dot-pulse"></span>
+        Active incident
+      </div>
+      <p class="mt-1 text-[13px] text-[#bf5a5d] font-mono">
+        Down for <%= distance_of_time_in_words(open_incident.started_at, Time.current) %>
+        (since <%= open_incident.started_at.utc.strftime("%Y-%m-%d %H:%M UTC") %>)
+      </p>
+    </div>
+  <% end %>
+
+  <%# Ping URL card + curl snippet (post-create state lives here too) %>
+  <div class="rounded-xl border border-border bg-surface p-6 shadow-sm space-y-4" data-testid="ping-url-card">
+    <div class="flex items-center justify-between">
+      <h2 class="text-[13px] font-semibold text-secondary">Ping URL</h2>
+      <%= button_to "Rotate token", monitor_ping_token_path(@monitor), method: :patch,
+            form: { data: { turbo_confirm: "Rotate the token? The current ping URL stops working immediately." } },
+            class: "h-7 px-2.5 rounded-lg border border-border text-[12px] font-semibold text-secondary hover:bg-hairline" %>
+    </div>
+    <%= render "shared/copyable", value: ping_url_for(@monitor), label: "Ping URL" %>
+    <div>
+      <p class="text-[12px] text-muted mb-1">Wire it into your job:</p>
+      <%= render "shared/copyable", value: curl_snippet_for(@monitor), dark: true, label: "curl snippet" %>
+    </div>
+  </div>
+
+  <%# Settings summary %>
+  <div class="rounded-xl border border-border bg-surface p-6 shadow-sm">
+    <h2 class="text-[13px] font-semibold text-secondary mb-4">Settings</h2>
+    <dl class="grid grid-cols-2 gap-y-3 text-[13px]">
+      <dt class="text-muted">Status</dt><dd><%= render "shared/status_badge", status: @monitor.status %></dd>
+      <dt class="text-muted">Expected interval</dt><dd class="font-mono"><%= humanize_seconds(@monitor.expected_interval_seconds) %></dd>
+      <dt class="text-muted">Grace period</dt><dd class="font-mono"><%= humanize_seconds(@monitor.grace_period_seconds) %></dd>
+      <dt class="text-muted">Last ping</dt>
+      <dd class="font-mono"><%= @monitor.last_ping_at ? @monitor.last_ping_at.utc.strftime("%Y-%m-%d %H:%M UTC") : "never" %></dd>
+    </dl>
+  </div>
+
+  <%# Recent events (simple last-N list; the 90-day uptime panel lands in Phase 2) %>
+  <div class="rounded-xl border border-border bg-surface p-6 shadow-sm">
+    <h2 class="text-[13px] font-semibold text-secondary mb-4">Recent pings</h2>
+    <% events = @monitor.ping_events.order(received_at: :desc).limit(10) %>
+    <% if events.any? %>
+      <ul class="divide-y divide-hairline text-[12px] font-mono text-secondary">
+        <% events.each do |event| %>
+          <li class="py-2 flex items-center justify-between">
+            <span><%= event.received_at.utc.strftime("%Y-%m-%d %H:%M:%S UTC") %></span>
+            <span class="text-muted"><%= event.source_ip %></span>
+          </li>
+        <% end %>
+      </ul>
+    <% else %>
+      <p class="text-[13px] text-muted">No pings yet.</p>
+    <% end %>
+  </div>
+</div>

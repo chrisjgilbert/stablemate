@@ -1,0 +1,37 @@
+module MonitorsHelper
+  # Human-friendly rendering of an interval/grace in seconds ("1h", "5m", "1d").
+  def humanize_seconds(seconds)
+    return "—" if seconds.blank?
+
+    secs = seconds.to_i
+    if secs % 86_400 == 0
+      "#{secs / 86_400}d"
+    elsif secs % 3_600 == 0
+      "#{secs / 3_600}h"
+    elsif secs % 60 == 0
+      "#{secs / 60}m"
+    else
+      "#{secs}s"
+    end
+  end
+
+  # The full ping URL for a monitor (mono, copyable everywhere).
+  def ping_url_for(monitor)
+    ping_url(monitor.ping_token)
+  end
+
+  # A curl one-liner for the post-create card / docs.
+  def curl_snippet_for(monitor)
+    "curl -fsS #{ping_url_for(monitor)}"
+  end
+
+  # Interval presets offered in the form (label => seconds). "Custom" is handled
+  # client-side by the preset_field Stimulus controller.
+  def interval_presets
+    [ [ "Every 5 minutes", 300 ], [ "Hourly", 3_600 ], [ "Daily", 86_400 ], [ "Weekly", 604_800 ] ]
+  end
+
+  def grace_presets
+    [ [ "1 minute", 60 ], [ "5 minutes", 300 ], [ "15 minutes", 900 ], [ "1 hour", 3_600 ] ]
+  end
+end

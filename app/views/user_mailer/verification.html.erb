@@ -1,0 +1,10 @@
+<h1 style="font-family: sans-serif; color: #1a1a1e;">Confirm your email</h1>
+
+<p style="font-family: sans-serif; color: #26262c;">
+  Welcome to Stablemate. Confirm your email address to finish setting up your
+  account. (You can keep using Stablemate in the meantime.)
+</p>
+
+<p style="font-family: sans-serif;">
+  <%= link_to "Confirm email", email_verification_url(token: @token), style: "color: #5b53eb;" %>
+</p>

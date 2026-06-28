@@ -1,0 +1,26 @@
+<%#
+  A human-preset + Custom field backed by a hidden seconds value. The Stimulus
+  preset_field controller writes the chosen seconds into the hidden field and
+  reveals the custom input when "Custom" is picked.
+  Locals: form, field (symbol), label, presets ([[label, seconds], ...]), current (int|nil).
+%>
+<% matches_preset = presets.any? { |_, secs| secs == current } %>
+<div data-controller="preset-field" class="space-y-2">
+  <%= form.label field, label, class: "block text-[13px] font-medium text-secondary" %>
+
+  <%= form.hidden_field field, value: current, data: { "preset-field-target" => "value" } %>
+
+  <select data-preset-field-target="select" data-action="preset-field#update"
+          aria-label="<%= label %> preset"
+          class="w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand">
+    <% presets.each do |plabel, secs| %>
+      <option value="<%= secs %>" <%= "selected" if secs == current %>><%= plabel %></option>
+    <% end %>
+    <option value="custom" <%= "selected" unless matches_preset %>>Custom (seconds)</option>
+  </select>
+
+  <input type="number" min="0" data-preset-field-target="custom"
+         data-action="input->preset-field#syncCustom"
+         value="<%= current %>" aria-label="<%= label %> in seconds"
+         class="w-full h-[38px] px-3 rounded-lg border border-border font-mono text-[13px] focus:outline-brand <%= "hidden" if matches_preset %>">
+</div>

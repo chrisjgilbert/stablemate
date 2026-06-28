@@ -1,0 +1,20 @@
+<%#
+  GemChip (design-system.md §2): quiet indigo chip shown ONLY when the monitor
+  was registered from the gem (source == "gem"). variant: :compact (rows) or
+  :full (detail header).
+  Locals: monitor, variant (default :compact).
+%>
+<% variant ||= :compact %>
+<% if monitor.source == "gem" %>
+  <% if variant == :full %>
+    <span class="inline-flex items-center gap-1 px-2 h-[22px] rounded-md bg-brand-tint text-gem text-[11px] font-medium"
+          title="Registered from config/recurring.yml">
+      <span aria-hidden="true">◆</span> synced from gem
+    </span>
+  <% else %>
+    <span class="inline-flex items-center gap-0.5 px-1.5 rounded-[5px] bg-brand-tint text-gem font-mono text-[9.5px]"
+          title="Registered from config/recurring.yml">
+      <span aria-hidden="true">◆</span> gem
+    </span>
+  <% end %>
+<% end %>

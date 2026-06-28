@@ -25,5 +25,17 @@ Capybara.register_driver(:stablemate_cuprite) do |app|
 end
 
 class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
+  include ActionView::RecordIdentifier # dom_id in assertions
+
   driven_by :stablemate_cuprite
+
+  # Sign in through the real rendered UI (system tests must not fake the session).
+  # Fixtures share the password "password1234".
+  def sign_in(user, password: "password1234")
+    visit sign_in_path
+    fill_in "Email", with: user.email_address
+    fill_in "Password", with: password
+    click_on "Sign in"
+    assert_current_path root_path
+  end
 end

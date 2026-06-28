@@ -1,0 +1,7 @@
+<%#
+  The detail-header status badge, wrapped so the live-status broadcast can
+  replace just the badge over Solid Cable. dom_id matches the broadcast target.
+%>
+<span id="<%= dom_id(monitor, :badge) %>">
+  <%= render "shared/status_badge", status: monitor.status %>
+</span>

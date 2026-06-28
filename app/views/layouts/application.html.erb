@@ -11,20 +11,40 @@
 
     <%= yield :head %>
 
-    <%# Enable PWA manifest for installable apps (make sure to enable in config/routes.rb too!) %>
-    <%#= tag.link rel: "manifest", href: pwa_manifest_path(format: :json) %>
-
     <link rel="icon" href="/icon.png" type="image/png">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icon.png">
 
-    <%# Includes all stylesheet files in app/assets/stylesheets %>
     <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
     <%= javascript_importmap_tags %>
   </head>
 
-  <body>
-    <main class="container mx-auto mt-28 px-5 flex">
+  <body class="bg-app text-ink font-sans antialiased min-h-screen">
+    <% if authenticated? %>
+      <header class="border-b border-border bg-surface">
+        <div class="max-w-5xl mx-auto px-5 h-14 flex items-center justify-between">
+          <%= link_to root_path, class: "flex items-center gap-2" do %>
+            <%= render "shared/logo" %>
+            <span class="font-semibold tracking-tight">Stablemate</span>
+          <% end %>
+          <%= button_to "Sign out", session_path, method: :delete,
+                class: "h-8 px-3 rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+        </div>
+      </header>
+    <% end %>
+
+    <main class="max-w-5xl mx-auto px-5 py-10">
+      <% if notice %>
+        <div class="mb-5 rounded-lg border border-up-bg bg-up-bg/60 px-4 py-2.5 text-[13px] text-up-text" role="status">
+          <%= notice %>
+        </div>
+      <% end %>
+      <% if alert %>
+        <div class="mb-5 rounded-lg border border-down-bg bg-down-bg/60 px-4 py-2.5 text-[13px] text-down-text" role="alert">
+          <%= alert %>
+        </div>
+      <% end %>
+
       <%= yield %>
     </main>
   </body>

@@ -1,6 +1,12 @@
-# Phase 0 has no auth yet (has_secure_password / bcrypt arrive in Phase 1), so a
-# placeholder digest is fine — nothing verifies passwords this phase.
+<% password_digest = BCrypt::Password.create("password1234") %>
+
 alice:
   email_address: alice@example.com
-  password_digest: not-a-real-digest-phase-0
+  password_digest: <%= password_digest %>
+  plan: free
+  verified_at: <%= 1.day.ago.utc.iso8601 %>
+
+bob:
+  email_address: bob@example.com
+  password_digest: <%= password_digest %>
   plan: free
