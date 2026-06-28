@@ -1,0 +1,10 @@
+<%#
+  The "generate a key" form, shared by the header (compact) and empty-state
+  (prominent) call sites. POSTs to ApiKey.issue via Settings::ApiKeysController.
+  Locals: label (button text), height ("h-8"/"h-9" etc.).
+%>
+<%= form_with url: settings_api_keys_path, method: :post do |f| %>
+  <%= f.hidden_field :"api_key[name]", value: "API key" %>
+  <%= f.submit label,
+        class: "inline-flex items-center #{height} px-3 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
+<% end %>

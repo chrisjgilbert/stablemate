@@ -1,8 +1,9 @@
 class User < ApplicationRecord
-  include Plan, Verification
+  include Plan, Verification, MonitorSync
 
   has_secure_password
   has_many :sessions, dependent: :destroy
+  has_many :api_keys, dependent: :destroy
   has_many :monitors, class_name: "Monitoring::Monitor", dependent: :destroy
 
   normalizes :email_address, with: ->(e) { e.strip.downcase }

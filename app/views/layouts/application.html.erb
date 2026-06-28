@@ -27,8 +27,12 @@
             <%= render "shared/logo" %>
             <span class="font-semibold tracking-tight">Stablemate</span>
           <% end %>
-          <%= button_to "Sign out", session_path, method: :delete,
-                class: "h-8 px-3 rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+          <div class="flex items-center gap-1">
+            <%= link_to "API keys", settings_api_keys_path,
+                  class: "h-8 px-3 inline-flex items-center rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+            <%= button_to "Sign out", session_path, method: :delete,
+                  class: "h-8 px-3 rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+          </div>
         </div>
       </header>
     <% end %>

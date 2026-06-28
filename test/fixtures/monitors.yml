@@ -23,6 +23,18 @@ up:
   next_due_at: <%= 50.minutes.from_now.utc.iso8601 %>
   source: manual
 
+# Registered from the gem (source: gem) — drives the gem-chip system test (S14).
+gem_synced:
+  user: alice
+  monitor_type: heartbeat
+  name: daily_digest
+  ping_token: fixture_gem_token_dddddddddddddddddd
+  expected_interval_seconds: 86400
+  grace_period_seconds: 3600
+  status: pending
+  source: gem
+  registration_key: daily_digest
+
 # Owned by bob — used to prove tenant isolation (alice must get a 404).
 bobs:
   user: bob

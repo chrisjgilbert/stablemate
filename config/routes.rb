@@ -23,6 +23,27 @@ Rails.application.routes.draw do
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", as: :rails_health_check
 
+  # API-key management UI (session-authed, owner-only). Generate-once modal +
+  # masked list + revoke. (architecture.md §7)
+  namespace :settings do
+    resources :api_keys, only: %i[index create destroy]
+  end
+
+  # Bearer-authed JSON API for the companion gem. Tenant-scoped to the API key's
+  # owner. Sync + read + token rotation; paths kept per the PRD. (architecture.md §7)
+  namespace :api do
+    namespace :v1 do
+      resources :monitors, only: %i[index show] do
+        collection do
+          post :sync, to: "monitors/syncs#create"
+        end
+        member do
+          post :rotate, to: "monitors/ping_tokens#update"
+        end
+      end
+    end
+  end
+
   # Public ping hot path — the token is the credential. Both verbs so a bare
   # `curl` works; recorded as a "create" of a ping. (architecture.md §7)
   match "/ping/:ping_token", to: "pings#create", via: %i[get post], as: :ping

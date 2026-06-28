@@ -1,0 +1,4 @@
+production:
+  twice_daily:
+    class: TwiceDailyJob
+    schedule: "0 9,17 * * *"
