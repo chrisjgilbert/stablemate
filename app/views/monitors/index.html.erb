@@ -11,13 +11,20 @@
 
   <% if at_cap %>
     <span class="inline-flex items-center h-8 px-3 rounded-lg bg-hairline text-[13px] font-semibold text-muted cursor-not-allowed"
-          title="You've reached the limit of <%= current_user.monitor_limit %> monitors"
+          title="<%= monitor_limit_note(current_user) %>"
           data-testid="at-limit">At monitor limit</span>
   <% else %>
     <%= link_to "New monitor", new_monitor_path,
           class: "inline-flex items-center h-8 px-3 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover" %>
   <% end %>
 </div>
+
+<% if at_cap %>
+  <%# Matter-of-fact note (no upgrade/pricing — there's nothing to link to). %>
+  <p class="mb-6 text-[13px] text-muted" data-testid="at-limit-note">
+    <%= monitor_limit_note(current_user) %> Delete a monitor to add another.
+  </p>
+<% end %>
 
 <% if @monitors.any? %>
   <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm">

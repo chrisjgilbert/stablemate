@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_28_183139) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_28_191526) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -109,6 +109,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_28_183139) do
     t.datetime "updated_at", null: false
     t.datetime "verified_at"
     t.index "lower((email_address)::text)", name: "index_users_on_lower_email_address", unique: true
+  end
+
+  create_table "waitlist_signups", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "email_address", null: false
+    t.index ["email_address"], name: "index_waitlist_signups_on_email_address", unique: true
   end
 
   add_foreign_key "api_keys", "users"

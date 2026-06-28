@@ -36,6 +36,8 @@ class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
     fill_in "Email", with: user.email_address
     fill_in "Password", with: password
     click_on "Sign in"
-    assert_current_path root_path
+    # Post-login lands on the dashboard: auth sends you to root, and the root
+    # redirects signed-in users on to /monitors (phase-4 landing page).
+    assert_current_path monitors_path
   end
 end

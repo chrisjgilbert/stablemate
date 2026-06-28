@@ -12,7 +12,8 @@ class AuthenticationTest < ApplicationSystemTestCase
     fill_in "Confirm password", with: "password1234"
     click_on "Create account"
 
-    assert_current_path root_path
+    # Signed-in users are redirected from the root to their dashboard (phase-4).
+    assert_current_path monitors_path
     assert_text "Monitor your first cron job"
     assert_text "config/recurring.yml"
     assert_text "New monitor"

@@ -48,6 +48,13 @@ module MonitorsHelper
     "#{number_with_precision(percent, precision: 2)}%"
   end
 
+  # The at-limit sentence, shared by the dashboard and the New-monitor action so
+  # the wording (and the "Free plan" label, the seam for paid tiers) lives in one
+  # place. (phase-4 §3.2 — matter-of-fact, no upgrade/pricing.)
+  def monitor_limit_note(user)
+    "You're at the #{user.monitor_limit}-monitor limit for the Free plan."
+  end
+
   # Standard mono UTC timestamp used across the events list and settings.
   def mono_timestamp(time, seconds: false, blank: "never")
     return blank if time.blank?
