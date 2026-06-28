@@ -7,6 +7,9 @@ deliverability, and ship docs. Dog-food it on Stablemate's own jobs.
 PRD refs: §1 (caps/waitlist), §3.1a (WaitlistSignup), §5.1, §6.5 (rate-limit),
 §7 Phase 4. Design refs: [`design-system.md`](design-system.md) — sign-up
 at-capacity waitlist mode, at-limit monitor state, landing page.
+Architecture: [`../../CLAUDE.md`](../../CLAUDE.md) +
+[`architecture.md`](architecture.md) — the `Signup` coordinator owns the
+cap→waitlist branch; rate-limiting is middleware, **not** a service.
 
 ---
 
@@ -40,6 +43,9 @@ sits in front of Phase 1's sign-up flow.
 ## 3 · Behaviour & contracts
 
 ### 3.1 Signup cap → waitlist (PRD §3.1a, §5.1)
+The branch is owned by the `Signup` **top-level coordinator** (a noun spanning
+`User` + `WaitlistSignup`; see [`architecture.md` §6](architecture.md#6--sign-up--waitlist)).
+`RegistrationsController#create` stays thin and asks `Signup`.
 - When `User.count >= SIGNUP_ACCOUNT_CAP`, the sign-up flow switches to
   **waitlist mode**: the form captures an email into `WaitlistSignup` (unique;
   duplicate email is a friendly no-op success), **creates no User**, no password

@@ -7,6 +7,9 @@ wire its ping URL, and — when pings stop — receive a `down` email, then a
 PRD refs: §3.1–§3.7, §4 (state machine), §5.1/§5.3/§5.5, §7 Phase 1.
 Design refs: [`design-system.md`](design-system.md) screens — auth, dashboard,
 new/edit form, monitor detail (history panel is Phase 2).
+Architecture: [`../../CLAUDE.md`](../../CLAUDE.md) +
+[`architecture.md`](architecture.md) — operation objects/concerns/sub-resource
+controllers, **no `app/services/`**.
 
 ---
 
@@ -24,7 +27,8 @@ new/edit form, monitor detail (history panel is Phase 2).
   opening an `Incident`, enqueuing a `down` notification.
 - **Ping handling** upgraded from Phase 0: resolves incidents + enqueues
   `recovered` on recovery.
-- Action Mailer `down` + `recovered` emails via a **channel-agnostic dispatcher**.
+- Action Mailer `down` + `recovered` emails via a **channel-agnostic command
+  layer** (`Notifications::Dispatch` + `Notifications::EmailChannel`).
 - A (non-blocking) email **verification** email on signup.
 - Reusable UI components from [`design-system.md`](design-system.md#2--reusable-components-build-as-viewcomponents-or-partials).
 - Live status via Turbo Streams over Solid Cable (dashboard rows + detail badge).
@@ -74,10 +78,15 @@ waitlist + signup cap + ping rate-limiting (Phase 4); "still down" reminders.
   (`validate :within_monitor_cap, on: :create`) **and** guarded in the UI (the
   New-monitor action shows the at-limit state when at cap). Editing an existing
   monitor is never blocked by the cap.
-- Pause/resume: toggles `status` to/from `paused`. Resuming returns to `pending`
-  if never pinged, else `up` (re-evaluated against `next_due_at`).
-- Rotate token: regenerates `ping_token` (old URL stops working immediately);
-  detail page shows the new URL.
+- Pause/resume: a **sub-resource controller** (`Monitors::PausesController`,
+  `resource :pause` — pause = `#create`, resume = `#destroy`; no `POST /:id/pause`
+  custom verb) delegating to `monitor.pause!` / `monitor.resume!` (the
+  `Monitor::Pausing` concern). Resuming returns to `pending` if never pinged, else
+  `up` (re-evaluated against `next_due_at`).
+- Rotate token: a sub-resource (`Monitors::PingTokensController#update`,
+  `resource :ping_token, only: :update`) calling `monitor.rotate_ping_token!`
+  (the `Monitor::PingToken` concern). Old URL stops working immediately; detail
+  page shows the new URL.
 - Delete: destroys the monitor and dependent `PingEvent`/`Incident`/`Notification`
   rows (`dependent: :destroy`).
 
@@ -93,8 +102,12 @@ pending ──first ping──▶ up ──interval+grace elapsed, no ping──
 - `down`: `now > last_ping_at + interval + grace`. Opens an incident, sends `down`.
 - `paused`: excluded from detection and alerting.
 
-Implement as explicit methods on `Monitor` (e.g. `mark_down!`, `record_ping!`,
-`pause!`, `resume!`), not a heavyweight gem — keep it dead simple and unit-tested.
+Implement per [`architecture.md`](architecture.md#2--monitor--the-centre-of-gravity):
+status predicates + scopes in a `Monitor::HeartbeatStates` **concern**;
+`monitor.check_in!` and `monitor.flag_missed!` as **operation objects**
+(`Monitor::CheckIn`, `Monitor::MissedPing`); `pause!`/`resume!` in a
+`Monitor::Pausing` concern. No state-machine gem, no `*Service`. Each operation is
+unit-tested directly.
 
 ### 3.5 Detection (recurring job, every 30s)
 A Solid Queue recurring task `DetectMissedPingsJob`:
@@ -102,18 +115,22 @@ A Solid Queue recurring task `DetectMissedPingsJob`:
 SELECT monitors WHERE status = 'up'
   AND next_due_at + (grace_period_seconds || ' seconds')::interval < now()
 ```
-For each match (pure timestamp comparison, no network calls):
-1. Transition `up → down`.
-2. Open an `Incident` (`started_at = now`, `cause = "missed_ping"`) — **only if no
+The job is **orchestration only** — it iterates and delegates to the record
+(`Monitor.overdue.find_each(&:flag_missed!)`); the logic lives in the
+`Monitor::MissedPing` operation. For each overdue monitor (pure timestamp
+comparison, no network calls), `flag_missed!`:
+1. Transitions `up → down`.
+2. Opens an `Incident` (`started_at = now`, `cause = "missed_ping"`) — **only if no
    open incident exists** (the partial unique index is the backstop).
-3. Enqueue a `down` `Notification` via the dispatcher.
-4. Broadcast a Turbo Stream badge/row update.
+3. Enqueues a `down` `Notification` and hands it to `Notifications::Dispatch`.
+4. Broadcasts a Turbo Stream badge/row update.
 
 Wire it in `config/recurring.yml` at `every: "30s"` (uses `DETECTION_INTERVAL`).
 
 ### 3.6 Ping handling (extends Phase 0)
-On ping receipt:
-- Record `PingEvent`; set `last_ping_at = now`; recompute `next_due_at`.
+`PingsController#create` stays thin and delegates to `monitor.check_in!` (the
+`Monitor::CheckIn` operation object). On ping receipt the operation:
+- Records a `PingEvent`; sets `last_ping_at = now`; recomputes `next_due_at`.
 - `pending → up`.
 - `down → up`: **resolve the open incident** (`resolved_at = now`); enqueue a
   `recovered` `Notification`; broadcast update.
@@ -122,11 +139,15 @@ On ping receipt:
   status or alert (paused means "don't monitor"). *(Document this choice in the
   ping controller; the test pins it.)*
 
-### 3.7 Alerting (channel-agnostic dispatcher)
-- A `NotificationDispatcher` (PORO/service) takes `(monitor, event, incident)`,
-  creates a `Notification` row (`channel: "email"`), and delivers via
-  `MonitorMailer`. The mailer is the only email-specific piece; the dispatcher
-  interface is what V2 webhook channels plug into.
+### 3.7 Alerting (channel-agnostic, Command pattern)
+- The `Monitor` operation creates the `Notification` row (`channel: "email"`) and
+  hands it to `Notifications::Dispatch` (a **coordinator**), which selects the
+  channel(s) and delegates to a `Notifications::Channel` **command** — V1 ships one,
+  `Notifications::EmailChannel`, wrapping `MonitorMailer`. The mailer is the only
+  email-specific piece; new channels (webhook, V2) are additive commands behind the
+  same contract. This is the Command-pattern exception, **not** a default service —
+  see [`architecture.md` §5](architecture.md#5--incidents--alerting). No
+  `app/services/`, no `*Dispatcher` PORO.
 - **Transition-only (decision #2):** exactly one `down` email per incident,
   exactly one `recovered` email on resolution. The open-incident invariant
   guarantees no duplicate down-alerts during a continuing outage.
@@ -193,8 +214,8 @@ On ping receipt:
 27. `MonitorMailer#down` renders with monitor name, expected-by time, detail link;
     delivered to the owner's email.
 28. `MonitorMailer#recovered` renders and is delivered on recovery.
-29. The dispatcher creates a `Notification` row per dispatch with correct
-    `channel`/`event` and sets `delivered_at`.
+29. `Notifications::Dispatch` creates a `Notification` row per dispatch with
+    correct `channel`/`event` and `Notifications::EmailChannel` sets `delivered_at`.
 30. End-to-end `[system]`/`[job]`: create monitor → no ping → detection → down
     email; ping again → recovery email. (The PRD Exit, as one test.)
 

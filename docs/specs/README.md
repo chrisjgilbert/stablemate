@@ -60,6 +60,15 @@ all specs:
 
 ## 3 · Conventions
 
+### Architecture (non-negotiable)
+Stablemate follows a **strict 37signals-inspired, vanilla-Rails** architecture:
+keep `app/` small, put logic on records, **no `app/services/` directory**. Use
+operation objects (noun, entity-scoped), concerns, sub-resource controllers,
+coordinators, and the Command pattern (narrow) per the decision table in
+[`../../CLAUDE.md`](../../CLAUDE.md). The concrete per-object/per-phase inventory
+is [`architecture.md`](architecture.md) — **its names are normative**. Deviate
+only with a one-line justification.
+
 ### Stack
 - **Rails 8**, PostgreSQL, **Solid Queue** (jobs + recurring), Solid Cable
   (Turbo Streams), Solid Cache. Hotwire (Turbo + Stimulus), Tailwind CSS,
@@ -77,7 +86,8 @@ all specs:
 - Layers: `[model]` unit, `[request]` controller/integration, `[job]` Solid Queue
   jobs (use `perform_enqueued_jobs` / inline adapter), `[mailer]` Action Mailer
   (assert via `ActionMailer::Base.deliveries`), `[system]` end-to-end Capybara,
-  `[unit]` POROs/services, `[gem]` the companion gem's own suite.
+  `[unit]` operation objects / concerns / coordinators, `[gem]` the companion
+  gem's own suite.
 - **Time** is controlled in tests with `travel_to` / `freeze_time` — detection,
   grace windows and "X ago" formatting all depend on it.
 
@@ -174,8 +184,10 @@ migration.
 | 3 | [`phase-3-api-and-gem.md`](phase-3-api-and-gem.md) | `/api/v1`, API keys, sync, companion gem | 1 (2 for richer detail data) |
 | 4 | [`phase-4-launch-hardening.md`](phase-4-launch-hardening.md) | Waitlist/signup cap, rate-limit, deliverability, docs | 1–3 |
 
-Cross-cutting UI direction lives in
-[`design-system.md`](design-system.md) — every phase that builds screens reads it.
+Cross-cutting direction every phase reads: [`design-system.md`](design-system.md)
+(UI) and [`architecture.md`](architecture.md) (object layout). The root
+[`../../CLAUDE.md`](../../CLAUDE.md) carries the architecture rules the coding
+agent applies automatically.
 
 Phases 0→1→2 are strictly sequential. **Phase 3 can run in parallel with Phase
 2** once Phase 1 lands (the gem/API need monitors + auth, not uptime history),

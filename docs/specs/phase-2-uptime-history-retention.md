@@ -8,6 +8,8 @@ PRD refs: §3.4 (PingEvent retention), §3.6 (UptimeDayStat), §3.8 (retention
 summary), §5.4, §7 Phase 2, §9 (why owner-only, no public page).
 Design refs: [`design-system.md`](design-system.md) — `UptimeBar`, `MiniTicks`,
 detail "Uptime — last 90 days" panel + recent events.
+Architecture: [`../../CLAUDE.md`](../../CLAUDE.md) +
+[`architecture.md`](architecture.md) — jobs orchestrate, records do the work.
 
 ---
 
@@ -42,7 +44,10 @@ Can be built in parallel with Phase 3.
 ## 3 · Behaviour & contracts
 
 ### 3.1 Daily rollup job (`RollupUptimeJob`, recurring, daily)
-For each monitor, for the day(s) not yet rolled up:
+The job **orchestrates only** — it iterates monitors and calls
+`monitor.roll_up_uptime(day)` (the `Monitor::UptimeRollup` operation object; the
+`Monitor::Uptime` concern reads the results). For each monitor, for the day(s) not
+yet rolled up, `roll_up_uptime`:
 - Compute `up_seconds` / `down_seconds` for the day from `Incident` intervals
   (a day is "down" for the seconds it overlapped an open/!resolved or
   resolved-that-day incident; "up" otherwise — `paused`/`pending` windows count
@@ -70,7 +75,9 @@ For each monitor, for the day(s) not yet rolled up:
   lead the list with the down event.
 
 ### 3.3 Pruning job (`PrunePingEventsJob`, recurring, daily)
-- Deletes `PingEvent` rows with `received_at < now - PING_RETENTION`.
+- Delegates to a `PingEvent.prunable` scope + batched delete (the job is iteration
+  only; the rule lives on the record): deletes `PingEvent` rows with
+  `received_at < now - PING_RETENTION`.
 - Deletes in batches (`in_batches`) to avoid long locks.
 - **Ordering guarantee:** rollups for a day must be complete before that day's
   raw pings are pruned. Since pruning only touches rows older than 90d and rollup

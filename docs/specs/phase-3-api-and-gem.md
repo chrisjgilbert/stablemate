@@ -7,7 +7,9 @@ per-job code**. This is the product's differentiator.
 PRD refs: §1 (two-layer gem), §3.2 (ApiKey), §6 (API design), §6.6 (gem
 architecture), §7 Phase 3, §10 (positioning). Design refs:
 [`design-system.md`](design-system.md) — API keys screen + generate-key modal,
-gem chip on monitors. Integration ref:
+gem chip on monitors. Architecture: [`../../CLAUDE.md`](../../CLAUDE.md) +
+[`architecture.md`](architecture.md) — `user.sync_monitors` operation, `ApiKey`
+issuance/auth concerns, the gem's registrar **Command** seam. Integration ref:
 [`../design/design_handoff_stablemate/SOLID_QUEUE_INTEGRATION.md`](../design/design_handoff_stablemate/SOLID_QUEUE_INTEGRATION.md).
 
 ---
@@ -48,6 +50,9 @@ Phase 2 data exists.
 ## 3 · Server-side behaviour & contracts
 
 ### 3.1 API key model + lifecycle
+- Issued via `ApiKey.issue(user:, name:)` → `[api_key, raw_token]` (the
+  `ApiKey::Issuance` operation); lookup via `ApiKey.authenticating(raw)` (the
+  `ApiKey::Authentication` concern). No `ApiKeyService`.
 - Raw format `sm_live_<random>` (e.g. `"sm_live_" + SecureRandom.alphanumeric(32)`).
 - Store **SHA-256 digest** + `token_last4`. Raw key returned **once** at creation
   and never again (no plaintext persisted).
@@ -66,6 +71,10 @@ Authorization: Bearer sm_live_xxxxxxxxxxxx
   is the only credential on the hot path (PRD §6.3). Keep it that way.
 
 ### 3.3 `POST /api/v1/monitors/sync` (idempotent bulk upsert)
+Thin controller (`Api::V1::Monitors::SyncsController#create`) → the
+`user.sync_monitors(app:, entries:)` **operation object** (`User::MonitorSync`),
+which owns the upsert + cap logic. No sync "service".
+
 Request:
 ```json
 {

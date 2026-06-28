@@ -5,6 +5,8 @@ breadth is added. This phase is deliberately thin — it proves the loop and the
 deploy pipeline, nothing more.
 
 PRD refs: §7 Phase 0, §6.3 (ping), §3.1/§3.3/§3.4 (User/Monitor/PingEvent).
+Architecture: follow [`../../CLAUDE.md`](../../CLAUDE.md) +
+[`architecture.md`](architecture.md) — no `app/services/`; logic on records.
 
 ---
 
@@ -56,12 +58,18 @@ though Phase 0 only exercises a few, ship them all now:
 ```
 GET|POST /ping/:ping_token  →  200 {"ok": true}
 ```
-On a valid token:
-1. Create a `PingEvent` (`received_at = now`, `kind = "success"`, `source_ip`
+`PingsController#create` stays thin and delegates to `monitor.check_in!` (the
+first form of the `Monitor::CheckIn` operation object — see
+[`architecture.md` §2](architecture.md#2--monitor--the-centre-of-gravity)). On a
+valid token, `check_in!`:
+1. Creates a `PingEvent` (`received_at = now`, `kind = "success"`, `source_ip`
    from request, optional `duration_ms` from query/body param).
-2. Set `monitor.last_ping_at = now`, `monitor.next_due_at = now + expected_interval_seconds`.
-3. If `status == "pending"` → set `status = "up"`. (Other transitions are Phase 1.)
-4. Respond `200 {"ok": true}`.
+2. Sets `monitor.last_ping_at = now`, `monitor.next_due_at = now + expected_interval_seconds`.
+3. If `status == "pending"` → sets `status = "up"`. (Other transitions are Phase 1.)
+4. The controller responds `200 {"ok": true}`.
+
+`Monitor` generates its `ping_token` via a `Monitor::PingToken` concern (not inline
+controller code).
 
 On an unknown token → **`404`**, opaque body (no tenant leakage, no "monitor not
 found" detail).
