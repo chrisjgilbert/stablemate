@@ -555,7 +555,35 @@ shareable status pages (with custom domains & aggregated status sites);
 registrar adapters for other schedulers (`sidekiq-cron`, `good_job.cron`,
 `whenever`); webhook channels; teams/roles; "still down" reminders; incident
 acknowledgement; gem `prune`/reconciliation deletes; richer run-state
-(`start`/`fail`) pings.
+(`start`/`fail`) pings — **including capturing the failure's error class +
+message and surfacing it as alert context** (deferred but intended; the exception
+is already available in the ActiveJob `perform.active_job` payload). Full stack
+traces stay out of scope — that's Mission Control / an error tracker's job; see
+§10.
+
+---
+
+## 10. Positioning vs. Mission Control — Jobs (and error trackers)
+
+Recorded so future scope decisions don't drift into a neighbour's lane.
+
+- **Mission Control — Jobs** is an in-app dashboard that introspects jobs the
+  system *ran* (finished/failed, errors, backtraces, retry/discard). Stablemate's
+  job is the inverse: detecting runs that **didn't happen** (scheduler down,
+  broken `recurring.yml`, host offline, misconfigured cron) — the *silence* a
+  queue dashboard is structurally blind to. Stablemate is also **external** (works
+  when the app is down) and **push** (it emails you; a dashboard you must remember
+  to check does not). They are complementary: Stablemate says *that* a scheduled
+  job stopped running and roughly what broke; Mission Control is where you go to
+  inspect and retry.
+- **Error trackers** (Sentry, Honeybadger, AppSignal) own full exceptions +
+  backtraces. Stablemate should carry just enough error context (class + message)
+  to make an alert actionable, and link out for the rest — not become a worse
+  error tracker.
+- **Implication for the error feature above:** surface error class + message in
+  the alert/detail (intended, deferred); keep full backtraces out. Staying in the
+  "detect the absence, tell you, give just enough to know where to look" lane is
+  what keeps the product *dead simple*.
 
 ---
 
