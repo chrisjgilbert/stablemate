@@ -113,6 +113,14 @@ The branch is owned by the `Signup` **top-level coordinator** (a noun spanning
 10. `down`/`recovered` emails set a configured `from` and render a working detail
     link (host from config, not request).
 
+### Required system tests (must ship) — browser-driven, Definition-of-Done gate
+- **S15 — At-capacity → waitlist.** With the account count at the cap, `/sign_up`
+  renders **waitlist mode** (email field, no password); submitting shows the
+  calm "You're on the list" success and creates no logged-in session.
+- **S16 — At-limit monitor.** A user with 5 monitors sees the at-limit treatment on
+  the New-monitor action and the "5 / 5" count on the dashboard, with **no**
+  upgrade/pricing UI anywhere.
+
 ---
 
 ## 5 · Acceptance criteria (PRD Phase 4 Exit)
@@ -124,6 +132,7 @@ The branch is owned by the `Signup` **top-level coordinator** (a noun spanning
       spam); SPF/DKIM documented.
 - [ ] Install guide, API reference, and backup/restore runbook exist.
 - [ ] Stablemate is dog-fooded monitoring its own recurring jobs.
+- [ ] **Required system tests S15–S16 all pass** (`bin/rails test:system` green).
 - [ ] All Test Plan scenarios pass; suite + linter green.
 
 ---

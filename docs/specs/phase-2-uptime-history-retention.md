@@ -129,6 +129,16 @@ yet rolled up, `roll_up_uptime`:
     elapsed, and "down for …" — and **no Acknowledge button**.
 15. After a recovering ping, the banner clears and the badge returns to Up.
 
+### Required system tests (must ship) — browser-driven, Definition-of-Done gate
+- **S8 — Detail uptime panel.** Given a monitor with rolled-up history, the detail
+  page renders the **90-day `UptimeBar`** (90 bars), the overall % matching the
+  fixture, and the recent-events list (mono timestamps, `duration_ms` where present).
+- **S9 — Dashboard sparkline.** A dashboard row renders **`MiniTicks`** (16 ticks)
+  + uptime %.
+- **S10 — Active-incident banner.** A down monitor's detail page shows the red
+  banner (expected-by, grace elapsed, "down for …") with **no Acknowledge button**;
+  after a recovering ping the banner clears and the badge returns to Up.
+
 ---
 
 ## 5 · Acceptance criteria (PRD Phase 2 Exit)
@@ -138,6 +148,7 @@ yet rolled up, `roll_up_uptime`:
 - [ ] Old raw `PingEvent`s (>90d) are pruned; rollups survive indefinitely.
 - [ ] Uptime % and the bar match hand-computed fixtures.
 - [ ] No public/shareable page exists (owner-only).
+- [ ] **Required system tests S8–S10 all pass** (`bin/rails test:system` green).
 - [ ] All Test Plan scenarios pass; suite + linter green.
 
 ---

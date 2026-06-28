@@ -115,10 +115,19 @@ purely to observe the timestamp move.
 10. **Given** a monitor, **when** `GET /monitors/:id.json`, **then** the JSON
     reflects current `status`, `last_ping_at`, `next_due_at`.
 
-### Smoke `[system]`
-11. A minimal system/integration test that seeds a user + monitor, pings the URL,
-    and asserts the status read shows the moved timestamp — the "walking skeleton"
+### Smoke `[request]`/`[integration]`
+11. A minimal integration test that seeds a user + monitor, pings the URL, and
+    asserts the status read shows the moved timestamp — the "walking skeleton"
     proof in one test.
+
+### Required system tests (must ship)
+**None.** Phase 0 has no UI yet, so there is no browser flow to drive — its
+end-to-end proof is the request/integration smoke above. **Browser-driven system
+tests become mandatory from Phase 1 onward** (the first phase with screens). Set
+up the system-test harness here anyway (Capybara + headless Chromium per
+[`README.md`](README.md#system-tests-system--required-browser-driven)) so Phase 1
+can write them immediately — verify it boots with a trivial "visit `/up`, see
+200" test.
 
 ---
 

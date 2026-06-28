@@ -32,7 +32,12 @@ only when every scenario is green and the Acceptance Criteria check out.
 
 **Definition of Done (every phase):**
 - All Test Plan scenarios implemented and passing.
-- `bin/rails test` (+ system tests) green; linter (`rubocop`/`standard`) clean.
+- **Every flow in the phase's "Required system tests (must ship)" list has a
+  passing browser-driven (Capybara) system test.** A phase is not done if any are
+  missing, even with all unit/request tests green. (Phase 0 is the one exception —
+  it has no UI yet; its end-to-end proof is request/integration level.)
+- `bin/rails test` **and** `bin/rails test:system` green; linter
+  (`rubocop`/`standard`) clean.
 - No N+1 on index/detail pages (assert with `bullet` or a query-count test
   where the spec calls for it).
 - Migrations are reversible and `bin/rails db:migrate` / `db:rollback` both run.
@@ -106,6 +111,24 @@ Stablemate is a deliberately boring, idiomatic, vanilla Rails app (full rules in
   gem's own suite.
 - **Time** is controlled in tests with `travel_to` / `freeze_time` — detection,
   grace windows and "X ago" formatting all depend on it.
+
+#### System tests (`[system]`) — required, browser-driven
+Agents skip these; the specs don't let them. Each phase spec lists **"Required
+system tests (must ship)"** — those are Definition-of-Done gates, not optional.
+- **Real browser, headless.** Chromium is preinstalled at
+  `$PLAYWRIGHT_BROWSERS_PATH`; **never run `playwright install`.** Prefer the Rails
+  default `driven_by :selenium, using: :headless_chrome`; if Selenium Manager's
+  driver download is blocked in the sandbox, use **cuprite** (Ferrum) pointed at
+  the preinstalled Chromium binary (CDP, no chromedriver). The SessionStart hook
+  ensures the browser is available.
+- **Drive the UI, assert what the user sees** — they exist to catch Turbo/Stimulus
+  behaviour (live status replacement over Solid Cable, the copy button, the
+  generate-key modal, waitlist mode) that request tests can't.
+- **For flows that cross time/jobs/email** (outage → down email → recovery), drive
+  the UI to set up state, then trigger detection inline (`perform_enqueued_jobs` /
+  run the job) under `travel_to`, and assert the row/badge flips and the email
+  was sent (`ActionMailer::Base.deliveries`).
+- One robust test per flow — not every field permutation (that's `[model]`/`[request]`).
 
 ### Money / cost-control constants (single source)
 Define in `config/stablemate.rb` (a small config object or `Rails.application.config.x.stablemate`):

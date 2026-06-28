@@ -49,4 +49,13 @@ else
   log "No bin/rails yet — skipping database preparation."
 fi
 
+# --- Browser for system tests ---------------------------------------------
+# Browser-driven Capybara system tests are mandatory (see CLAUDE.md). Chromium is
+# preinstalled via Playwright — surface its presence; never run 'playwright install'.
+if [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ] && [ -d "${PLAYWRIGHT_BROWSERS_PATH}" ]; then
+  log "Chromium available at \$PLAYWRIGHT_BROWSERS_PATH for system tests."
+else
+  log "NOTE: \$PLAYWRIGHT_BROWSERS_PATH not set; ensure a headless browser exists for system tests."
+fi
+
 log "Done."

@@ -236,12 +236,25 @@ Both layers key on the **Solid Queue task key**:
     class resolves to the right task key / ping URL.
 26. Two tasks sharing a job class → both monitors pinged + a warning logged.
 
-### End-to-end `[system]`/`[gem]`
+### End-to-end gem `[gem]`/`[integration]`
 27. (PRD Exit) Add the gem to a sample Solid Queue app → monitors auto-appear via
     sync; a real job run pings automatically; stopping the job → down alert.
 28. The execution subscriber also fires on a **non-Solid-Queue ActiveJob backend**
     (e.g. the test/async adapter) against a manually-created monitor whose
     `registration_key` matches the job class.
+
+### Required system tests (must ship) — browser-driven, Definition-of-Done gate
+The gem/API flows above are `[gem]`/`[request]`; the **UI** flows below must be
+real browser system tests:
+- **S11 — Generate API key.** From `/settings/api_keys`, click Generate; the modal
+  shows the full `sm_live_…` once with a Copy button and the amber "won't see
+  again" warning; after dismissing, the list shows only the masked form.
+- **S12 — Revoke API key.** Revoke a key from the list; it disappears from the table.
+- **S13 — API keys empty state.** With no keys, the page shows the explainer +
+  "Generate your first key".
+- **S14 — Gem chip.** A monitor with `source == "gem"` shows the **gem chip** on its
+  dashboard row and the **"synced from gem"** chip on its detail header; a manual
+  monitor shows neither.
 
 ---
 
@@ -254,6 +267,7 @@ Both layers key on the **Solid Queue task key**:
       check in on successful runs with zero per-job code; stopping a job alerts.
 - [ ] Layer 1 verified on a non-Solid-Queue ActiveJob backend.
 - [ ] Fire-and-forget delivery never breaks the host app.
+- [ ] **Required system tests S11–S14 all pass** (`bin/rails test:system` green).
 - [ ] All Test Plan scenarios pass; suite + linter green; the gem has its own
       green suite.
 

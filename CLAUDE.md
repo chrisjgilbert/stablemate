@@ -94,6 +94,33 @@ framework — we're using Rails as intended and keeping our own additions tiny.)
   additive in V2) is the example. The objection was never to the pattern — only to
   *defaulting* to it for ordinary one-shot operations that have an obvious owner.
 
+## System tests are non-negotiable
+
+Unit and request tests are necessary but not sufficient. **Every key end-to-end
+user flow ships with a browser-driven Capybara system test** — the kind that
+actually clicks through the rendered UI in a real (headless) browser. Agents
+routinely skip this layer; here we don't.
+
+- **The phase spec names them.** Each phase spec has a **"Required system tests
+  (must ship)"** list. Those tests are part of that phase's Definition of Done. A
+  phase is **not** done if any are missing — even with every unit/request test
+  green. A PR that adds a user-facing flow without its system test gets sent back.
+- **Browser-driven, not rack-test.** System tests drive a real headless Chromium
+  via Capybara, exercising Turbo/Stimulus behaviour (live status updates, the
+  copy button, the generate-key modal, the waitlist mode) — things rack-test
+  can't see. Assert on what the user sees, not on internals.
+- **Driver / environment.** Chromium is preinstalled at
+  `$PLAYWRIGHT_BROWSERS_PATH` — **never run `playwright install`.** Prefer the
+  Rails default `driven_by :selenium, using: :headless_chrome`; if the sandbox
+  blocks Selenium Manager's driver download, fall back to **cuprite** (Ferrum)
+  pointed at the preinstalled Chromium binary — it talks CDP directly, no
+  chromedriver needed. Either way the system suite must run headless in CI and in
+  web sessions.
+- **Keep them about flows, not coverage theatre.** One robust test per key flow
+  (sign-up → dashboard; create monitor → ping-URL card; outage → down email →
+  recovery; generate API key modal; at-capacity → waitlist). Don't system-test
+  every field permutation — that's what model/request tests are for.
+
 ## Development workflow (skills)
 
 TDD is the loop; these skills are the checkpoints around it. Sub-agents should
@@ -166,6 +193,9 @@ grep, because there is no junk drawer.
 - **Tests:** Minitest + fixtures + Capybara system tests (Rails 8 default). TDD —
   write the failing test from the phase spec's Test Plan first. Control time with
   `travel_to`/`freeze_time`.
+- **System tests are non-negotiable.** Every key user-facing flow MUST have a
+  passing **browser-driven** (Capybara) system test — see the rule below. This is
+  the most-skipped layer and the one that proves the product actually works.
 - **Specs are the build contract:** follow [`docs/specs/`](docs/specs/), not a
   re-reading of the PRD. The locked decisions are in
   [`docs/specs/README.md`](docs/specs/README.md).

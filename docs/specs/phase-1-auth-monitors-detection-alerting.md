@@ -225,6 +225,32 @@ Wire it in `config/recurring.yml` at `every: "30s"` (uses `DETECTION_INTERVAL`).
 31. When a monitor flips to `down`, the dashboard row badge updates without a full
     page reload (Turbo Stream).
 
+### Required system tests (must ship) — browser-driven, Definition-of-Done gate
+These E2E flows are mandatory for Phase 1 to be "done". Each drives the rendered
+UI in a real headless browser (Capybara); none may be downgraded to request tests.
+
+- **S1 — Sign up → dashboard.** Visit `/sign_up`, submit email + password, land on
+  the monitors dashboard showing the **empty state** (gem-first snippet + CTAs).
+- **S2 — Sign in / sign out.** Sign in returns to the dashboard; sign out returns
+  to `/sign_in` and protected routes are no longer reachable.
+- **S3 — Create a monitor.** From the dashboard, open New monitor, fill name +
+  interval + grace (exercise a preset), submit, and see the **ping-URL card + curl
+  snippet** revealed (post-create state).
+- **S4 — Pause / resume.** Pause a monitor from the UI (badge → Paused), then
+  resume it (badge returns).
+- **S5 — Rotate token.** Rotate the ping token on the detail page; the displayed
+  ping URL changes.
+- **S6 — Outage → recovery (the headline flow).** Create a monitor and ping it
+  (badge Up); under `travel_to` past `interval + grace`, run detection inline; the
+  **dashboard row badge flips to Down without a full reload** (Turbo Stream) and a
+  `down` email is in `ActionMailer::Base.deliveries`; ping again and the badge
+  returns to Up with a `recovered` email sent.
+- **S7 — Cap reached.** With 5 monitors, the New-monitor action shows the at-limit
+  state and the dashboard shows "5 / 5".
+
+(Tenant isolation, mailer rendering, and state-machine edges stay at
+`[request]`/`[model]`/`[mailer]` — don't duplicate them as system tests.)
+
 ---
 
 ## 5 · Acceptance criteria (PRD Phase 1 Exit)
@@ -236,6 +262,7 @@ Wire it in `config/recurring.yml` at `every: "30s"` (uses `DETECTION_INTERVAL`).
 - [ ] Exactly one `down` and one `recovered` email per incident (no duplicates,
       no reminders).
 - [ ] Tenant isolation holds (cross-tenant access impossible).
+- [ ] **Required system tests S1–S7 all pass** (`bin/rails test:system` green).
 - [ ] All Test Plan scenarios pass; suite + linter green.
 
 ---
