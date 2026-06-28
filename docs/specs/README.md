@@ -37,7 +37,9 @@ only when every scenario is green and the Acceptance Criteria check out.
   missing, even with all unit/request tests green. (Phase 0 is the one exception —
   it has no UI yet; its end-to-end proof is request/integration level.)
 - `bin/rails test` **and** `bin/rails test:system` green; linter
-  (`rubocop`/`standard`) clean.
+  (`rubocop`/`standard`) clean. **`bin/ci` is the single command that runs all of
+  this**; a PreToolUse hook runs it before every `git push` and blocks on failure
+  (same script runs in GitHub Actions). Don't push red.
 - No N+1 on index/detail pages (assert with `bullet` or a query-count test
   where the spec calls for it).
 - Migrations are reversible and `bin/rails db:migrate` / `db:rollback` both run.

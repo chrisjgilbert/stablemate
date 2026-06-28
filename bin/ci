@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Stablemate CI — the single source of truth for "is this green?".
+# Run locally (the pre-push hook calls this) and in GitHub Actions, so local and
+# remote CI are identical. Defensive: the repo starts as docs only, so when the
+# app isn't scaffolded yet this exits 0 instead of failing.
+#
+# Usage: bin/ci
+set -uo pipefail
+
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+step() { printf '\n\033[1m→ %s\033[0m\n' "$*"; }
+
+fail=0
+note_fail() { fail=1; printf '\033[31m✗ %s failed\033[0m\n' "$1"; }
+
+# --- Nothing to do until the app exists ------------------------------------
+if [ ! -f Gemfile ]; then
+  bold "bin/ci: no Gemfile yet — app not scaffolded. Nothing to check. ✓"
+  exit 0
+fi
+
+bold "== Stablemate CI =="
+
+# --- Dependencies ----------------------------------------------------------
+if command -v bundle >/dev/null 2>&1; then
+  step "bundle install"
+  bundle check >/dev/null 2>&1 || bundle install || { echo "bundle install failed"; exit 1; }
+fi
+
+# --- Prepare the test database --------------------------------------------
+if [ -f bin/rails ]; then
+  step "db:test:prepare"
+  RAILS_ENV=test bin/rails db:prepare || { echo "db:prepare failed"; exit 1; }
+fi
+
+# --- Lint ------------------------------------------------------------------
+if bundle exec rubocop --version >/dev/null 2>&1; then
+  step "rubocop"
+  bundle exec rubocop || note_fail "rubocop"
+fi
+
+# --- Security --------------------------------------------------------------
+if bundle exec brakeman --version >/dev/null 2>&1; then
+  step "brakeman"
+  bundle exec brakeman --quiet --no-pager -w2 || note_fail "brakeman"
+fi
+if bundle exec bundle-audit version >/dev/null 2>&1; then
+  step "bundle-audit"
+  bundle exec bundle-audit check --update || note_fail "bundle-audit"
+fi
+
+# --- Tests -----------------------------------------------------------------
+if [ -f bin/rails ]; then
+  step "rails test (unit + request + job + mailer)"
+  bin/rails test || note_fail "rails test"
+
+  step "rails test:system (browser-driven, mandatory)"
+  bin/rails test:system || note_fail "rails test:system"
+fi
+
+echo
+if [ "$fail" -ne 0 ]; then
+  bold "== CI FAILED =="
+  exit 1
+fi
+bold "== CI PASSED =="

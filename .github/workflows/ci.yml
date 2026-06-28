@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+# Mirrors the local pre-push gate: the same bin/ci runs here so "green locally"
+# means "green in CI". While the repo is docs-only (no Gemfile), bin/ci exits 0
+# and this workflow stays green; once the app is scaffolded the full suite runs.
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for a scaffolded app
+        id: app
+        run: |
+          if [ -f Gemfile ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No Gemfile yet — app not scaffolded; bin/ci will no-op."
+          fi
+
+      - name: Set up Ruby
+        if: steps.app.outputs.present == 'true'
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - name: Install Chromium for system tests
+        if: steps.app.outputs.present == 'true'
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Run CI (bin/ci)
+        run: |
+          chmod +x bin/ci
+          bin/ci
