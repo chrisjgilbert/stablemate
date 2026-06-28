@@ -11,6 +11,9 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # Cap the whole job; the default is 6h, which is far too long for a hung
+    # system test or a wedged browser. Bump if the real suite outgrows it.
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -48,12 +51,15 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
+        timeout-minutes: 10
 
       - name: Install Chromium for system tests
         if: steps.app.outputs.present == 'true'
         uses: browser-actions/setup-chrome@v1
+        timeout-minutes: 5
 
       - name: Run CI (bin/ci)
         run: |
           chmod +x bin/ci
           bin/ci
+        timeout-minutes: 15
