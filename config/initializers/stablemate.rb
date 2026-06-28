@@ -1,0 +1,32 @@
+# Stablemate cost-control & behaviour constants — the single source of truth.
+#
+# Tests assert behaviour *relative to* these constants (never hard-coded
+# numbers), so changing a value here doesn't break the suite. See
+# docs/specs/README.md §"Money / cost-control constants".
+#
+# Reached via Rails.application.config.x.stablemate.<name> or the Stablemate
+# module constants below (whichever reads more naturally at the call site).
+module Stablemate
+  # Max monitors a single user may own (paused monitors still count). (README §2 #7)
+  MAX_MONITORS_PER_USER  = 5
+
+  # Global account cap; raised manually to re-open signups. (README §2 #7)
+  SIGNUP_ACCOUNT_CAP     = 100
+
+  # Detection sweep cadence — the recurring DetectMissedPingsJob interval. (README §2 #1)
+  DETECTION_INTERVAL     = 30.seconds
+
+  # How long raw PingEvents are kept before pruning. (README §4)
+  PING_RETENTION         = 90.days
+
+  # Gem-derived grace = this fraction of the interval (min 5 minutes). (README §4)
+  DEFAULT_GRACE_FRACTION = 0.15
+end
+
+Rails.application.config.x.stablemate.tap do |c|
+  c.max_monitors_per_user  = Stablemate::MAX_MONITORS_PER_USER
+  c.signup_account_cap     = Stablemate::SIGNUP_ACCOUNT_CAP
+  c.detection_interval     = Stablemate::DETECTION_INTERVAL
+  c.ping_retention         = Stablemate::PING_RETENTION
+  c.default_grace_fraction = Stablemate::DEFAULT_GRACE_FRACTION
+end

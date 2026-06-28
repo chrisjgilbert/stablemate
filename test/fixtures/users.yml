@@ -1,0 +1,6 @@
+# Phase 0 has no auth yet (has_secure_password / bcrypt arrive in Phase 1), so a
+# placeholder digest is fine — nothing verifies passwords this phase.
+alice:
+  email_address: alice@example.com
+  password_digest: not-a-real-digest-phase-0
+  plan: free
