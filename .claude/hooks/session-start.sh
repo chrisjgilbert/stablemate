@@ -20,7 +20,9 @@ if [ -f Gemfile ]; then
   if command -v bundle >/dev/null 2>&1; then
     log "Installing gems (bundle install)…"
     # bundle install (not 'ci') so the cached container layer is reused.
-    bundle install --jobs 4 --retry 3
+    # Non-fatal (consistent with db:prepare below): a transient failure warns
+    # rather than aborting the whole session-start hook.
+    bundle install --jobs 4 --retry 3 || log "WARNING: bundle install failed; continuing."
   else
     log "Gemfile present but bundler not found; skipping gem install."
   fi

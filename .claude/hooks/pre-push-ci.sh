@@ -16,7 +16,7 @@ read -r tool_name command <<EOF
 $(printf '%s' "$input" | ruby -rjson -e '
   d = JSON.parse(STDIN.read) rescue {}
   ti = d["tool_input"] || {}
-  puts "#{d["tool_name"]}\t#{(ti["command"] || "").gsub(/\s+/, " ")}"
+  puts "#{d["tool_name"]}\t#{(ti["command"] || "").gsub(/\s+/, " ").strip}"
 ' 2>/dev/null)
 EOF
 
@@ -25,7 +25,12 @@ case "$tool_name" in
   Bash) ;;
   *) exit 0 ;;
 esac
-if ! printf '%s' "$command" | grep -Eq '(^|[;&|]|\<)git[[:space:]]+([-a-z]+[[:space:]]+)*push(\>|$)'; then
+# Match `git push` only when `push` is the git SUBCOMMAND at a command position —
+# command start or right after a shell separator (; && || | &  or an opening
+# paren). This avoids false positives like `git config push.default`, `git help
+# push`, or `echo "git push"`, which must not trigger a CI run / block.
+# (Trade-off: rare global-option forms such as `git -C dir push` are not gated.)
+if ! printf '%s' "$command" | grep -Eq '(^|[;&|(])[[:space:]]*git[[:space:]]+push([[:space:];&|)]|$)'; then
   exit 0
 fi
 
