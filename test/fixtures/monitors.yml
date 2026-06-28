@@ -1,0 +1,24 @@
+# Fixtures are inserted via raw SQL (callbacks/validations are skipped), so every
+# NOT NULL column — including ping_token, which the model normally auto-fills —
+# must be set explicitly here.
+pending:
+  user: alice
+  monitor_type: heartbeat
+  name: Nightly backup
+  ping_token: fixture_pending_token_aaaaaaaaaaaaaaaa
+  expected_interval_seconds: 3600
+  grace_period_seconds: 300
+  status: pending
+  source: manual
+
+up:
+  user: alice
+  monitor_type: heartbeat
+  name: Hourly sync
+  ping_token: fixture_up_token_bbbbbbbbbbbbbbbbbbbb
+  expected_interval_seconds: 3600
+  grace_period_seconds: 300
+  status: up
+  last_ping_at: <%= 10.minutes.ago.utc.iso8601 %>
+  next_due_at: <%= 50.minutes.from_now.utc.iso8601 %>
+  source: manual
