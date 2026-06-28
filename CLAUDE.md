@@ -155,6 +155,30 @@ invoke them at the right moments rather than improvising equivalents.
    `bin/ci` runs in GitHub Actions (`.github/workflows/ci.yml`), so local green ==
    CI green. Don't push with a red suite, and don't bypass the hook.
 
+## Git & commit hygiene
+
+Keep `main` a **clean, linear history** — it should read top-to-bottom as a
+sequence of deliberate changes, not a tangle of merge bubbles and "wip" commits.
+
+- **Linear, no merge bubbles.** Rebase your branch onto `main`; don't merge `main`
+  into your branch. Integrate with fast-forward or rebase, never a merge commit.
+  (`git pull --rebase`; `git config pull.rebase true` locally.)
+- **Squash where possible.** Collapse WIP/fixup commits into logical units before
+  merge — often one PR is one well-described commit. Use
+  `git commit --fixup <sha>` while iterating, then
+  `git rebase -i --autosquash main` to tidy up. Don't merge a string of
+  "fix typo", "address review", "oops" commits.
+- **Each commit stands on its own.** It should build and pass `bin/ci`
+  independently — no commit that knowingly leaves the suite red.
+- **Messages: imperative subject, explain the *why*.** ~50-char subject, blank
+  line, body if the change isn't obvious. Keep the `Co-Authored-By:` /
+  `Claude-Session:` trailers we already use.
+- **Force-push only your own feature branch** (after a rebase). Never force-push
+  `main` or a shared branch.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the human-facing version and the PR
+checklist.
+
 ## Deviate, but say so
 
 This convention is a starting point, not dogma. When something genuinely doesn't
