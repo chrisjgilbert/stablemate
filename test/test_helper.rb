@@ -27,6 +27,19 @@ module RequestSignInHelper
   end
 end
 
+module RateLimitingTestHelper
+  # The ping limiter uses a dedicated in-process MemoryStore (see PingsController).
+  # Clear it around a block so a test starts from a clean count and leaves no
+  # residue for the next test (parallel workers each have their own store).
+  def with_rate_limiting
+    PingsController::RATE_LIMIT_STORE.clear
+    yield
+  ensure
+    PingsController::RATE_LIMIT_STORE.clear
+  end
+end
+
 class ActionDispatch::IntegrationTest
   include RequestSignInHelper
+  include RateLimitingTestHelper
 end

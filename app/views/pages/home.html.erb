@@ -1,0 +1,63 @@
+<% content_for :title, "Stablemate — heartbeat monitoring for your cron jobs" %>
+
+<div class="max-w-3xl mx-auto text-center pt-10 pb-16">
+  <div class="flex flex-col items-center gap-4">
+    <%= render "shared/logo", size: 52 %>
+
+    <h1 class="text-4xl sm:text-5xl font-semibold tracking-tight text-ink mt-2">
+      Know the moment a cron job stops running.
+    </h1>
+
+    <p class="text-[15px] text-secondary max-w-xl leading-relaxed">
+      Stablemate is heartbeat monitoring for your scheduled jobs. Each job pings a
+      URL when it finishes; if a ping is late, we email you. No agents, no dashboards
+      to babysit — just a calm signal when something stops.
+    </p>
+
+    <div class="flex items-center gap-3 mt-4">
+      <%= link_to "Get started — free", sign_up_path,
+            class: "inline-flex items-center h-[38px] px-5 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover shadow-sm" %>
+      <%= link_to "Read the docs", "https://github.com/chrisjgilbert/stablemate/blob/main/docs/install.md",
+            class: "inline-flex items-center h-[38px] px-5 rounded-lg border border-border bg-surface text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+    </div>
+
+    <p class="text-[13px] text-muted mt-1">
+      Free — up to <%= Stablemate::MAX_MONITORS_PER_USER %> monitors. No credit card.
+    </p>
+  </div>
+
+  <!-- Gem-first path: recurring jobs register themselves. -->
+  <div class="mt-14 text-left max-w-xl mx-auto">
+    <p class="text-[12px] font-semibold uppercase tracking-wide text-muted mb-2">
+      Recommended — install the gem
+    </p>
+    <div class="rounded-xl border border-border bg-[#1c1c22] text-[#d4d4dc] font-mono text-[12px] leading-relaxed p-4 overflow-x-auto shadow-sm">
+<pre class="whitespace-pre"># config/recurring.yml
+daily_digest:
+  class: DailyDigestJob
+  schedule: every day at 9am</pre>
+    </div>
+    <p class="text-[13px] text-muted mt-2">
+      Add the gem and your recurring jobs register themselves — no per-job code.
+    </p>
+  </div>
+
+  <div class="mt-12 grid sm:grid-cols-3 gap-4 text-left">
+    <div class="rounded-xl border border-border bg-surface p-5 shadow-sm">
+      <h3 class="text-[14px] font-semibold text-ink mb-1">Heartbeat, not polling</h3>
+      <p class="text-[13px] text-secondary leading-relaxed">Your job tells us it ran. A missed check-in is the signal — no false alarms from network blips.</p>
+    </div>
+    <div class="rounded-xl border border-border bg-surface p-5 shadow-sm">
+      <h3 class="text-[14px] font-semibold text-ink mb-1">Email when it matters</h3>
+      <p class="text-[13px] text-secondary leading-relaxed">One alert when a job goes down, one when it recovers. No noise, no reminder spam.</p>
+    </div>
+    <div class="rounded-xl border border-border bg-surface p-5 shadow-sm">
+      <h3 class="text-[14px] font-semibold text-ink mb-1">90-day uptime history</h3>
+      <p class="text-[13px] text-secondary leading-relaxed">See each job's track record at a glance, with a day-by-day uptime bar.</p>
+    </div>
+  </div>
+
+  <p class="mt-12 text-[13px] text-secondary">
+    Already have an account? <%= link_to "Sign in", sign_in_path, class: "text-brand font-medium" %>
+  </p>
+</div>

@@ -23,4 +23,52 @@ class SignupTest < ActiveSupport::TestCase
       assert user.errors[:email_address].any?
     end
   end
+
+  # Scenario 1/2 (model) — at the cap, run lands on the waitlist: a WaitlistSignup
+  # is created, NO User, no verification email.
+  test "at the cap, run creates a WaitlistSignup and no User" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
+      result = nil
+      assert_no_enqueued_emails do
+        assert_difference -> { WaitlistSignup.count }, 1 do
+          assert_no_difference -> { User.count } do
+            result = Signup.new(email: "waitlisted@example.com", password: "password1234").run
+          end
+        end
+      end
+
+      assert_kind_of WaitlistSignup, result
+      assert result.persisted?
+      assert_equal "waitlisted@example.com", result.email_address
+    end
+  end
+
+  # Scenario 3 (model) — a duplicate waitlist email is a friendly success, not an
+  # error, and creates no second row.
+  test "at the cap, a duplicate waitlist email is a friendly no-op success" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
+      WaitlistSignup.create!(email_address: "again@example.com")
+
+      result = nil
+      assert_no_difference -> { WaitlistSignup.count } do
+        result = Signup.new(email: "AGAIN@example.com", password: "password1234").run
+      end
+
+      assert_kind_of WaitlistSignup, result
+      assert result.persisted?
+      assert result.errors.empty?, "duplicate waitlist signup must not surface errors"
+    end
+  end
+
+  # Scenario 4/5 (model) — below the cap (or after raising it), normal sign-up.
+  test "below the cap, run creates a User as normal" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
+      result = nil
+      assert_difference -> { User.count }, 1 do
+        result = Signup.new(email: "under-cap@example.com", password: "password1234", password_confirmation: "password1234").run
+      end
+      assert_kind_of User, result
+      assert result.persisted?
+    end
+  end
 end

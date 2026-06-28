@@ -2,7 +2,7 @@ require "test_helper"
 
 class MonitorMailerTest < ActionMailer::TestCase
   include Rails.application.routes.url_helpers
-  def default_url_options = { host: "example.com" }
+  def default_url_options = { host: "example.com", protocol: "https" }
 
   setup { @monitor = monitors(:up) }
 
@@ -28,5 +28,26 @@ class MonitorMailerTest < ActionMailer::TestCase
     assert_match @monitor.name, mail.subject
     assert_match @monitor.name, mail.body.encoded
     assert_match monitor_url(@monitor), mail.body.encoded
+  end
+
+  # Scenario 10 — down/recovered emails carry a configured From and render a detail
+  # link whose host comes from config (default_url_options), not any request.
+  test "down and recovered set a configured From address" do
+    configured_from = ApplicationMailer.default[:from]
+    assert configured_from.present?
+
+    assert_equal configured_from, MonitorMailer.down(@monitor)[:from].value
+    assert_equal configured_from, MonitorMailer.recovered(@monitor)[:from].value
+  end
+
+  test "detail link host comes from config, not the request" do
+    config_host = Rails.application.config.action_mailer.default_url_options[:host]
+
+    [ MonitorMailer.down(@monitor), MonitorMailer.recovered(@monitor) ].each do |mail|
+      link = mail.body.encoded[/https?:\/\/[^\s"'<]+/]
+      assert link, "expected a detail link in the email body"
+      assert link.start_with?("https://"), "detail link must be https, got #{link}"
+      assert_equal config_host, URI.parse(link).host
+    end
   end
 end

@@ -48,6 +48,7 @@ Rails.application.routes.draw do
   # `curl` works; recorded as a "create" of a ping. (architecture.md §7)
   match "/ping/:ping_token", to: "pings#create", via: %i[get post], as: :ping
 
-  # Defines the root path route ("/")
-  root "monitors#index"
+  # Defines the root path route ("/"). Anonymous visitors get the marketing
+  # landing page; signed-in users are redirected to their dashboard. (phase-4)
+  root "pages#home"
 end

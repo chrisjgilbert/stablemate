@@ -95,6 +95,47 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     assert event.source_ip.present?
   end
 
+  # Scenario 7 — pinging a known token faster than the limit returns 429 after the
+  # threshold; the ping hot path is otherwise unchanged.
+  test "pinging a token over the per-token limit returns 429" do
+    with_rate_limiting do
+      limit = PingsController::PER_TOKEN_LIMIT
+
+      limit.times do
+        get ping_path(@monitor.ping_token)
+        assert_response :success
+      end
+
+      get ping_path(@monitor.ping_token)
+      assert_response :too_many_requests
+    end
+  end
+
+  test "normal cron cadence is never throttled" do
+    with_rate_limiting do
+      # A handful of pings well under the threshold all succeed.
+      3.times do
+        get ping_path(@monitor.ping_token)
+        assert_response :success
+      end
+    end
+  end
+
+  # Scenario 8 — repeated unknown-token requests are rate-limited per IP and always
+  # return 404 (never a 429 that would distinguish a real token from a fake one,
+  # and never 200).
+  test "repeated unknown-token requests are rate-limited per IP but still 404" do
+    with_rate_limiting do
+      limit = PingsController::PER_IP_LIMIT
+
+      # Drive the per-IP limit with unknown tokens; every response stays 404.
+      (limit + 1).times do |i|
+        get ping_path("scan-token-#{i}")
+        assert_response :not_found
+      end
+    end
+  end
+
   # CSRF is disabled in the test env by default, which hides a real production
   # bug: a machine POST has no authenticity token. Turn forgery protection on
   # for this one test to prove the endpoint is genuinely CSRF-exempt.

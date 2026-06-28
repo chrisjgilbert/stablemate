@@ -36,8 +36,10 @@ Rails.application.configure do
   # ActionMailer::Base.deliveries array.
   config.action_mailer.delivery_method = :test
 
-  # Set host to be used by links generated in mailer templates.
-  config.action_mailer.default_url_options = { host: "example.com" }
+  # Set host + protocol used by links generated in mailer templates. https matches
+  # production (config.action_mailer.default_url_options) so the mailer tests can
+  # assert the detail links are https, as users will receive them.
+  config.action_mailer.default_url_options = { host: "example.com", protocol: "https" }
 
   # Print deprecation notices to the stderr.
   config.active_support.deprecation = :stderr
