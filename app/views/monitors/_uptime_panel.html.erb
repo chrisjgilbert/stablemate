@@ -1,0 +1,16 @@
+<%#
+  Detail "Uptime — last 90 days" panel (design-system.md §3): the 90-bar UptimeBar
+  fed real data from the rollups (Monitoring::Monitor::Uptime), trailed by the
+  overall uptime %. Server-rendered, no JS.
+  Locals: monitor.
+%>
+<% series = monitor.uptime_series(days: 90) %>
+<div class="rounded-xl border border-border bg-surface p-6 shadow-sm" data-testid="uptime-panel">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-[13px] font-semibold text-secondary">Uptime — last 90 days</h2>
+    <span class="font-mono text-[13px] text-ink" data-testid="uptime-percent">
+      <%= uptime_percent_label(monitor.uptime_percent(days: 90)) %>
+    </span>
+  </div>
+  <%= render "shared/uptime_bar", days: uptime_bar_days(series) %>
+</div>

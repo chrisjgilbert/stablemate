@@ -22,7 +22,9 @@
 <% if @monitors.any? %>
   <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm">
     <div id="monitors" class="divide-y divide-hairline">
-      <%= render partial: "monitors/row", collection: @monitors, as: :monitor %>
+      <% @monitors.each do |monitor| %>
+        <%= render "monitors/row", monitor: monitor, mini_ticks: @mini_ticks[monitor.id] || [] %>
+      <% end %>
     </div>
   </div>
 <% else %>

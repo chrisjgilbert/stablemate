@@ -13,6 +13,11 @@
     <%= render "shared/gem_chip", monitor: monitor, variant: :compact %>
   </div>
   <div class="flex items-center gap-4 text-[12px] text-muted shrink-0">
+    <%# Last-16-checks sparkline + uptime % (Phase 2). The index preloads ticks
+        for all rows in one query (no N+1); a single-row Turbo broadcast omits the
+        local and falls back to the per-monitor lookup. %>
+    <% ticks = monitor.mini_ticks(kinds: local_assigns[:mini_ticks]) %>
+    <span data-testid="mini-ticks"><%= render "shared/mini_ticks", checks: ticks %></span>
     <span class="font-mono">every <%= humanize_seconds(monitor.expected_interval_seconds) %></span>
     <span class="font-mono">
       <%= monitor.last_ping_at ? "#{time_ago_in_words(monitor.last_ping_at)} ago" : "never pinged" %>
