@@ -1,0 +1,30 @@
+<%#
+  Generate-once modal (design-system.md / phase-3 §3.5): shows the full sm_live_…
+  key exactly once, with a Copy button (clipboard controller) and an amber
+  "you won't see this key again" warning. Dismissed via the dialog controller;
+  the key is never re-rendered after this. Locals: raw_token.
+%>
+<div data-controller="dialog" data-dialog-open-value="true">
+  <div data-dialog-target="backdrop" data-action="click->dialog#backdropClick"
+       class="fixed inset-0 z-40 bg-black/30 flex items-center justify-center p-4">
+    <div class="w-full max-w-md rounded-2xl bg-surface shadow-xl border border-border p-6 space-y-4"
+         role="dialog" aria-modal="true" aria-label="New API key" data-testid="api-key-modal">
+      <h2 class="text-lg font-semibold tracking-tight">Your new API key</h2>
+
+      <div class="rounded-lg border px-4 py-2.5 text-[13px]"
+           style="background:#fdf4e3; border-color:#f5e3bf; color:#8a6310;"
+           data-testid="api-key-warning">
+        Copy this key now — you won't see it again.
+      </div>
+
+      <%= render "shared/copyable", value: raw_token, dark: true, label: "API key" %>
+
+      <div class="flex justify-end pt-1">
+        <button type="button" data-action="dialog#close"
+                class="h-9 px-4 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover">
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

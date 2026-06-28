@@ -1,0 +1,7 @@
+production:
+  morning_report:
+    class: ReportJob
+    schedule: every day at 8am
+  evening_report:
+    class: ReportJob
+    schedule: every day at 8pm

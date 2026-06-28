@@ -60,6 +60,25 @@ if [ -f bin/rails ]; then
   bin/rails test:system || note_fail "rails test:system"
 fi
 
+# --- Companion gem suite ---------------------------------------------------
+# Runs the gem's own Minitest suite when gem/ is present (skipped only when the
+# directory doesn't exist). The gem suite is a REQUIRED part of the gate and
+# fails CLOSED: if the gem's deps can't be installed, `require "fugit"` raises
+# and the run red-fails here — we never want to silently skip the gem suite. So
+# a real gem test failure OR a gem dependency failure fails CI. Invoked directly
+# via ruby (not `bundle exec rake`) so it's independent of the app's Bundler and
+# of the Bundler 4 binstub quirk that hides bundled executables in this sandbox.
+if [ -d gem ]; then
+  step "stablemate gem tests"
+  (
+    cd gem
+    # Best-effort install; if it fails the ruby run below still fails closed on
+    # the missing dependency, so CI stays red rather than skipping the suite.
+    bundle check >/dev/null 2>&1 || bundle install >/dev/null 2>&1 || true
+    ruby -Ilib -Itest -e 'Dir["test/**/*_test.rb"].each { |f| require File.expand_path(f) }'
+  ) || note_fail "gem tests"
+fi
+
 echo
 if [ "$fail" -ne 0 ]; then
   bold "== CI FAILED =="

@@ -1,0 +1,10 @@
+production:
+  daily_digest:
+    class: DailyDigestJob
+    schedule: every day at 9am
+  clear_sessions:
+    class: ClearSessionsJob
+    schedule: every 15 minutes
+  db_backup:
+    command: "Backup.run"
+    schedule: "0 3 * * *"

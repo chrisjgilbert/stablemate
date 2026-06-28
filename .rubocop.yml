@@ -1,6 +1,12 @@
 # Omakase Ruby styling for Rails
 inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 
+# The companion gem (gem/) is a separate codebase with its own toolchain and
+# conventions; it is not linted by the host app's rubocop run.
+AllCops:
+  Exclude:
+    - "gem/**/*"
+
 # Overwrite or add rules to create your own house style
 #
 # # Use `[a, [b, c]]` not `[ a, [ b, c ] ]`
