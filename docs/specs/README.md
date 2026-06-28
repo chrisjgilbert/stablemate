@@ -225,6 +225,10 @@ migration.
 | 3 | [`phase-3-api-and-gem.md`](phase-3-api-and-gem.md) | `/api/v1`, API keys, sync, companion gem | 1 (2 for richer detail data) |
 | 4 | [`phase-4-launch-hardening.md`](phase-4-launch-hardening.md) | Waitlist/signup cap, rate-limit, deliverability, docs | 1–3 |
 
+**Implementing this?** Start with the
+[`coordinator-playbook.md`](coordinator-playbook.md) — how to delegate phases to
+specialist sub-agents, the sequencing, and the per-phase loop.
+
 Cross-cutting direction every phase reads: [`design-system.md`](design-system.md)
 (UI) and [`architecture.md`](architecture.md) (object layout). The root
 [`../../CLAUDE.md`](../../CLAUDE.md) carries the architecture rules the coding
