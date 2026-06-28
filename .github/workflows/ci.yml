@@ -55,7 +55,7 @@ jobs:
 
       - name: Install Chromium for system tests
         if: steps.app.outputs.present == 'true'
-        uses: browser-actions/setup-chrome@v1
+        uses: browser-actions/setup-chrome@v2
         timeout-minutes: 5
 
       - name: Run CI (bin/ci)
