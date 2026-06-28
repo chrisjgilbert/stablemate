@@ -1,0 +1,32 @@
+<% content_for :title, "Sign in" %>
+<div class="max-w-sm mx-auto mt-8">
+  <div class="flex flex-col items-center gap-3 mb-8">
+    <%= render "shared/logo", size: 40 %>
+    <h1 class="text-2xl font-semibold tracking-tight">Sign in to Stablemate</h1>
+  </div>
+
+  <div class="rounded-xl border border-border bg-surface p-6 shadow-sm">
+    <%= form_with url: session_path, class: "space-y-4" do |form| %>
+      <div>
+        <%= form.label :email_address, "Email", class: "block text-[13px] font-medium text-secondary mb-1" %>
+        <%= form.email_field :email_address, required: true, autofocus: true, autocomplete: "username",
+              value: params[:email_address],
+              class: "w-full h-[38px] px-3 rounded-lg border border-border font-mono text-[13px] focus:outline-brand" %>
+      </div>
+      <div>
+        <%= form.label :password, "Password", class: "block text-[13px] font-medium text-secondary mb-1" %>
+        <%= form.password_field :password, required: true, autocomplete: "current-password", maxlength: 72,
+              class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
+      </div>
+      <%= form.submit "Sign in",
+            class: "w-full h-[38px] rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
+    <% end %>
+    <p class="mt-3 text-[12px] text-muted text-center">
+      <%= link_to "Forgot password?", new_password_path, class: "underline hover:no-underline" %>
+    </p>
+  </div>
+
+  <p class="mt-5 text-center text-[13px] text-secondary">
+    New to Stablemate? <%= link_to "Create an account", sign_up_path, class: "text-brand font-medium" %>
+  </p>
+</div>

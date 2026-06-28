@@ -10,9 +10,20 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_28_144045) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_28_170227) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "incidents", force: :cascade do |t|
+    t.string "cause", default: "missed_ping", null: false
+    t.datetime "created_at", null: false
+    t.bigint "monitor_id", null: false
+    t.datetime "resolved_at"
+    t.datetime "started_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["monitor_id"], name: "index_incidents_on_monitor_id"
+    t.index ["monitor_id"], name: "index_incidents_on_monitor_id_open", unique: true, where: "(resolved_at IS NULL)"
+  end
 
   create_table "monitors", force: :cascade do |t|
     t.datetime "created_at", null: false
@@ -35,6 +46,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_28_144045) do
     t.index ["user_id"], name: "index_monitors_on_user_id"
   end
 
+  create_table "notifications", force: :cascade do |t|
+    t.string "channel", default: "email", null: false
+    t.datetime "created_at", null: false
+    t.datetime "delivered_at"
+    t.string "event", null: false
+    t.bigint "incident_id"
+    t.bigint "monitor_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["incident_id"], name: "index_notifications_on_incident_id"
+    t.index ["monitor_id"], name: "index_notifications_on_monitor_id"
+  end
+
   create_table "ping_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "duration_ms"
@@ -43,6 +66,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_28_144045) do
     t.datetime "received_at", null: false
     t.string "source_ip"
     t.index ["monitor_id"], name: "index_ping_events_on_monitor_id"
+  end
+
+  create_table "sessions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "ip_address"
+    t.datetime "updated_at", null: false
+    t.string "user_agent"
+    t.bigint "user_id", null: false
+    t.index ["user_id"], name: "index_sessions_on_user_id"
   end
 
   create_table "users", force: :cascade do |t|
@@ -55,6 +87,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_28_144045) do
     t.index "lower((email_address)::text)", name: "index_users_on_lower_email_address", unique: true
   end
 
+  add_foreign_key "incidents", "monitors"
   add_foreign_key "monitors", "users"
+  add_foreign_key "notifications", "incidents"
+  add_foreign_key "notifications", "monitors"
   add_foreign_key "ping_events", "monitors"
+  add_foreign_key "sessions", "users"
 end

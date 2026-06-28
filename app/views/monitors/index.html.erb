@@ -1,0 +1,30 @@
+<% content_for :title, "Monitors" %>
+<% count = @monitors.size # relation already loaded; no extra COUNT query %>
+<% at_cap = count >= current_user.monitor_limit %>
+
+<div class="flex items-center justify-between mb-6">
+  <div class="flex items-center gap-3">
+    <h1 class="text-xl font-semibold tracking-tight">Monitors</h1>
+    <span class="font-mono text-[13px] text-muted"
+          data-testid="monitor-count"><%= count %> / <%= current_user.monitor_limit %></span>
+  </div>
+
+  <% if at_cap %>
+    <span class="inline-flex items-center h-8 px-3 rounded-lg bg-hairline text-[13px] font-semibold text-muted cursor-not-allowed"
+          title="You've reached the limit of <%= current_user.monitor_limit %> monitors"
+          data-testid="at-limit">At monitor limit</span>
+  <% else %>
+    <%= link_to "New monitor", new_monitor_path,
+          class: "inline-flex items-center h-8 px-3 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover" %>
+  <% end %>
+</div>
+
+<% if @monitors.any? %>
+  <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm">
+    <div id="monitors" class="divide-y divide-hairline">
+      <%= render partial: "monitors/row", collection: @monitors, as: :monitor %>
+    </div>
+  </div>
+<% else %>
+  <%= render "monitors/empty_state" %>
+<% end %>

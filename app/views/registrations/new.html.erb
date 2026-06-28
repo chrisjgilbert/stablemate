@@ -1,0 +1,43 @@
+<% content_for :title, "Sign up" %>
+<div class="max-w-sm mx-auto mt-8">
+  <div class="flex flex-col items-center gap-2 mb-8 text-center">
+    <%= render "shared/logo", size: 40 %>
+    <h1 class="text-2xl font-semibold tracking-tight">Create your account</h1>
+    <p class="text-[13px] text-muted">Free — up to <%= Stablemate::MAX_MONITORS_PER_USER %> monitors</p>
+  </div>
+
+  <div class="rounded-xl border border-border bg-surface p-6 shadow-sm">
+    <% if @user&.errors&.any? %>
+      <div class="mb-4 rounded-lg border border-down-bg bg-down-bg/60 px-3 py-2 text-[12px] text-down-text">
+        <ul class="list-disc list-inside">
+          <% @user.errors.full_messages.each do |msg| %><li><%= msg %></li><% end %>
+        </ul>
+      </div>
+    <% end %>
+
+    <%= form_with url: sign_up_path, class: "space-y-4" do |form| %>
+      <div>
+        <%= form.label :email_address, "Email", class: "block text-[13px] font-medium text-secondary mb-1" %>
+        <%= form.email_field :email_address, required: true, autofocus: true, autocomplete: "username",
+              value: @user&.email_address,
+              class: "w-full h-[38px] px-3 rounded-lg border border-border font-mono text-[13px] focus:outline-brand" %>
+      </div>
+      <div>
+        <%= form.label :password, "Password", class: "block text-[13px] font-medium text-secondary mb-1" %>
+        <%= form.password_field :password, required: true, autocomplete: "new-password", maxlength: 72,
+              class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
+      </div>
+      <div>
+        <%= form.label :password_confirmation, "Confirm password", class: "block text-[13px] font-medium text-secondary mb-1" %>
+        <%= form.password_field :password_confirmation, required: true, autocomplete: "new-password", maxlength: 72,
+              class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
+      </div>
+      <%= form.submit "Create account",
+            class: "w-full h-[38px] rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
+    <% end %>
+  </div>
+
+  <p class="mt-5 text-center text-[13px] text-secondary">
+    Already have an account? <%= link_to "Sign in", sign_in_path, class: "text-brand font-medium" %>
+  </p>
+</div>

@@ -5,8 +5,8 @@
 #   curl http://localhost:3000/ping/<ping_token>
 
 user = User.find_or_create_by!(email_address: "demo@stablemate.dev") do |u|
-  # Phase 0 has no auth yet; a placeholder digest is fine.
-  u.password_digest = "seed-placeholder-digest"
+  # A real (has_secure_password) credential so the demo account can sign in.
+  u.password = "password1234"
   u.plan = "free"
 end
 

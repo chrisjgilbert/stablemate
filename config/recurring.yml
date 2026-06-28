@@ -9,7 +9,23 @@
 #     priority: 2
 #     schedule: at 5am every day
 
-production:
+# Detection sweep cadence is DETECTION_INTERVAL (config/initializers/stablemate.rb
+# = 30.seconds). Solid Queue's recurring schedule is static YAML, so the literal
+# "every 30 seconds" must track that constant if it ever changes.
+#
+# Dev and production share the same schedule (anchor below). In development the
+# sweep only fires while a Solid Queue worker is running — start one with
+# `bin/jobs` (alongside `bin/rails server`) so monitors actually go down locally.
+default: &default
+  detect_missed_pings:
+    class: DetectMissedPingsJob
+    schedule: every 30 seconds
   clear_solid_queue_finished_jobs:
     command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
     schedule: every hour at minute 12
+
+development:
+  <<: *default
+
+production:
+  <<: *default

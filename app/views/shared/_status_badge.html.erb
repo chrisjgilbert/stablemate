@@ -1,0 +1,16 @@
+<%#
+  StatusBadge (design-system.md §2): pill with a leading dot + label, colours per
+  the status table. The DOWN dot pulses (gated behind prefers-reduced-motion in
+  CSS). Status is conveyed by dot AND text, never colour alone.
+  Locals: status (string).
+%>
+<% styles = {
+     "up"      => { dot: "bg-up-dot",      bg: "bg-up-bg",      text: "text-up-text",      label: "Up" },
+     "down"    => { dot: "bg-down-dot",    bg: "bg-down-bg",    text: "text-down-text",    label: "Down" },
+     "paused"  => { dot: "bg-paused-dot",  bg: "bg-paused-bg",  text: "text-paused-text",  label: "Paused" },
+     "pending" => { dot: "bg-pending-dot", bg: "bg-pending-bg", text: "text-pending-text", label: "Pending" }
+   }.fetch(status, { dot: "bg-paused-dot", bg: "bg-paused-bg", text: "text-paused-text", label: status.to_s.capitalize }) %>
+<span class="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[11px] font-semibold <%= styles[:bg] %> <%= styles[:text] %>">
+  <span class="w-1.5 h-1.5 rounded-full <%= styles[:dot] %> <%= "status-dot-pulse" if status == "down" %>"></span>
+  <%= styles[:label] %>
+</span>

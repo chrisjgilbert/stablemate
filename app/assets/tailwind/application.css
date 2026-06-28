@@ -1,1 +1,55 @@
 @import "tailwindcss";
+
+/* Design tokens (design-system.md §1). Tailwind v4 reads @theme to generate
+   utilities like text-ink, bg-brand, border-hairline, font-mono, etc. */
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-app: #fbfbfc;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #fafafb;
+  --color-border: #ececf1;
+  --color-hairline: #f1f1f4;
+  --color-ink: #1a1a1e;
+  --color-secondary: #62626c;
+  --color-muted: #80808c;
+  --color-faint: #a0a0ac;
+
+  --color-brand: #5b53eb;
+  --color-brand-border: #4b43d8;
+  --color-brand-hover: #4f47e0;
+  --color-brand-tint: #f3f2fd;
+  --color-gem: #6b62d6;
+
+  --color-up-dot: #1aa34a;
+  --color-up-bg: #e7f6ec;
+  --color-up-text: #177a3d;
+  --color-down-dot: #e5484d;
+  --color-down-bg: #fdeaea;
+  --color-down-text: #c0282d;
+  --color-paused-dot: #a3a3ae;
+  --color-paused-bg: #f1f1f4;
+  --color-paused-text: #6b6b76;
+  --color-pending-dot: #e0a000;
+  --color-pending-bg: #fdf4e3;
+  --color-pending-text: #a96a00;
+}
+
+/* The down-status dot pulses (an expanding box-shadow ring). Pure CSS, and
+   gated behind prefers-reduced-motion per the a11y rule. */
+@keyframes status-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.55); }
+  70%  { box-shadow: 0 0 0 6px rgba(229, 72, 77, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0); }
+}
+
+.status-dot-pulse {
+  animation: status-pulse 1.8s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot-pulse {
+    animation: none;
+  }
+}

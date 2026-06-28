@@ -1,0 +1,21 @@
+<%#
+  A single dashboard monitor row. Wrapped so the live-status broadcast
+  (monitor.broadcast_status_update) can replace just this fragment over Solid
+  Cable: it subscribes to the monitor's stream and the outer id matches the
+  broadcast target (dom_id(monitor, :row)).
+%>
+<%= turbo_stream_from monitor %>
+<div id="<%= dom_id(monitor, :row) %>" class="flex items-center justify-between px-[18px] py-[13px] hover:bg-surface-subtle">
+  <div class="flex items-center gap-3 min-w-0">
+    <%= render "shared/status_badge", status: monitor.status %>
+    <%= link_to monitor.name, monitor_path(monitor),
+          class: "font-mono text-[13px] text-ink truncate hover:text-brand" %>
+    <%= render "shared/gem_chip", monitor: monitor, variant: :compact %>
+  </div>
+  <div class="flex items-center gap-4 text-[12px] text-muted shrink-0">
+    <span class="font-mono">every <%= humanize_seconds(monitor.expected_interval_seconds) %></span>
+    <span class="font-mono">
+      <%= monitor.last_ping_at ? "#{time_ago_in_words(monitor.last_ping_at)} ago" : "never pinged" %>
+    </span>
+  </div>
+</div>

@@ -3,6 +3,9 @@ require "test_helper"
 # Unit test for the Monitoring::Monitor::CheckIn operation, reached via
 # monitor.check_in!.
 class Monitoring::Monitor::CheckInTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+  include ActionMailer::TestHelper
+
   setup { @monitor = monitors(:pending) }
 
   test "records a success PingEvent" do
@@ -52,5 +55,62 @@ class Monitoring::Monitor::CheckInTest < ActiveSupport::TestCase
       @monitor.reload
       assert_equal Time.current, @monitor.last_ping_at
     end
+  end
+
+  # Scenario 24 — down -> up: resolves the open incident, enqueues one recovered email.
+  test "a down monitor recovering resolves its incident and enqueues one recovered email" do
+    down = monitors(:up)
+    down.flag_missed!
+    incident = down.incidents.open.sole
+
+    freeze_time do
+      assert_enqueued_emails 1 do
+        down.check_in!(received_at: Time.current)
+      end
+
+      assert down.reload.up?
+      assert_equal Time.current, incident.reload.resolved_at
+      refute incident.open?
+      recovered = down.notifications.where(event: "recovered").sole
+      assert recovered.delivered_at.present?
+    end
+  end
+
+  # Scenario 25 — an up monitor receiving a ping sends no notification.
+  test "an up monitor receiving a ping enqueues no email" do
+    up = monitors(:up)
+    assert_enqueued_emails 0 do
+      up.check_in!(received_at: Time.current)
+    end
+    assert up.up?
+  end
+
+  # Scenario 26 — a paused monitor records the event but stays paused, sends nothing.
+  test "a paused monitor records the ping but stays paused and alerts nothing" do
+    paused = monitors(:up)
+    paused.pause!
+
+    assert_difference -> { paused.ping_events.count }, 1 do
+      assert_enqueued_emails 0 do
+        paused.check_in!(received_at: Time.current)
+      end
+    end
+
+    assert paused.reload.paused?
+  end
+
+  # Spec §3.7 — a down monitor with NO open incident recovers to up but must not
+  # emit a spurious incident-less recovery email or Notification row.
+  test "an incident-less down monitor recovers to up with no recovery alert" do
+    monitor = monitors(:up)
+    monitor.update!(status: "down") # down without any incident
+
+    assert_no_difference -> { monitor.notifications.count } do
+      assert_enqueued_emails 0 do
+        monitor.check_in!(received_at: Time.current)
+      end
+    end
+
+    assert monitor.reload.up?
   end
 end

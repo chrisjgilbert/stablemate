@@ -1,5 +1,23 @@
 Rails.application.routes.draw do
-  # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
+  # Authentication (Rails 8 generator). The session resource is the sign-in/out
+  # endpoint; we add friendly /sign_in + /sign_up aliases per the design (R3).
+  resource :session
+  resources :passwords, param: :token
+
+  get  "sign_in",  to: "sessions#new",        as: :sign_in
+  get  "sign_up",  to: "registrations#new",   as: :sign_up
+  post "sign_up",  to: "registrations#create"
+  resources :registrations, only: %i[new create]
+
+  # Non-blocking email verification link.
+  get "verify/:token", to: "email_verifications#show", as: :email_verification
+
+  # Authenticated monitor UI. CRUD plus the sub-resource controllers that replace
+  # custom verbs: pause/resume and rotate-token (architecture.md §7).
+  resources :monitors do
+    resource :pause, only: %i[create destroy], module: :monitors
+    resource :ping_token, only: :update, module: :monitors
+  end
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
   # Can be used by load balancers and uptime monitors to verify that the app is live.
@@ -9,14 +27,6 @@ Rails.application.routes.draw do
   # `curl` works; recorded as a "create" of a ping. (architecture.md §7)
   match "/ping/:ping_token", to: "pings#create", via: %i[get post], as: :ping
 
-  # Throwaway status read for the Phase 0 walking skeleton (replaced by the
-  # authenticated dashboard in Phase 1). JSON only.
-  resources :monitors, only: :show, defaults: { format: :json }
-
-  # Render dynamic PWA files from app/views/pwa/* (remember to link manifest in application.html.erb)
-  # get "manifest" => "rails/pwa#manifest", as: :pwa_manifest
-  # get "service-worker" => "rails/pwa#service_worker", as: :pwa_service_worker
-
   # Defines the root path route ("/")
-  # root "posts#index"
+  root "monitors#index"
 end
