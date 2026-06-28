@@ -2,7 +2,9 @@ class MonitorsController < ApplicationController
   before_action :set_monitor, only: %i[show edit update destroy]
 
   def index
-    @monitors = current_user.monitors.order(:created_at)
+    @monitors = current_user.monitors.order(:created_at).to_a
+    # Preload every row's sparkline ticks in one query (no per-row N+1).
+    @mini_ticks = Monitoring::Monitor.mini_ticks_for(@monitors.map(&:id))
   end
 
   def show

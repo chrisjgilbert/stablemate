@@ -30,15 +30,24 @@
   </div>
 
   <% if open_incident %>
+    <%# Active-incident banner (spec §3.4): red, pulsing down dot, expected-by,
+        grace elapsed, "down for …". NO Acknowledge button — incidents are
+        open/resolved only, resolved by a recovering ping. %>
     <div class="rounded-xl border border-[#f6d6d6] bg-[#fef4f4] p-5" data-testid="incident-banner">
       <div class="flex items-center gap-2 text-[#a01e23] font-semibold">
         <span class="w-2 h-2 rounded-full bg-down-dot status-dot-pulse"></span>
-        Active incident
+        Monitor is down — no ping received
       </div>
-      <p class="mt-1 text-[13px] text-[#bf5a5d] font-mono">
-        Down for <%= distance_of_time_in_words(open_incident.started_at, Time.current) %>
-        (since <%= open_incident.started_at.utc.strftime("%Y-%m-%d %H:%M UTC") %>)
-      </p>
+      <dl class="mt-2 grid grid-cols-2 gap-y-1 text-[13px] text-[#bf5a5d] font-mono max-w-md">
+        <% if @monitor.due_with_grace_at %>
+          <dt>Expected by</dt>
+          <dd data-testid="expected-by"><%= mono_timestamp(@monitor.due_with_grace_at) %></dd>
+        <% end %>
+        <dt>Grace</dt>
+        <dd data-testid="grace-elapsed"><%= humanize_seconds(@monitor.grace_period_seconds) %> elapsed</dd>
+        <dt>Down for</dt>
+        <dd data-testid="down-for"><%= distance_of_time_in_words(open_incident.started_at, Time.current) %></dd>
+      </dl>
     </div>
   <% end %>
 
@@ -65,25 +74,11 @@
       <dt class="text-muted">Expected interval</dt><dd class="font-mono"><%= humanize_seconds(@monitor.expected_interval_seconds) %></dd>
       <dt class="text-muted">Grace period</dt><dd class="font-mono"><%= humanize_seconds(@monitor.grace_period_seconds) %></dd>
       <dt class="text-muted">Last ping</dt>
-      <dd class="font-mono"><%= @monitor.last_ping_at ? @monitor.last_ping_at.utc.strftime("%Y-%m-%d %H:%M UTC") : "never" %></dd>
+      <dd class="font-mono"><%= mono_timestamp(@monitor.last_ping_at) %></dd>
     </dl>
   </div>
 
-  <%# Recent events (simple last-N list; the 90-day uptime panel lands in Phase 2) %>
-  <div class="rounded-xl border border-border bg-surface p-6 shadow-sm">
-    <h2 class="text-[13px] font-semibold text-secondary mb-4">Recent pings</h2>
-    <% events = @monitor.ping_events.order(received_at: :desc).limit(10) %>
-    <% if events.any? %>
-      <ul class="divide-y divide-hairline text-[12px] font-mono text-secondary">
-        <% events.each do |event| %>
-          <li class="py-2 flex items-center justify-between">
-            <span><%= event.received_at.utc.strftime("%Y-%m-%d %H:%M:%S UTC") %></span>
-            <span class="text-muted"><%= event.source_ip %></span>
-          </li>
-        <% end %>
-      </ul>
-    <% else %>
-      <p class="text-[13px] text-muted">No pings yet.</p>
-    <% end %>
-  </div>
+  <%# 90-day uptime history (real rollup data) + the recent-events feed. %>
+  <%= render "monitors/uptime_panel", monitor: @monitor %>
+  <%= render "monitors/recent_events", monitor: @monitor %>
 </div>

@@ -20,6 +20,17 @@ default: &default
   detect_missed_pings:
     class: DetectMissedPingsJob
     schedule: every 30 seconds
+  # Daily uptime rollup: aggregates each monitor's previous complete day(s) into
+  # UptimeDayStat. Backfills any missed days on the next run. (Phase 2 §3.1)
+  rollup_uptime:
+    class: RollupUptimeJob
+    schedule: every day at 00:10
+  # Daily pruning of raw PingEvents older than PING_RETENTION. Runs after the
+  # rollup so a day's stats exist before its raw pings are deleted (the job also
+  # safety-checks this per day). (Phase 2 §3.3)
+  prune_ping_events:
+    class: PrunePingEventsJob
+    schedule: every day at 00:40
   clear_solid_queue_finished_jobs:
     command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
     schedule: every hour at minute 12

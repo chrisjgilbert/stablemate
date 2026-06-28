@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_28_170227) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_28_175556) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -77,6 +77,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_28_170227) do
     t.index ["user_id"], name: "index_sessions_on_user_id"
   end
 
+  create_table "uptime_day_stats", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.date "day", null: false
+    t.integer "down_seconds", default: 0, null: false
+    t.bigint "monitor_id", null: false
+    t.integer "ping_count", default: 0, null: false
+    t.integer "up_seconds", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.index ["monitor_id", "day"], name: "index_uptime_day_stats_on_monitor_id_and_day", unique: true
+    t.index ["monitor_id"], name: "index_uptime_day_stats_on_monitor_id"
+  end
+
   create_table "users", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "email_address", null: false
@@ -93,4 +105,5 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_28_170227) do
   add_foreign_key "notifications", "monitors"
   add_foreign_key "ping_events", "monitors"
   add_foreign_key "sessions", "users"
+  add_foreign_key "uptime_day_stats", "monitors"
 end

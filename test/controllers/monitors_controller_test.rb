@@ -24,6 +24,28 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     refute_match @bobs.name, response.body
   end
 
+  # README DoD — the dashboard sparklines must not N+1: the mini-ticks query
+  # count is constant whether there are 2 monitors or 4 (one batched query, not
+  # one per row).
+  test "index loads sparkline ticks without an N+1 (constant queries as rows grow)" do
+    sign_in @alice
+    @alice.monitors.destroy_all # start clean within the per-user cap
+    2.times do |i|
+      @alice.monitors.create!(name: "extra-#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
+    end
+
+    counts = lambda do
+      n = 0
+      callback = ->(*, payload) { n += 1 if payload[:sql] =~ /ping_events/i && payload[:name] != "SCHEMA" }
+      ActiveSupport::Notifications.subscribed(callback, "sql.active_record") { get monitors_path }
+      n
+    end
+
+    baseline = counts.call
+    @alice.monitors.create!(name: "another", expected_interval_seconds: 3600, grace_period_seconds: 300)
+    assert_equal baseline, counts.call, "adding a monitor must not add a ping_events query"
+  end
+
   # Scenario 5 — cross-tenant access is impossible (404, not 403, no leak).
   test "a user cannot show another user's monitor" do
     sign_in @alice

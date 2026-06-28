@@ -26,11 +26,13 @@ module Monitoring
     include PingToken
     include HeartbeatStates
     include Pausing
+    include Uptime
 
     belongs_to :user
     has_many :ping_events, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
     has_many :incidents, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
     has_many :notifications, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
+    has_many :uptime_day_stats, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
 
     validates :name, presence: true
     validates :status, presence: true
@@ -67,6 +69,12 @@ module Monitoring
     # job for every monitor in the `overdue` scope).
     def flag_missed!
       MissedPing.new(self).call
+    end
+
+    # Aggregate one day's up/down seconds + ping count into a UptimeDayStat
+    # (idempotent upsert). Called by RollupUptimeJob for each day not yet rolled.
+    def roll_up_uptime(day)
+      UptimeRollup.new(self).call(day)
     end
 
     private
