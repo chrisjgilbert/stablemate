@@ -553,6 +553,10 @@ travels end-to-end before any feature breadth is added.
   cap set low, the Nth+1 sign-up lands on the waitlist.
 
 ### Deferred to V2 (explicitly)
+> The live, triageable version of this list — grouped, with source refs and the
+> per-item rationale — is maintained in [`docs/roadmap.md`](roadmap.md). The prose
+> below is the original PRD record.
+
 HTTP/uptime monitoring (polling, response-time charts, TLS-expiry); public /
 shareable status pages (with custom domains & aggregated status sites);
 registrar adapters for other schedulers (`sidekiq-cron`, `good_job.cron`,
