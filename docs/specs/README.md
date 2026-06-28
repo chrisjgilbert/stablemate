@@ -70,11 +70,27 @@ is [`architecture.md`](architecture.md) — **its names are normative**. Deviate
 only with a one-line justification.
 
 ### Stack
-- **Rails 8**, PostgreSQL, **Solid Queue** (jobs + recurring), Solid Cable
-  (Turbo Streams), Solid Cache. Hotwire (Turbo + Stimulus), Tailwind CSS,
-  server-rendered (no SPA). Deploy via Kamal to Hetzner. (PRD §2.1.6)
+- **Latest stable Rails (8.x)**, PostgreSQL, **Solid Queue** (jobs + recurring),
+  Solid Cable (Turbo Streams), Solid Cache. Hotwire (Turbo + Stimulus), Tailwind
+  CSS, server-rendered (no SPA). Deploy via Kamal to Hetzner. (PRD §2.1.6)
 - **Rails 8 built-in authentication generator** (sessions + `has_secure_password`).
   No Devise, no OAuth. (PRD §3.1)
+
+### Use Rails, don't fight it
+Stablemate is a deliberately boring, idiomatic, vanilla Rails app (full rules in
+[`../../CLAUDE.md`](../../CLAUDE.md)):
+- **Latest stable Rails**; `rails new` defaults; don't swap defaults without a note.
+- **Rails commands over hand-rolling** — `bin/rails generate` (authentication,
+  model, migration, controller, mailer, job, stimulus, scaffold), `db:*`, Kamal
+  generators. Trim generated output; don't reinvent it.
+- **Hotwire-first, server-driven reactivity:** ERB → Turbo Frames → Turbo Streams
+  (broadcast over Solid Cable) → a small Stimulus controller only for client-side
+  bits. No SPA, no client polling, no JSON API for our own UI. DOM is the source
+  of truth.
+- **Classic vanilla patterns:** associations, scopes, validations, enums,
+  `has_secure_password`, `has_secure_token`/`generates_token_for`, `rate_limit`,
+  Action Mailer, Active Job, fixtures. If you're inventing a pattern, you're
+  probably missing a built-in.
 
 ### Testing
 - **Default framework: Minitest** (Rails 8 default) with fixtures and

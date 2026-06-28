@@ -42,8 +42,10 @@ waitlist + signup cap + ping rate-limiting (Phase 4); "still down" reminders.
 
 ## 2 · Data model / migrations
 
-- Run `bin/rails generate authentication` → `Session` + auth plumbing. Add
-  `verified_at` to `users` if not already present (Phase 0 added it).
+- Run `bin/rails generate authentication` → `Session` + auth plumbing; build on
+  the generated controllers/views, don't hand-roll auth. Add `verified_at` to
+  `users` if not already present (Phase 0 added it). Use `bin/rails generate
+  mailer`/`controller`/`migration` for the rest rather than writing files by hand.
 - New tables: **`Incident`**, **`Notification`** (full README §4 columns).
   - `Incident`: **partial unique index** on `monitor_id WHERE resolved_at IS NULL`
     — enforces "at most one open incident per monitor" at the DB level.

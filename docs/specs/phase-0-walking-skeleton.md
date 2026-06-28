@@ -13,11 +13,14 @@ Architecture: follow [`../../CLAUDE.md`](../../CLAUDE.md) +
 ## 1 · Scope & dependencies
 
 **In:**
-- New Rails 8 app: PostgreSQL, Solid Queue, Solid Cable, Solid Cache, Hotwire,
-  Tailwind, Propshaft.
-- Migrations for `User`, `Monitor` (heartbeat), `PingEvent` — full reconciled
-  columns from [`README.md` §4](README.md#4--reconciled-data-model-authoritative)
-  so later phases don't re-migrate.
+- New app via **`rails new`** on the **latest stable Rails (8.x)** with default
+  modern stack: PostgreSQL, Solid Queue, Solid Cable, Solid Cache, Hotwire,
+  Tailwind, Propshaft. Keep the generated defaults; `bin/rails db:prepare` runs.
+- Migrations (via `bin/rails generate model`/`migration`) for `User`, `Monitor`
+  (heartbeat), `PingEvent` — full reconciled columns from
+  [`README.md` §4](README.md#4--reconciled-data-model-authoritative) so later
+  phases don't re-migrate. Prefer `has_secure_token`/`generates_token_for` for
+  `ping_token` rather than hand-rolling generation.
 - A seeded user + one heartbeat monitor.
 - `GET|POST /ping/:ping_token` endpoint that records a `PingEvent` and updates
   the monitor's `last_ping_at` / `next_due_at`.

@@ -46,6 +46,41 @@ in [`docs/specs/`](docs/specs/).
    record methods (`Monitor.overdue.find_each(&:flag_missed!)`). The behaviour lives
    on the record, not in the job.
 
+## Use Rails, don't fight it
+
+The architecture above is *how we organise our own code*. Equally important is
+**not writing code Rails already gives us.** Stablemate is deliberately a boring,
+idiomatic, vanilla Rails app — the value is in the product, not in clever plumbing.
+
+1. **Run the latest stable Rails** (the 8.x line; track point releases). Generate
+   the app with `rails new` and the default modern stack (PostgreSQL, Propshaft,
+   Solid Queue/Cable/Cache, Hotwire, Tailwind). Don't pin to an old version or
+   swap defaults without a justified note.
+2. **Reach for a Rails command before hand-rolling.** `bin/rails generate
+   authentication`, `generate migration`, `generate model`, `generate controller`,
+   scaffolds, `generate mailer`, `generate job`, `generate stimulus`,
+   `bin/rails db:*`, Kamal's generators — use them. Hand-writing what a generator
+   produces (and drifting from the convention) is the anti-pattern. Review and
+   trim generated output, but start from it.
+3. **Hotwire-first; prefer server-driven reactivity.** Reach for tools in this
+   order: plain server-rendered ERB → **Turbo Frames** → **Turbo Streams**
+   (broadcast over Solid Cable for live status) → a **small Stimulus controller**
+   only for genuinely client-side bits (copy-to-clipboard, toggle submit, modal).
+   No SPA, no React/Vue, no client-side state store, no JSON-API-for-our-own-UI,
+   no client polling. The DOM is the source of truth; the server drives change.
+4. **Classic, vanilla patterns over bespoke abstractions.** Use Active Record
+   associations, scopes, validations, callbacks (sparingly), enums, concerns,
+   Action Mailer, Active Job, `has_secure_password`, signed/rotatable tokens
+   (`has_secure_token` / `generates_token_for`), `rate_limit`, fixtures — the
+   stuff in the Rails guides. If you're inventing a pattern, you're probably
+   missing a built-in. Prefer the framework's seam to a gem to a hand-rolled one.
+5. **Convention over configuration.** Standard REST routes, conventional names and
+   file locations, `bin/` scripts, credentials for secrets. Surprising is bad.
+
+(These compose with the architecture: an *operation object* is still plain Ruby on
+a record; a *sub-resource controller* is still standard REST. We're not adding a
+framework — we're using Rails as intended and keeping our own additions tiny.)
+
 ## The allowed exceptions (narrow, not loopholes)
 
 - **Top-level coordinators.** A process spanning several entities and owned by none
@@ -96,8 +131,9 @@ grep, because there is no junk drawer.
 
 ## Project specifics
 
-- **Stack:** Rails 8, PostgreSQL, Solid Queue / Solid Cable / Solid Cache, Hotwire
-  (Turbo + Stimulus), Tailwind, Propshaft. Server-rendered, no SPA. Deploy via Kamal.
+- **Stack:** latest stable Rails (8.x), PostgreSQL, Solid Queue / Solid Cable /
+  Solid Cache, Hotwire (Turbo + Stimulus), Tailwind, Propshaft. Server-rendered,
+  no SPA. Generated with `rails new` defaults; deploy via Kamal.
 - **Auth:** Rails 8 built-in authentication generator (sessions +
   `has_secure_password`). No Devise, no OAuth.
 - **Tests:** Minitest + fixtures + Capybara system tests (Rails 8 default). TDD —
