@@ -149,3 +149,49 @@ registration via the companion gem**, and the UI should show it. Please add:
 Unchanged and still approved: the design tokens, the StatusBadge / UptimeBar /
 MiniTicks components, the status-colour language, dark-mode tokens, and the
 Hotwire/Tailwind implementation notes from the original handoff.
+
+---
+
+# Round 3 addendum — Free plan, monitor cap, launch waitlist
+
+Your round-2 set is accepted as-is; everything above stands. This addendum covers
+three small additions from a pricing/launch decision. They affect **two existing
+screens** (sign-up, new-monitor) — no new screens.
+
+## R3.1 · One fix to the sign-up screen (required)
+The sign-up subtitle currently reads **"Three monitors free, forever."** That
+implied a plan we hadn't decided. We've now decided: **V1 is a single Free plan
+capped at 5 monitors per user, no payment.** Please update the subtitle to reflect
+**5** (e.g. *"Free — up to 5 monitors"* or *"5 monitors free while in beta"*).
+Keep it to one quiet line; no pricing table, no tiers — there is only one plan.
+
+## R3.2 · New state: sign-up at capacity → waitlist
+At launch we cap total sign-ups (cost protection). When the cap is hit, the
+**sign-up screen becomes a waitlist**:
+- Same centered-card layout and logo as the normal sign-up.
+- Headline like *"We're at capacity right now"*; one line explaining we're letting
+  people in gradually.
+- **Email field + "Join the waitlist"** button (no password field — no account is
+  created).
+- Success state: a calm *"You're on the list — we'll email you an invite."*
+- This is a *mode* of the sign-up screen, not a separate destination.
+
+## R3.3 · New state: monitor limit reached
+A Free user who already has 5 monitors can't create a 6th. Please design the
+**at-limit treatment**:
+- The **New monitor** action shows an at-limit state — e.g. the button is disabled
+  (or still clickable but) with an inline note: *"You're at the 5-monitor limit
+  for the Free plan."*
+- Keep the tone matter-of-fact and forward-looking (a paid tier is coming, but
+  **do not** design upgrade/pricing UI now — there's nothing to link to yet).
+- If easy, show the count somewhere unobtrusive on the dashboard (e.g. "4 / 5
+  monitors") so the limit isn't a surprise.
+
+## R3 screen impact
+| Screen | Change |
+|---|---|
+| Sign up | Fix subtitle to "5" (R3.1); add at-capacity **waitlist** mode (R3.2) |
+| New monitor / dashboard | Add **at-limit** state + optional "n / 5" count (R3.3) |
+
+Still **not** wanted in V1: pricing tables, plan-comparison UI, checkout, or any
+"upgrade" flow. One Free plan, one cap, one waitlist gate — nothing more.

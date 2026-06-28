@@ -56,8 +56,16 @@ yet.
 - **Heartbeat monitors only in V1.** HTTP/uptime monitoring is deferred to V2.
 - **Email-only alerting in V1**, architected so webhook channels are additive in
   V2.
-- **Multi-tenant from day one**, single owner per monitor. No teams, no billing,
-  no plan limits in V1.
+- **Multi-tenant from day one**, single owner per monitor. No teams in V1.
+- **One Free plan in V1, capped at 5 monitors/user; no payment/checkout.** V1
+  ships a single Free tier with a per-user monitor cap (`MAX_MONITORS_PER_USER =
+  5`, a tunable constant). A paid tier comes later; `User.plan` (default `free`)
+  exists now purely for forward-compatibility, so adding billing is non-
+  destructive. No Stripe, no checkout, no metering in V1.
+- **Launch signup cap to bound cost.** Free sign-ups are gated by a global,
+  config-driven limit (`SIGNUP_ACCOUNT_CAP`, default 100). When the account count
+  reaches it, the sign-up form switches to a **waitlist** (email capture), not a
+  hard close — protecting the hosting bill while building a launch list.
 - The `Monitor` model uses a `monitor_type` discriminator (`heartbeat` only for
   now) so HTTP monitors slot in later without a destructive migration.
 - **Gem execution tracking is built on ActiveJob**, not Solid Queue directly —
@@ -109,7 +117,9 @@ yet.
   owner's authenticated dashboard only. (See §9 for the rationale.)
 - **Webhook / Slack alert channels.** → V2 (architected for, not built).
 - **Teams, organisations, shared ownership, roles/permissions.** → later.
-- **Billing, plans, quotas, usage limits.**
+- **Payment / checkout / metered billing.** V1 has one Free plan and a fixed
+  5-monitor cap; there is no Stripe integration, no paid tier, no usage metering.
+  (The per-user monitor cap and the launch signup cap *are* in V1 — see §1.)
 - **Aggregated multi-monitor status sites, custom domains / CNAMEs.** → V2.
 - **Cron-expression schedule parsing** (e.g. validating that pings line up with
   a `* * * *` spec). V1 uses a simple expected-interval model.
@@ -135,10 +145,28 @@ The tenant. Owns everything.
 | `email_address` | string, unique, not null | Rails 8 auth convention |
 | `password_digest` | string | `has_secure_password` |
 | `verified_at` | datetime, null | Set when email confirmed; not enforced in V1 |
+| `plan` | string, not null, default `free` | Forward-compat for a paid tier; V1 is always `free` |
 | `created_at` / `updated_at` | datetime | |
 
 Auth uses the **Rails 8 built-in authentication generator** (sessions +
 `has_secure_password`). No Devise, no OAuth in V1.
+
+**Monitor cap.** A user may own at most `MAX_MONITORS_PER_USER` (5 in V1) active
+monitors, enforced on creation in both the UI and the API (§6.2). The cap is a
+constant keyed off `plan`, so a future paid tier raises it without a migration.
+
+### 3.1a `WaitlistSignup`
+Captures interested emails once the launch signup cap is reached.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | bigint PK | |
+| `email_address` | string, unique, not null | |
+| `created_at` | datetime | |
+
+When `User.count >= SIGNUP_ACCOUNT_CAP` (config, default 100), the sign-up flow
+creates a `WaitlistSignup` instead of a `User`. No account, no monitors, no
+login — just a list to invite from later. Raising the cap re-opens sign-ups.
 
 ### 3.2 `ApiKey`
 Long-lived bearer token used by the companion gem. A user may have several
@@ -313,8 +341,12 @@ On ping receipt for a monitor:
 ## 5. User Flows
 
 ### 5.1 Sign up & first monitor (manual)
-1. User registers (email + password); verification email sent (non-blocking).
-2. Creates a monitor: name, expected interval, grace period.
+1. User registers (email + password). **If the global signup cap is reached**,
+   the form instead captures a `WaitlistSignup` and shows a "you're on the list"
+   confirmation — no account is created (§3.1a). Otherwise a verification email is
+   sent (non-blocking).
+2. Creates a monitor: name, expected interval, grace period. **Blocked with an
+   "at your 5-monitor limit" message** once the cap is hit (§3.1).
 3. Stablemate shows the **unique ping URL** and a `curl` snippet.
 4. User wires the URL into their cron/job. First ping flips `pending → up`.
 
@@ -386,6 +418,13 @@ Content-Type: application/json
 Behaviour: upsert by `(user, registration_key)`. Returns each monitor with its
 **ping URL** so the gem can map job → URL locally.
 
+**Monitor cap handling (graceful, partial).** If the payload would take the user
+over `MAX_MONITORS_PER_USER`, sync registers up to the cap and returns the
+remainder under `skipped` with `reason: "limit_reached"` — it does **not** fail
+the whole request. Already-existing monitors always update (the cap only blocks
+*new* ones). The gem logs a warning for skipped jobs so the developer sees they
+need to raise their plan (later) or trim monitored jobs.
+
 ```
 200 OK
 {
@@ -394,6 +433,9 @@ Behaviour: upsert by `(user, registration_key)`. Returns each monitor with its
       "ping_url": "https://stablemate.dev/ping/<ping_token>",
       "status": "pending" },
     ...
+  ],
+  "skipped": [
+    { "registration_key": "cleanup_job", "reason": "limit_reached" }
   ]
 }
 ```
@@ -475,12 +517,13 @@ travels end-to-end before any feature breadth is added.
 - **Exit:** `curl` a ping URL in production → row persisted, timestamp moves.
 
 ### Phase 1 — Auth, monitors CRUD, detection & email alert
-- Rails 8 authentication (sign up / in / out); tenant scoping.
-- Monitor CRUD UI (name, interval, grace, pause/resume, token rotation).
+- Rails 8 authentication (sign up / in / out); tenant scoping; `User.plan`.
+- Monitor CRUD UI (name, interval, grace, pause/resume, token rotation), with the
+  **5-monitor per-user cap** enforced and an at-limit message.
 - Detection recurring job; `up/down/pending/paused` state machine; `Incident`.
 - Action Mailer `down` + `recovered` emails via a channel-agnostic dispatcher.
 - **Exit:** create a monitor, stop pinging, receive a down email; resume pinging,
-  receive recovery.
+  receive recovery. Creating a 6th monitor is blocked.
 
 ### Phase 2 — Uptime history (authenticated) + retention
 - Monitor detail view: 90-day uptime bar + recent ping events, owner-only.
@@ -497,11 +540,14 @@ travels end-to-end before any feature breadth is added.
   subscriber also fires on a non-Solid-Queue ActiveJob backend against a
   manually-created monitor.
 
-### Phase 4 — Hardening & polish
+### Phase 4 — Launch hardening & polish
+- **Launch signup cap + waitlist** (`SIGNUP_ACCOUNT_CAP`, `WaitlistSignup`, the
+  capacity-reached sign-up state) — cost protection for public launch.
 - Ping rate-limiting; abuse/opaque-error review; mailer deliverability
   (SPF/DKIM); dashboards/empty states; docs + install guide; backup/restore
   runbook for the Hetzner box.
-- **Exit:** documented, deployable, dog-fooded on Stablemate's own jobs.
+- **Exit:** documented, deployable, dog-fooded on Stablemate's own jobs; with the
+  cap set low, the Nth+1 sign-up lands on the waitlist.
 
 ### Deferred to V2 (explicitly)
 HTTP/uptime monitoring (polling, response-time charts, TLS-expiry); public /
@@ -535,6 +581,13 @@ acknowledgement; gem `prune`/reconciliation deletes; richer run-state
    derivation (class name vs. Solid Queue task key) so a recurring task and its
    ActiveJob `perform` resolve to the *same* monitor. Low risk, but pin it before
    the gem work in Phase 3.
+7. **Cap numbers.** `MAX_MONITORS_PER_USER = 5` and `SIGNUP_ACCOUNT_CAP = 100` are
+   placeholders chosen to bound cost at launch. Both are constants/config, trivial
+   to change — confirm the figures (and whether the global cap should re-open
+   automatically or stay manual).
+8. **Paused monitors and the cap.** Does a `paused` monitor count toward the
+   5-monitor limit? Proposal: **yes** (it still occupies a slot and could be
+   resumed); pausing is not a way to exceed the cap. Confirm.
 
 ---
 
