@@ -5,6 +5,27 @@ Covers database backup/restore, redeploys, and email deliverability (SPF/DKIM).
 
 ---
 
+## 0 · Pre-launch checklist
+
+Do these before opening sign-ups. (Feature backlog beyond V1 lives in
+[`roadmap.md`](roadmap.md), not here.)
+
+- [ ] **SMTP credentials set** — `bin/rails credentials:edit` (`smtp.address`,
+      `port`, `user_name`, `password`). Production fails loud at first send if
+      unset (no silent fallback). See §2.
+- [ ] **Deliverability verified** — SPF/DKIM/DMARC published and a real `down`
+      email lands in an inbox (not spam). See §2 "Verify".
+- [ ] **Backups running** — the nightly `pg_dump` cron is installed and a restore
+      has been rehearsed once. See §1.
+- [ ] **Dog-fooding on** — Stablemate is monitoring its own recurring jobs via
+      the gem. See §3.
+- [ ] **Rate limiter (optional)** — the ping limiter uses a per-process
+      `MemoryStore` (coarse bound, kept off the hot path). If a precise *global*
+      limit is wanted, move it to Solid Cache (accepting a per-ping cache round
+      trip). Documented in `app/controllers/pings_controller.rb`.
+
+---
+
 ## 1 · PostgreSQL backup & restore
 
 PostgreSQL runs as a container on the Hetzner host (managed by Kamal accessories).
