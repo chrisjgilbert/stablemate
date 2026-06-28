@@ -94,6 +94,33 @@ framework — we're using Rails as intended and keeping our own additions tiny.)
   additive in V2) is the example. The objection was never to the pattern — only to
   *defaulting* to it for ordinary one-shot operations that have an obvious owner.
 
+## Development workflow (skills)
+
+TDD is the loop; these skills are the checkpoints around it. Sub-agents should
+invoke them at the right moments rather than improvising equivalents.
+
+1. **TDD first.** For each scenario in the phase spec's Test Plan: write the
+   failing test → smallest change to green → refactor. Keep `bin/rails test`
+   (+ system tests) and the linter green continuously.
+2. **`/code-review` before pushing.** Run it on your working diff and address the
+   findings before opening/updating a PR. It reviews for correctness bugs and
+   reuse/simplification cleanups.
+3. **`/security-review` on sensitive surfaces.** Run it whenever a change touches
+   auth, sessions, `ping_token`/API-key handling, the public ping endpoint, the
+   `/api/v1` surface, or rate-limiting — i.e. most of Phases 1, 3 and 4. Tokens
+   are secrets; opaque `404`/`401`, constant-time compare, shown-once keys.
+4. **`/verify` (and `/run`) for real behaviour.** Green unit tests aren't the
+   whole story for a monitoring product — use `/verify`/`/run` to launch the app
+   and observe the actual flow: a ping flips `pending→up`, a stalled monitor
+   emails on `down`, recovery emails on the next ping, the dashboard renders.
+   Especially at each phase's Acceptance Criteria.
+5. **`/init` to keep this file current.** As the codebase grows, use `/init` (or
+   just edit) so `CLAUDE.md` keeps reflecting reality — stale conventions rot.
+6. **SessionStart hook.** Web sessions auto-prepare the app (deps, DB, a quick
+   test/lint sanity check) via `.claude/hooks/` — see
+   [`docs/specs/README.md`](docs/specs/README.md) and the hook script. Don't
+   duplicate that setup by hand each session.
+
 ## Deviate, but say so
 
 This convention is a starting point, not dogma. When something genuinely doesn't
