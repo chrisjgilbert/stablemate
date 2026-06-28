@@ -44,6 +44,9 @@ class User
       def call(entries:)
         registered = []
         skipped = []
+        # Count the user's slots once, then decrement locally per successful create
+        # (updates never consume a slot), instead of a fresh COUNT per new entry.
+        @slots = @user.remaining_monitor_slots
 
         Array(entries).each do |raw|
           entry = Entry.from(raw)
@@ -70,11 +73,11 @@ class User
       end
 
       private
-        # remaining_monitor_slots queries the DB live, so each create immediately
-        # shrinks it — no need to track in-run creations separately. Updates to
-        # existing monitors never consume a slot (they're handled above).
+        # Slots remaining for NEW monitors this run. Seeded once from the live
+        # count and decremented by persist_create on each successful creation;
+        # updates to existing monitors never consume a slot.
         def room_for_more?
-          @user.remaining_monitor_slots.positive?
+          @slots.positive?
         end
 
         # Cheap pre-check of the attributes the Monitor model requires for a new
@@ -111,6 +114,7 @@ class User
             status: "pending"
           )
           if monitor.persisted?
+            @slots -= 1
             registered << monitor
           else
             skipped << skip(entry, "invalid")

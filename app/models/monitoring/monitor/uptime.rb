@@ -57,9 +57,7 @@ module Monitoring
       # :no_data), oldest → newest. Past days come from UptimeDayStat; the final
       # element (today) is computed live so the bar updates intraday.
       def uptime_series(days: 90)
-        stats = uptime_day_stats
-                  .where(day: (Date.current - (days - 1))..Date.current)
-                  .index_by(&:day)
+        stats = windowed_day_stats(days).index_by(&:day)
 
         (0...days).map do |offset|
           day = Date.current - (days - 1 - offset)
@@ -72,13 +70,16 @@ module Monitoring
       end
 
       # Overall uptime over the window: sum(up) / sum(up + down), with no-data days
-      # excluded from the denominator. Returns nil when nothing was measured.
+      # excluded from the denominator (they contribute 0/0). Returns nil when
+      # nothing was measured. Derived from the same rows uptime_series loads, so the
+      # detail panel renders both off ONE query.
       def uptime_percent(days: 90)
-        totals = uptime_day_stats
-                   .where(day: (Date.current - (days - 1))..Date.current)
-                   .pick(Arel.sql("COALESCE(SUM(up_seconds), 0)"), Arel.sql("COALESCE(SUM(down_seconds), 0)"))
+        up = down = 0
+        windowed_day_stats(days).each do |stat|
+          up   += stat.up_seconds
+          down += stat.down_seconds
+        end
 
-        up, down = totals
         measured = up + down
         return nil if measured.zero?
 
@@ -104,8 +105,8 @@ module Monitoring
       def recent_events(limit: 12)
         events = []
 
-        ping_events.order(received_at: :desc).limit(limit).each do |ping|
-          events << Event.new(:ping, ping.received_at, "Ping received", ping.duration_ms)
+        ping_events.order(received_at: :desc).limit(limit).pluck(:received_at, :duration_ms).each do |received_at, duration_ms|
+          events << Event.new(:ping, received_at, "Ping received", duration_ms)
         end
 
         incidents.order(started_at: :desc).limit(limit).each do |incident|
@@ -120,15 +121,22 @@ module Monitoring
       Event = Struct.new(:kind, :at, :label, :duration_ms)
 
       private
+        # The rolled-up day stats for the window, loaded once and memoized so the
+        # detail panel's uptime_series + uptime_percent share a single query.
+        def windowed_day_stats(days)
+          (@windowed_day_stats ||= {})[days] ||=
+            uptime_day_stats.where(day: (Date.current - (days - 1))..Date.current).to_a
+        end
+
         # The live status of the current, not-yet-rolled day, derived from the
         # monitor's present state: paused/pending → no-data; an open incident today
         # → down (or partial if the day also saw up time); otherwise up.
         def live_today_status
           return :no_data if paused? || pending?
 
-          open_incident = incidents.open.first
-          if open_incident
-            started_today = open_incident.started_at.to_date >= Date.current
+          incident = open_incident
+          if incident
+            started_today = incident.started_at.to_date >= Date.current
             # Down all of today so far if the incident predates today; otherwise it
             # only covers part of today → partial.
             started_today ? :partial : :down

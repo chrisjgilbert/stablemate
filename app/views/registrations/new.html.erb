@@ -13,13 +13,7 @@
 
   <div class="rounded-xl border border-border bg-surface p-6 shadow-sm">
     <% if @waitlist %>
-      <% if @waitlist_signup&.errors&.any? %>
-        <div class="mb-4 rounded-lg border border-down-bg bg-down-bg/60 px-3 py-2 text-[12px] text-down-text">
-          <ul class="list-disc list-inside">
-            <% @waitlist_signup.errors.full_messages.each do |msg| %><li><%= msg %></li><% end %>
-          </ul>
-        </div>
-      <% end %>
+      <%= render "shared/form_errors", record: @waitlist_signup %>
 
       <%= form_with url: sign_up_path, class: "space-y-4", data: { testid: "waitlist-form" } do |form| %>
         <div>
@@ -31,13 +25,7 @@
               class: "w-full h-[38px] rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
       <% end %>
     <% else %>
-      <% if @user&.errors&.any? %>
-        <div class="mb-4 rounded-lg border border-down-bg bg-down-bg/60 px-3 py-2 text-[12px] text-down-text">
-          <ul class="list-disc list-inside">
-            <% @user.errors.full_messages.each do |msg| %><li><%= msg %></li><% end %>
-          </ul>
-        </div>
-      <% end %>
+      <%= render "shared/form_errors", record: @user %>
 
       <%= form_with url: sign_up_path, class: "space-y-4" do |form| %>
         <div>

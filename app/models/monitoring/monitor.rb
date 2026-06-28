@@ -45,18 +45,22 @@ module Monitoring
     # with no client polling. (Broadcasts are wired explicitly from the
     # operations so they fire exactly on a real state change, not every save.)
     def broadcast_status_update
-      broadcast_replace_later_to(
-        self,
-        target: ActionView::RecordIdentifier.dom_id(self, :row),
-        partial: "monitors/row",
-        locals: { monitor: self }
-      )
-      broadcast_replace_later_to(
-        self,
-        target: ActionView::RecordIdentifier.dom_id(self, :badge),
-        partial: "monitors/badge",
-        locals: { monitor: self }
-      )
+      %i[row badge].each do |fragment|
+        broadcast_replace_later_to(
+          self,
+          target: ActionView::RecordIdentifier.dom_id(self, fragment),
+          partial: "monitors/#{fragment}",
+          locals: { monitor: self }
+        )
+      end
+    end
+
+    # The monitor's currently-open incident, if any. The open-incident invariant
+    # (the partial unique index on monitor_id WHERE resolved_at IS NULL) guarantees
+    # at most one, so callers rely on this single accessor rather than each
+    # re-expressing `incidents.open.first`.
+    def open_incident
+      incidents.open.first
     end
 
     # Record a ping: persist a PingEvent, advance the timestamps, transition, and

@@ -3,8 +3,8 @@
   a Copy button (Stimulus clipboard controller). Used for ping URLs and curl.
   Locals: value (string), dark (bool, for curl/keys), label (optional aria label).
 %>
-<% dark ||= false %>
-<% label ||= "value" %>
+<% dark = local_assigns.fetch(:dark, false) %>
+<% label = local_assigns.fetch(:label, "value") %>
 <div data-controller="clipboard"
      class="flex items-stretch gap-2 rounded-lg overflow-hidden border <%= dark ? "border-[#26262e]" : "border-border" %>">
   <input data-clipboard-target="source" type="text" readonly value="<%= value %>"
