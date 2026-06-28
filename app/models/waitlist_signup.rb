@@ -3,10 +3,10 @@
 # Created by the Signup coordinator's at-capacity branch; never edited (no
 # updated_at), so a duplicate email is a friendly no-op rather than an error.
 class WaitlistSignup < ApplicationRecord
+  include EmailNormalization
+
   # No updated_at column (write-once); tell Active Record not to maintain it.
   self.record_timestamps = false
-
-  normalizes :email_address, with: ->(e) { e.to_s.strip.downcase }
 
   validates :email_address, presence: true, uniqueness: { case_sensitive: false }
 

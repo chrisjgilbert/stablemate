@@ -1,0 +1,12 @@
+<%#
+  Validation-errors block for a form, shared across sign-up/waitlist (and any
+  other form that wants the standard down-tinted error list).
+  Locals: record (an Active Record object, may be nil).
+%>
+<% if record&.errors&.any? %>
+  <div class="mb-4 rounded-lg border border-down-bg bg-down-bg/60 px-3 py-2 text-[12px] text-down-text">
+    <ul class="list-disc list-inside">
+      <% record.errors.full_messages.each do |msg| %><li><%= msg %></li><% end %>
+    </ul>
+  </div>
+<% end %>

@@ -64,7 +64,7 @@ module Monitoring
           # recovery alert — "exactly one recovered email on resolution" means no
           # incident-less recovery emails (spec §3.7). Returns the notification to
           # dispatch, or nil.
-          resolved = @monitor.incidents.open.first
+          resolved = @monitor.open_incident
           return nil unless resolved
 
           resolved.resolve!(at: received_at)
