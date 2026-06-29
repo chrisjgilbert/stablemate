@@ -84,6 +84,19 @@ class Monitoring::MonitorTest < ActiveSupport::TestCase
     refute @user.monitors.build(name: "Over", **ATTRS).valid?
   end
 
+  # Caps OFF (issue #16): with no cap configured, creating past the old limit is
+  # allowed — the within_monitor_cap validation never fires.
+  test "with the cap OFF, a user can create monitors past the old limit" do
+    stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
+      6.times { |i| @user.monitors.create!(name: "M#{i}", **ATTRS) }
+
+      sixth_plus = @user.monitors.build(name: "Seventh", **ATTRS)
+      assert sixth_plus.valid?
+      assert sixth_plus.save
+      assert_equal 7, @user.monitors.count
+    end
+  end
+
   # Scenario 11 — editing an existing monitor at the cap is allowed.
   test "editing an existing monitor when at the cap succeeds" do
     Stablemate::MAX_MONITORS_PER_USER.times { |i| @user.monitors.create!(name: "M#{i}", **ATTRS) }

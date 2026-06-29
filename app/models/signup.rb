@@ -14,8 +14,11 @@ class Signup
   attr_reader :record
 
   # Whether new sign-ups are currently gated to the waitlist. The controller asks
-  # this to decide which mode of the sign-up screen to render.
+  # this to decide which mode of the sign-up screen to render. With no signup cap
+  # configured (issue #16) sign-ups are always open and there is no waitlist.
   def self.at_capacity?
+    return false unless Stablemate.signup_cap_enabled?
+
     User.count >= Stablemate::SIGNUP_ACCOUNT_CAP
   end
 

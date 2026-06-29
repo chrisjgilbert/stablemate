@@ -85,6 +85,19 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "up", monitor.reload.status
   end
 
+  # Caps OFF (issue #16): the gem sync never returns skipped: limit_reached when no
+  # cap is configured — all well-formed new keys register.
+  test "with the cap OFF, sync registers every key and skips nothing for limit" do
+    stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
+      sync(%w[a b c d e f].map { |k| entry(k) })
+      assert_response :success
+
+      body = JSON.parse(response.body)
+      assert_equal 6, body["monitors"].size
+      assert_empty body["skipped"]
+    end
+  end
+
   test "sync requires a bearer token" do
     post sync_api_v1_monitors_url, params: { monitors: [] }, as: :json
     assert_response :unauthorized
