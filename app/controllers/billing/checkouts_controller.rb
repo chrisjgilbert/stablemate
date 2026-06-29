@@ -21,7 +21,9 @@ module Billing
       )
 
       redirect_to session.url, allow_other_host: true, status: :see_other
-    rescue ::Stripe::StripeError
+    rescue ::Stripe::StripeError, Pay::Error
+      # Pay raises ::Stripe::StripeError straight through for Checkout, but wraps
+      # other failures in Pay::Error — catch both so no Stripe hiccup 500s the user.
       redirect_back_or_to billing_subscription_path, alert: "Couldn't start checkout. Please try again."
     end
   end

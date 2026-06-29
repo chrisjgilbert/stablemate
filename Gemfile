@@ -74,4 +74,8 @@ group :test do
   # Cuprite (Ferrum/CDP) drives the preinstalled Chromium directly when Selenium
   # Manager's chromedriver download is blocked in the sandbox.
   gem "cuprite", require: false
+  # Block real outbound HTTP in the suite (localhost stays open for Capybara/
+  # Puma/Cuprite). Stripe paths are exercised end-to-end against stubbed
+  # api.stripe.com responses, never the live API.
+  gem "webmock", require: false
 end

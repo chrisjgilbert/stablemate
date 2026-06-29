@@ -2,10 +2,13 @@ require "application_system_test_case"
 
 # Hosted-tier billing, browser-driven (issue #19). We toggle the billing gate by
 # stubbing the Stablemate Stripe keys (the in-process Capybara app sees the stub,
-# exactly as ConfigGatedCapsTest toggles the #16 caps). Stripe itself is never
-# hit: Checkout is stubbed and the plan is flipped the way production does it —
-# through the verified-webhook sync on the user's Pay subscription mirror.
+# exactly as ConfigGatedCapsTest toggles the #16 caps). The real network is locked
+# down (WebMock): the upgrade plan-flip is driven the way production does it —
+# through the verified-webhook sync — and the downgrade's Stripe cancel runs
+# end-to-end against a stubbed api.stripe.com response (StripeApiStubs).
 class BillingTest < ApplicationSystemTestCase
+  include StripeApiStubs
+
   ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze
   FREE  = Stablemate::FREE_PLAN_MONITOR_LIMIT
   PRO   = Stablemate::PRO_PLAN_MONITOR_LIMIT
@@ -54,6 +57,15 @@ class BillingTest < ApplicationSystemTestCase
     with_billing_enabled do
       @user.update!(plan: "pro")
       monitors = (FREE + 2).times.map { |i| @user.monitors.create!(name: "Keep#{i}", **ATTRS) }
+      # A real active subscription mirror so the downgrade reaches Stripe to cancel.
+      sub_id = "sub_sys_#{SecureRandom.hex(4)}"
+      customer = @user.set_payment_processor(:stripe)
+      customer.update!(processor_id: "cus_sys_#{SecureRandom.hex(4)}")
+      customer.subscriptions.create!(
+        name: "pro", processor_id: sub_id,
+        processor_plan: "price_pro", status: "active", quantity: 1
+      )
+      stub_stripe_subscription_cancel(sub_id)
 
       sign_in @user
       visit billing_subscription_path
@@ -68,6 +80,8 @@ class BillingTest < ApplicationSystemTestCase
       click_on "Suspend the rest & downgrade"
 
       assert_current_path billing_subscription_path
+      # The browser flow drove the real Stripe cancel end-to-end (against the stub).
+      assert_requested :delete, %r{https://api\.stripe\.com/v1/subscriptions/#{sub_id}}
       assert_equal 2, @user.monitors.where(status: "suspended").count
       assert_equal FREE, @user.monitors.counting_toward_cap.count
 

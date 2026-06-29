@@ -9,7 +9,9 @@ module Billing
         return_url: billing_subscription_url
       )
       redirect_to session.url, allow_other_host: true, status: :see_other
-    rescue ::Stripe::StripeError
+    rescue ::Stripe::StripeError, Pay::Error
+      # Catch Pay's wrapped errors too (see CheckoutsController) so a Stripe hiccup
+      # surfaces a retry message instead of an unhandled 500.
       redirect_back_or_to billing_subscription_path, alert: "Couldn't open the billing portal. Please try again."
     end
   end

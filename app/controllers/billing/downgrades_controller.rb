@@ -18,9 +18,12 @@ module Billing
       else
         render_picker(status: :unprocessable_entity, alert: "Choose exactly #{Stablemate::FREE_PLAN_MONITOR_LIMIT} monitors to keep active.")
       end
-    rescue ::Stripe::StripeError
-      # Stripe is cancelled before any monitor is suspended (User::Downgrade#to_free!),
-      # so a failure here leaves nothing half-done. Surface a generic retry message.
+    rescue ::Stripe::StripeError, Pay::Error
+      # The cancel goes through Pay's cancel_now!, which wraps Stripe failures in
+      # Pay::Error (not ::Stripe::StripeError) — catch both or a real cancel failure
+      # escapes as an unhandled 500. Stripe is cancelled before any monitor is
+      # suspended (User::Downgrade#to_free!), so a failure here leaves nothing
+      # half-done. Surface a generic retry message.
       render_picker(status: :service_unavailable, alert: "Couldn't complete the downgrade. Please try again.")
     end
 
