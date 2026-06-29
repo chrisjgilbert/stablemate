@@ -1,6 +1,6 @@
 class User < ApplicationRecord
   include EmailNormalization
-  include Plan, Verification, MonitorSync
+  include Plan, Verification, MonitorSync, Subscription
 
   has_secure_password
   has_many :sessions, dependent: :destroy

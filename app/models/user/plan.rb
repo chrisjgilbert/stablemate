@@ -1,31 +1,64 @@
 class User
-  # Plan-derived monitor capacity. Keyed off `plan`; in V1 every plan is "free".
-  # The cap is config-gated (issue #16): with no cap configured the limit is
-  # unlimited (a self-hoster has no cap); the managed instance sets a finite cap
-  # via env. Paused monitors still occupy a slot (locked decision #8), so the
-  # count is unconditional. Backs Monitoring::Monitor#within_monitor_cap.
+  # Plan-derived monitor capacity.
+  #
+  # Two regimes, chosen by the billing config-gate (issue #19):
+  #
+  #   * billing ENABLED (managed instance, Stripe keys set): the cap is
+  #     *plan-derived* — Free = 5, Pro = 100 — keyed off `plan`, which is itself
+  #     only ever changed by a verified Stripe webhook (User::Subscription).
+  #   * billing DISABLED (self-host default, issue #16): the env-driven cap
+  #     stands unchanged — unset/0 ⇒ unlimited.
+  #
+  # `suspended` monitors (plan downgrade, PRD §3.3) never count toward the cap;
+  # `paused` ones still do (locked decision #8). Backs
+  # Monitoring::Monitor#within_monitor_cap.
   module Plan
     extend ActiveSupport::Concern
 
-    # The number of monitors this user may own, or nil when the cap is OFF
-    # (unlimited). (One plan today; this is the seam for paid tiers later.)
+    FREE = "free".freeze
+    PRO  = "pro".freeze
+
+    def free? = plan == FREE
+    def pro?  = plan == PRO
+
+    # The number of monitors this user may own, or nil when there is no cap
+    # (unlimited — self-host with the env cap OFF).
     def monitor_limit
-      Stablemate::MAX_MONITORS_PER_USER if Stablemate.monitor_cap_enabled?
+      if Stablemate.billing_enabled?
+        pro? ? Stablemate::PRO_PLAN_MONITOR_LIMIT : Stablemate::FREE_PLAN_MONITOR_LIMIT
+      elsif Stablemate.monitor_cap_enabled?
+        Stablemate::MAX_MONITORS_PER_USER
+      end
     end
 
-    # When the cap is OFF, a user is never at the cap.
+    # When there's no cap, a user is never at the cap. Suspended monitors are
+    # excluded from the count.
     def at_monitor_cap?
-      return false unless Stablemate.monitor_cap_enabled?
+      limit = monitor_limit
+      return false if limit.nil?
 
-      monitors.count >= monitor_limit
+      active_monitor_count >= limit
     end
 
-    # When the cap is OFF, slots are effectively infinite — Float::INFINITY keeps
-    # callers (e.g. the gem sync) decrementing without ever running out.
+    # Float::INFINITY when uncapped keeps callers (e.g. the gem sync) decrementing
+    # without ever running out. Never negative.
     def remaining_monitor_slots
-      return Float::INFINITY unless Stablemate.monitor_cap_enabled?
+      limit = monitor_limit
+      return Float::INFINITY if limit.nil?
 
-      [ monitor_limit - monitors.count, 0 ].max
+      [ limit - active_monitor_count, 0 ].max
     end
+
+    # How many cap slots this user is over the Free cap by (>= 0). Drives the
+    # gated "choose your 5" downgrade (PRD §5.6): how many must be suspended.
+    def over_free_cap_by
+      [ active_monitor_count - Stablemate::FREE_PLAN_MONITOR_LIMIT, 0 ].max
+    end
+
+    private
+      # Monitors that occupy a cap slot — everything except `suspended`.
+      def active_monitor_count
+        monitors.counting_toward_cap.count
+      end
   end
 end

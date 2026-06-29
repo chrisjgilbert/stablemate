@@ -28,6 +28,11 @@
             <span class="font-semibold tracking-tight">Stablemate</span>
           <% end %>
           <div class="flex items-center gap-1">
+            <% if billing_enabled? %>
+              <%= link_to "Billing", billing_subscription_path,
+                    class: "h-8 px-3 inline-flex items-center rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline",
+                    data: { testid: "nav-billing" } %>
+            <% end %>
             <%= link_to "API keys", settings_api_keys_path,
                   class: "h-8 px-3 inline-flex items-center rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline" %>
             <%= button_to "Sign out", session_path, method: :delete,

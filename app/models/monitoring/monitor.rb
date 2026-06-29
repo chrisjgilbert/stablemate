@@ -81,6 +81,11 @@ module Monitoring
       UptimeRollup.new(self).call(day)
     end
 
+    # Plan-downgrade (de)activation (hosted tier only — issue #19). A suspended
+    # monitor is retained but not monitored/alerted and excluded from the cap.
+    def suspend!    = Suspension.new(self).suspend!
+    def reactivate! = Suspension.new(self).reactivate!
+
     private
       # A user may own at most MAX_MONITORS_PER_USER monitors — paused ones still
       # occupy a slot (locked decision #8). Only blocks creation; editing an

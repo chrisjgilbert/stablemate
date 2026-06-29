@@ -52,7 +52,7 @@ module MonitorsHelper
   # the wording (and the "Free plan" label, the seam for paid tiers) lives in one
   # place. (phase-4 §3.2 — matter-of-fact, no upgrade/pricing.)
   def monitor_limit_note(user)
-    "You're at the #{user.monitor_limit}-monitor limit for the Free plan."
+    "You're at the #{user.monitor_limit}-monitor limit for the #{user.pro? ? "Pro" : "Free"} plan."
   end
 
   # Standard mono UTC timestamp used across the events list and settings.

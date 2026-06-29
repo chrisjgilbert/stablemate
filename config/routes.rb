@@ -29,6 +29,23 @@ Rails.application.routes.draw do
     resources :api_keys, only: %i[index create destroy]
   end
 
+  # Hosted-tier billing (issue #19). The routes exist, but every billing
+  # controller is gated by Stablemate.billing_enabled? (Billing::BaseController):
+  # on a keyless self-host instance the whole namespace answers an opaque 404, so
+  # there is no billing surface to probe and no UI ever links here. Custom verbs
+  # are replaced by RESTful sub-resources: upgrade = create a checkout; manage
+  # card = create a portal session; downgrade = create the choose-5 selection.
+  namespace :billing do
+    resource :subscription, only: :show, controller: "subscriptions"
+    resource :checkout, only: :create, controller: "checkouts"
+    resource :portal_session, only: :create, controller: "portal_sessions"
+    # The gated "choose your 5" downgrade (PRD §5.6): show the picker, then
+    # commit the chosen set. A singular sub-resource of the subscription.
+    resource :downgrade, only: %i[new create], controller: "downgrades"
+    # Stripe's signed, idempotent webhook — the only writer of User.plan.
+    resource :webhook, only: :create, controller: "webhooks"
+  end
+
   # Bearer-authed JSON API for the companion gem. Tenant-scoped to the API key's
   # owner. Sync + read + token rotation; paths kept per the PRD. (architecture.md §7)
   namespace :api do

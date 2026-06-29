@@ -1,0 +1,41 @@
+<% content_for :title, "Billing" %>
+
+<div class="mb-6">
+  <h1 class="text-xl font-semibold tracking-tight">Billing</h1>
+  <p class="mt-1 text-[13px] text-muted">Manage your plan and payment details.</p>
+</div>
+
+<div class="rounded-xl border border-border bg-surface p-5 shadow-sm" data-testid="billing-panel">
+  <div class="flex items-center justify-between">
+    <div>
+      <div class="text-[13px] text-muted">Current plan</div>
+      <div class="text-lg font-semibold" data-testid="current-plan">
+        <%= @user.pro? ? "Pro" : "Free" %>
+      </div>
+      <div class="mt-1 font-mono text-[13px] text-muted">
+        Up to <%= @user.monitor_limit %> monitors
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <% if @user.pro? %>
+        <%= button_to "Manage card & invoices", billing_portal_session_path,
+              class: "h-8 px-3 inline-flex items-center rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline border border-border" %>
+        <%= link_to "Downgrade to Free", new_billing_downgrade_path,
+              class: "h-8 px-3 inline-flex items-center rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline border border-border",
+              data: { testid: "downgrade-link" } %>
+      <% else %>
+        <%= button_to "Upgrade to Pro", billing_checkout_path,
+              class: "h-8 px-3 inline-flex items-center rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover",
+              data: { testid: "upgrade-button" } %>
+      <% end %>
+    </div>
+  </div>
+
+  <% if @user.must_choose_downgrade? %>
+    <div class="mt-4 rounded-lg border border-down-bg bg-down-bg/40 px-4 py-3 text-[13px] text-down-text" role="alert" data-testid="choose-five-lock">
+      Your plan dropped to Free while you have more than <%= Stablemate::FREE_PLAN_MONITOR_LIMIT %> active monitors.
+      <%= link_to "Choose which #{Stablemate::FREE_PLAN_MONITOR_LIMIT} to keep active", new_billing_downgrade_path, class: "font-semibold underline" %>.
+    </div>
+  <% end %>
+</div>
