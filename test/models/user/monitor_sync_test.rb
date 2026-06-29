@@ -147,6 +147,19 @@ class User::MonitorSyncTest < ActiveSupport::TestCase
     assert_equal 3600, @user.monitors.find_by(registration_key: "keep").expected_interval_seconds
   end
 
+  # Caps OFF (issue #16): with no cap configured, the gem sync never skips for
+  # limit_reached — every well-formed new key registers, however many there are.
+  test "with the cap OFF, sync never skips for limit_reached" do
+    stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
+      keys = %w[a b c d e f g h] # bob already owns 1 fixture monitor -> 9 total
+      result = @user.sync_monitors(entries: keys.map { |k| entry(k) })
+
+      assert_equal keys.size, result[:registered].size
+      assert_empty result[:skipped]
+      assert_equal keys.size + 1, @user.monitors.count
+    end
+  end
+
   test "cannot mass-assign protected attributes through the payload" do
     result = @user.sync_monitors(entries: [
       { registration_key: "evil", name: "Evil", expected_interval_seconds: 60,

@@ -1,12 +1,13 @@
 <% content_for :title, "Monitors" %>
 <% count = @monitors.size # relation already loaded; no extra COUNT query %>
-<% at_cap = count >= current_user.monitor_limit %>
+<% at_cap = current_user.at_monitor_cap? %>
 
 <div class="flex items-center justify-between mb-6">
   <div class="flex items-center gap-3">
     <h1 class="text-xl font-semibold tracking-tight">Monitors</h1>
-    <span class="font-mono text-[13px] text-muted"
-          data-testid="monitor-count"><%= count %> / <%= current_user.monitor_limit %></span>
+    <span class="font-mono text-[13px] text-muted" data-testid="monitor-count">
+      <%= current_user.monitor_limit ? "#{count} / #{current_user.monitor_limit}" : count %>
+    </span>
   </div>
 
   <% if at_cap %>

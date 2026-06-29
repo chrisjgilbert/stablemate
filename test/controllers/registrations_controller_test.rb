@@ -109,6 +109,27 @@ class RegistrationsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # Caps OFF (issue #16, self-host default): the waitlist mode is unreachable even
+  # when the account count exceeds what would have been the managed cap; GET
+  # renders the normal form and POST creates a User + session.
+  test "with the signup cap OFF, the waitlist is never rendered and signup creates a user" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, 0) do
+      get sign_up_path
+      assert_response :success
+      assert_select "input[type=password]"
+      assert_select "[data-testid=waitlist-form]", count: 0
+
+      assert_difference -> { User.count }, 1 do
+        assert_no_difference -> { WaitlistSignup.count } do
+          post sign_up_path, params: {
+            email_address: "self-host@example.com", password: "password1234", password_confirmation: "password1234"
+          }
+        end
+      end
+      assert cookies[:session_id].present?
+    end
+  end
+
   # Scenario 5 — raising the cap re-opens normal sign-up.
   test "raising the cap re-opens normal sign-up" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do

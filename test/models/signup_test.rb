@@ -71,4 +71,21 @@ class SignupTest < ActiveSupport::TestCase
       assert result.persisted?
     end
   end
+
+  # Caps OFF (issue #16, self-host default): sign-ups always open, never waitlisted,
+  # even when the account count exceeds what would have been the managed cap.
+  test "with the signup cap OFF, at_capacity? is false and run always creates a User" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, 0) do
+      refute Signup.at_capacity?
+
+      result = nil
+      assert_no_difference -> { WaitlistSignup.count } do
+        assert_difference -> { User.count }, 1 do
+          result = Signup.new(email: "always-open@example.com", password: "password1234").run
+        end
+      end
+      assert_kind_of User, result
+      assert result.persisted?
+    end
+  end
 end

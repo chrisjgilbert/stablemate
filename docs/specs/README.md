@@ -60,7 +60,7 @@ all specs:
 | 4 | Gem ping reliability | **Fire-and-forget** — best-effort single async request, errors swallowed, never blocks the job. A transient outage is absorbed by the grace period. |
 | 5 | Irregular-cron interval | **Largest gap** — `expected_interval_seconds` = the longest gap between consecutive runs; user can tighten via UI override. |
 | 6 | ActiveJob → monitor mapping key | **Solid Queue task key** — `registration_key` = the `recurring.yml` task key. The registrar (Layer 2) writes it; the execution subscriber (Layer 1) resolves a job's `perform.active_job` back to that key. See Phase 3 §"Mapping". |
-| 7 | Cap numbers | `MAX_MONITORS_PER_USER = 5`, `SIGNUP_ACCOUNT_CAP = 100`. Both config constants. Global cap re-opens **manually** (raise the constant). |
+| 7 | Cap numbers | `MAX_MONITORS_PER_USER` / `SIGNUP_ACCOUNT_CAP`, **env-driven, default 0 ⇒ OFF/unlimited** (issue #16). Self-host has no caps/waitlist; the managed instance sets them (e.g. 5 / 100). When ON, the global cap re-opens **manually** (raise the env value). |
 | 8 | Paused monitors vs. cap | **Count toward the cap.** A `paused` monitor still occupies a slot. Pausing is not a way to exceed the limit. |
 
 ---
@@ -133,16 +133,25 @@ system tests (must ship)"** — those are Definition-of-Done gates, not optional
 - One robust test per flow — not every field permutation (that's `[model]`/`[request]`).
 
 ### Money / cost-control constants (single source)
-Define in `config/stablemate.rb` (a small config object or `Rails.application.config.x.stablemate`):
+Define in `config/initializers/stablemate.rb` (the `Stablemate` module, mirrored to
+`Rails.application.config.x.stablemate`):
 ```ruby
-MAX_MONITORS_PER_USER   = 5
-SIGNUP_ACCOUNT_CAP      = 100
+MAX_MONITORS_PER_USER   = ENV.fetch("STABLEMATE_MAX_MONITORS_PER_USER", 0).to_i  # 0 ⇒ unlimited
+SIGNUP_ACCOUNT_CAP      = ENV.fetch("STABLEMATE_SIGNUP_ACCOUNT_CAP", 0).to_i     # 0 ⇒ always open
 DETECTION_INTERVAL      = 30.seconds
 PING_RETENTION          = 90.days
 DEFAULT_GRACE_FRACTION  = 0.15   # gem-derived grace = 15% of interval, min 5.minutes
 ```
+The two caps are **config-gated and default to OFF / unlimited** (issue #16): a
+self-hoster has no per-user monitor cap and no signup cap/waitlist; the managed
+instance switches them on via env. Use `Stablemate.monitor_cap_enabled?` /
+`Stablemate.signup_cap_enabled?` (true only for a positive value) rather than
+re-deriving the "0 ⇒ unlimited" rule at each call site.
+
 Tests assert behaviour **relative to these constants**, never hard-coded numbers,
-so changing a constant doesn't break the suite.
+so changing a constant doesn't break the suite. The test environment sets the env
+to the managed values (5 / 100) so the default suite exercises the caps-ON path;
+caps-OFF tests stub the constants to 0.
 
 ### Security defaults
 - `ping_token` and `ApiKey` raw tokens are **secrets**: tokens are random,

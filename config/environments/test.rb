@@ -3,6 +3,15 @@
 # your test database is "scratch space" for the test suite and is wiped
 # and recreated between test runs. Don't rely on the data there!
 
+# Caps are config-gated and default to OFF/unlimited at runtime (issue #16). The
+# suite exercises the managed-mode "caps ON" behaviour by default (5 monitors /
+# 100 accounts). This file is evaluated before config/initializers, so setting the
+# env the cap initializer reads here makes the gate ON for every test entry point
+# (unit, request, AND the in-process system-test server). Caps-OFF tests stub the
+# Stablemate constants to 0 inline.
+ENV["STABLEMATE_MAX_MONITORS_PER_USER"] ||= "5"
+ENV["STABLEMATE_SIGNUP_ACCOUNT_CAP"] ||= "100"
+
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
 

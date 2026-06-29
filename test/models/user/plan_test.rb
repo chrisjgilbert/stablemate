@@ -22,4 +22,16 @@ class User::PlanTest < ActiveSupport::TestCase
     @user.monitors.first.pause!
     assert @user.reload.at_monitor_cap?
   end
+
+  # Caps OFF (issue #16, self-host default): no per-user monitor cap.
+  test "with the cap OFF, monitor_limit is nil and the cap is never reached" do
+    stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
+      assert_nil @user.monitor_limit
+      assert_equal Float::INFINITY, @user.remaining_monitor_slots
+
+      (Stablemate::MAX_MONITORS_PER_USER.to_i + 6).times { |i| @user.monitors.create!(name: "M#{i}", **ATTRS) }
+      refute @user.reload.at_monitor_cap?
+      assert_equal Float::INFINITY, @user.reload.remaining_monitor_slots
+    end
+  end
 end

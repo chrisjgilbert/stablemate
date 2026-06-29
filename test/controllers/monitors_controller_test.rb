@@ -103,6 +103,21 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity
   end
 
+  # Caps OFF (issue #16): with no cap configured, creating past the old limit is
+  # allowed through the UI create path.
+  test "with the cap OFF, creating past the old limit is allowed" do
+    stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
+      sign_in @bob
+      @bob.monitors.delete_all
+      6.times { |i| @bob.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
+
+      assert_difference -> { @bob.monitors.count }, 1 do
+        post monitors_path, params: { monitor: { name: "Seventh", expected_interval_seconds: 3600, grace_period_seconds: 300 } }
+      end
+      assert_response :redirect
+    end
+  end
+
   # Scenario 13 (request) — destroy removes the monitor.
   test "destroy removes the owner's monitor" do
     sign_in @alice
