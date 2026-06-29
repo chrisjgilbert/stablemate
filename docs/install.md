@@ -1,144 +1,149 @@
-# Installing Stablemate
+# Self-hosting Stablemate
 
-Stablemate watches your scheduled jobs by **heartbeat**: each job pings a URL when
-it finishes. If a ping is late by more than the grace period, Stablemate emails
-you. There are two ways to wire it up — the **gem** (recommended; zero per-job
-code) and the **manual** path (a plain HTTP call from any job, in any language).
+Run your own Stablemate instance with Docker. You need a host with **Docker** and
+the **Docker Compose plugin**, a **domain name** pointing at it, and an **SMTP**
+account to send alert emails. No Ruby or Rails knowledge required.
+
+> Want to wire your *jobs* to Stablemate (the gem / ping URLs)? That's
+> [`integrating.md`](integrating.md). This page is about running the **server**.
 
 ---
 
-## 1 · The gem path (Rails + Solid Queue)
-
-The companion gem registers your recurring jobs as monitors and pings them on
-every successful run. You write no per-job code.
-
-### 1.1 Add the gem
-
-```ruby
-# Gemfile
-gem "stablemate"
-```
+## 1 · Get the code
 
 ```sh
-bundle install
+git clone https://github.com/<your-org>/stablemate.git
+cd stablemate
 ```
 
-### 1.2 Get an API key
+## 2 · Configure
 
-In the app: **Settings → API keys → Generate key**. The raw key
-(`sm_live_…`) is shown **once** — copy it immediately. Store it in credentials:
+Everything is configured through a single `.env` file — there are **no in-repo
+Rails credentials** to manage (you do not need `config/master.key`).
 
 ```sh
-bin/rails credentials:edit
+cp .env.example .env
 ```
 
-```yaml
-stablemate:
-  api_key: sm_live_xxxxxxxxxxxxxxxxxxxx
+Open `.env` and fill it in. The values you must set:
+
+| Variable | What it is |
+|---|---|
+| `STABLEMATE_HOST` | Your public hostname, e.g. `status.acme.com`. **Ping URLs and email links are built from this** — it must be the domain your jobs and browser reach. |
+| `STABLEMATE_PROTOCOL` | `https` in production (`http` only for a local trial). |
+| `SECRET_KEY_BASE` | A long random secret. Generate one (see below). |
+| `DB_PASSWORD` | A strong password for the bundled PostgreSQL. |
+| `SMTP_*` | Your SMTP provider's host/port/credentials. |
+| `STABLEMATE_MAIL_FROM` | The From address on alerts (must be SPF/DKIM-aligned with your SMTP domain). |
+
+Generate a `SECRET_KEY_BASE`:
+
+```sh
+docker compose run --rm web bin/rails secret
 ```
 
-### 1.3 Configure the initializer
+Copy the output into `SECRET_KEY_BASE` in `.env`.
+
+### Caps & waitlist (optional)
+
+Self-hosters normally leave `STABLEMATE_MAX_MONITORS_PER_USER` and
+`STABLEMATE_SIGNUP_ACCOUNT_CAP` **unset** — that means unlimited monitors and open
+sign-ups with no waitlist. Set them only if you want to throttle a public instance.
+
+## 3 · Start it
+
+```sh
+docker compose up -d --build
+```
+
+This builds the production image, starts PostgreSQL, and starts the app. On boot
+the app **runs database migrations automatically** (`bin/rails db:prepare` creates
+and migrates the primary plus the Solid Cache/Queue/Cable databases) — you don't
+run migrations by hand.
+
+Watch it come up:
+
+```sh
+docker compose logs -f web
+```
+
+When you see Puma listening, browse to your `STABLEMATE_HOST`.
+
+> **TLS.** The app expects HTTPS in production and sets HSTS + Secure cookies. Put
+> a TLS-terminating reverse proxy (Caddy, nginx, a load balancer, Cloudflare) in
+> front of port 80, or terminate TLS at the host. For a quick **local** trial over
+> plain HTTP, set `STABLEMATE_PROTOCOL=http` and `STABLEMATE_FORCE_SSL=false` in
+> `.env` and visit `http://localhost`.
+
+## 4 · Create the first account
+
+There is no special admin seed — the **first person to sign up** simply registers
+an account. Open `https://<your-host>/`, click **Sign up**, and create your login.
+You land on the dashboard.
+
+## 5 · Create a monitor and send a ping
+
+1. **New monitor** → give it a name and an expected interval.
+2. On the monitor's page, copy the **Ping URL** (it contains a secret token).
+3. Hit it from anywhere — the monitor flips from **pending** to **up**:
+
+   ```sh
+   curl -fsS https://<your-host>/ping/<ping_token>
+   ```
+
+Wire this into the end of your real jobs, or use the companion gem — see
+[`integrating.md`](integrating.md).
+
+## 6 · Verify alert email
+
+Stop pinging a monitor past its grace period and Stablemate sends a **down** email;
+the next ping sends a **recovered** email. If no email arrives, check
+`docker compose logs -f web` for SMTP errors and confirm your `SMTP_*` values and
+that `STABLEMATE_MAIL_FROM` is a sender your provider authorises.
+
+---
+
+## Pointing the companion gem at your instance
+
+In a Rails app using the [`stablemate` gem](../gem/README.md), set the endpoint to
+your own server — either in the initializer or via the `STABLEMATE_ENDPOINT`
+environment variable:
 
 ```ruby
 # config/initializers/stablemate.rb
 Stablemate.configure do |c|
-  c.api_key         = Rails.application.credentials.dig(:stablemate, :api_key)
-  c.endpoint        = "https://stablemate.dev"
-  c.ping_on_success = true          # ping when a monitored job finishes cleanly
-  # c.recurring_path = "config/recurring.yml"  # default
-  # c.timeout        = 2                        # HTTP timeout, seconds
+  c.api_key  = Rails.application.credentials.dig(:stablemate, :api_key)
+  c.endpoint = "https://status.acme.com"   # your self-hosted Stablemate
 end
 ```
 
-### 1.4 Declare your jobs in `recurring.yml`
-
-The gem reads Solid Queue's recurring config. Each task key becomes a monitor.
-
-```yaml
-# config/recurring.yml
-daily_digest:
-  class: DailyDigestJob
-  schedule: every day at 9am
-
-hourly_sync:
-  class: HourlySyncJob
-  schedule: every hour
-```
-
-The interval is parsed from `schedule:` (via Fugit). For irregular crons the
-**largest** gap between runs is used as the expected interval; tighten it later in
-the monitor's settings if you want a snugger window.
-
-### 1.5 Sync
-
-Registration happens automatically on boot. To force it (e.g. after editing
-`recurring.yml`):
-
 ```sh
-bin/rails stablemate:sync
+# or, equivalently
+export STABLEMATE_ENDPOINT=https://status.acme.com
 ```
 
-Sync is **idempotent** — it upserts monitors keyed on the task key, so running it
-repeatedly is safe. A sync failure logs a warning and never crashes boot.
-
-That's it. On each **successful** job run the gem fires a fire-and-forget ping in
-the background. A job that raises does **not** ping — the missed beat is the
-signal.
-
-> **Manual fallback without `recurring.yml`.** You can skip registration and use
-> execution tracking alone: create a monitor by hand whose **registration key**
-> equals the job class name (e.g. `CleanupJob`). The gem's subscriber will ping it
-> on every successful run.
+The gem defaults to the managed instance (`https://stablemate.dev`) only when
+neither is set.
 
 ---
 
-## 2 · The manual path (any language, any scheduler)
+## Operating it
 
-Every monitor has a **ping URL** containing a secret token. Hit it from the end of
-your job. Find the URL on the monitor's detail page (it includes a ready-to-paste
-`curl` snippet).
+- **Upgrades.** `git pull && docker compose up -d --build`. Migrations run on boot.
+- **Backups.** Your data lives in the `postgres_data` Docker volume. Back it up
+  with `docker compose exec postgres pg_dump -U "$DB_USERNAME" "$POSTGRES_DB"`.
+  See [`runbook.md`](runbook.md) for restore and deliverability (SPF/DKIM) details.
+- **Uploads** (if any) persist in the `storage_data` volume.
+- **Logs.** `docker compose logs -f web`.
+- **Console.** `docker compose exec web bin/rails console`.
 
-### curl (cron, shell)
+## Troubleshooting
 
-```sh
-# at the end of your job
-curl -fsS https://stablemate.dev/ping/<ping_token>
-```
-
-A bare `GET` works; `POST` is identical. Optionally report run latency:
-
-```sh
-curl -fsS "https://stablemate.dev/ping/<ping_token>?duration_ms=842"
-```
-
-### Ruby (Net::HTTP)
-
-```ruby
-require "net/http"
-Net::HTTP.get_response(URI("https://stablemate.dev/ping/#{ping_token}"))
-rescue StandardError
-  # best-effort: never let a failed ping break the job
-end
-```
-
-### Notes
-
-- The **ping token is the only credential** on this path — no API key, no headers.
-  Treat the URL as a secret. Rotate it from the monitor's detail page if it leaks
-  (the old URL stops working immediately).
-- The endpoint always returns `{"ok":true}` on a known token and an opaque `404`
-  on an unknown one. It is rate-limited (see [`api.md`](api.md)) generously enough
-  for any real cron cadence.
-
----
-
-## 3 · What you'll see
-
-- A **pending** monitor flips to **up** on its first ping.
-- If a ping is overdue past the grace period, the monitor goes **down** and you
-  get one `down` email.
-- The next successful ping flips it back to **up** and sends one `recovered` email.
-- The dashboard shows a 90-day uptime bar per monitor.
-
-See [`api.md`](api.md) for the full HTTP contract and
-[`runbook.md`](runbook.md) for operations (backups, deliverability).
+| Symptom | Fix |
+|---|---|
+| `Blocked hosts` / 403 on every page | `STABLEMATE_HOST` must match the hostname you're visiting; add extras to `STABLEMATE_HOSTS`. Host authorization is only enforced once you set `STABLEMATE_HOST`. |
+| 403 on a `host:port` URL (e.g. a local `localhost:3000` trial) | Set `STABLEMATE_HOST` to the bare host (`localhost`); the port is for the public URL, but Rails matches the Host header without its port. |
+| Endless redirect to HTTPS on a plain-HTTP trial | Set `STABLEMATE_FORCE_SSL=false` and `STABLEMATE_PROTOCOL=http`. |
+| Ping URLs / email links show the wrong domain | They come from `STABLEMATE_HOST` — fix it and restart (`docker compose up -d`). |
+| No alert emails | Check `SMTP_*` and `STABLEMATE_MAIL_FROM`; watch `docker compose logs -f web`. |
+| `web` exits on boot | Usually a DB connection issue — confirm `DB_PASSWORD` matches and Postgres is healthy (`docker compose ps`). |

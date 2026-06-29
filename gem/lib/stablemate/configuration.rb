@@ -18,7 +18,10 @@ module Stablemate
     attr_accessor :logger
 
     def initialize
-      @endpoint = "https://stablemate.dev"
+      # Defaults to the managed instance, but a self-hosted user points the gem at
+      # their own server either by setting Stablemate.config.endpoint in an
+      # initializer or via the STABLEMATE_ENDPOINT env var.
+      @endpoint = ENV.fetch("STABLEMATE_ENDPOINT", "https://stablemate.dev")
       @ping_on_success = true
       @recurring_path = "config/recurring.yml"
       @timeout = 2

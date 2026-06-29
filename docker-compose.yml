@@ -1,0 +1,52 @@
+# Self-hosting Stablemate with Docker Compose.
+#
+# One command to stand up the app + PostgreSQL:
+#
+#   cp .env.example .env   # then edit .env
+#   docker compose up -d --build
+#
+# The web container runs database migrations automatically on boot (the entrypoint
+# runs `bin/rails db:prepare`, which creates and migrates the primary + Solid
+# Cache/Queue/Cable databases). See docs/install.md for the full walkthrough.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-stablemate_production}
+      POSTGRES_USER: ${DB_USERNAME:-stablemate}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-stablemate} -d ${POSTGRES_DB:-stablemate_production}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+    image: stablemate
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # DB_HOST is fixed to the compose service name regardless of .env so the
+      # app always reaches the bundled Postgres on the internal network.
+      DB_HOST: postgres
+    ports:
+      # Thruster (the production server) listens on 80 inside the container.
+      # Map it to 80 on the host, or change the left side (e.g. "8080:80").
+      - "${WEB_PORT:-80}:80"
+    volumes:
+      # Persist Active Storage uploads written to /rails/storage.
+      - storage_data:/rails/storage
+
+volumes:
+  postgres_data:
+  storage_data:

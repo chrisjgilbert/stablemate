@@ -1,9 +1,17 @@
 # syntax=docker/dockerfile:1
 # check=error=true
 
-# This Dockerfile is designed for production, not development. Use with Kamal or build'n'run by hand:
-# docker build -t stablemate .
-# docker run -d -p 80:80 -e RAILS_MASTER_KEY=<value from config/master.key> --name stablemate stablemate
+# This Dockerfile is designed for production, not development. It runs standalone
+# (self-hosting) and with Kamal. Self-hosting is driven entirely by env vars — no
+# in-repo Rails credentials / RAILS_MASTER_KEY required. The simplest path is
+# docker-compose (see docker-compose.yml + docs/install.md). To build'n'run by hand:
+#   docker build -t stablemate .
+#   docker run -d -p 80:80 \
+#     -e SECRET_KEY_BASE=$(openssl rand -hex 64) \
+#     -e STABLEMATE_HOST=status.example.com \
+#     -e DB_HOST=... -e DB_USERNAME=... -e DB_PASSWORD=... \
+#     -e SMTP_ADDRESS=... -e STABLEMATE_MAIL_FROM=... \
+#     --name stablemate stablemate
 
 # For a containerized dev environment, see Dev Containers: https://guides.rubyonrails.org/getting_started_with_devcontainer.html
 
