@@ -28,8 +28,11 @@ issue**.
   PR → **squash-merge**. Never push to `main` directly.
 - Vanilla Rails per `CLAUDE.md` / `architecture.md`: **no `app/services/`** —
   operation objects, concerns, sub-resource controllers; names are normative.
-- **System tests ship** with every user-facing flow. `/code-review` before every
-  push; `/security-review` on auth/token/billing/ping surfaces.
+- **System tests ship** with every user-facing flow.
+- **Per-PR quality loop (every issue, before merge):** `/code-review` and **apply
+  its fixes** → `/simplify` (reuse/altitude cleanups) → `/verify` (run the app and
+  observe the real behaviour, not just green units). Plus `/security-review` on
+  auth/token/billing/ping surfaces. Re-run `bin/ci` after applying fixes.
 - Each issue is one branch and one PR. Keep history linear.
 
 ---
@@ -47,12 +50,16 @@ issue**.
 > Sequence:
 > 1. Kick off **#16** and **#17 in parallel** — #17 in its own git worktree.
 >    Hand each sub-agent the matching brief from `followups-coordination.md`.
-> 2. When a sub-agent's PR is green (`bin/ci`) and meets its acceptance criteria,
->    review it, then **squash-merge** to `main`. (`main` is protected — everything
->    is push-to-branch → PR → squash-merge.)
-> 3. Start **#19 only after #16 is merged.** Hand off its brief; require
->    `/security-review` before its PR.
-> 4. Report status after each merge; stop when all three are merged. If a sub-agent
+> 2. Before any PR is merged, run the **per-PR quality loop** on it: `/code-review`
+>    and **apply its fixes**, then `/simplify`, then `/verify` (run the app and
+>    confirm the real behaviour), plus `/security-review` on sensitive surfaces.
+>    Re-run `bin/ci` after applying fixes.
+> 3. When a sub-agent's PR is green (`bin/ci`), the quality loop is clean, and it
+>    meets its acceptance criteria, review it, then **squash-merge** to `main`.
+>    (`main` is protected — everything is push-to-branch → PR → squash-merge.)
+> 4. Start **#19 only after #16 is merged.** Hand off its brief; `/security-review`
+>    is required for it.
+> 5. Report status after each merge; stop when all three are merged. If a sub-agent
 >    is blocked on an open decision (e.g. the Pro £ price, §8 of the PRD), surface
 >    it and move on to other ready work rather than guessing.
 
