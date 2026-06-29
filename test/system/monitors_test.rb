@@ -54,6 +54,24 @@ class MonitorsTest < ApplicationSystemTestCase
     assert_selector "input[aria-label='Ping URL'][value*='/ping/']"
   end
 
+  # S8 — the dashboard rows link into the monitor's detail page (the only way to
+  # reach it from the index). The link is stretched across the whole row.
+  test "S8: clicking a monitor row opens its detail page" do
+    monitor = @alice.monitors.create!(name: "Clickable", expected_interval_seconds: 3600, grace_period_seconds: 300)
+    sign_in @alice
+    assert_text "Clickable" # on the index/dashboard
+
+    within "##{ActionView::RecordIdentifier.dom_id(monitor, :row)}" do
+      # The row's link covers the whole row (before:inset-0), so a click anywhere
+      # on it — over the sparkline, not just the name — resolves to this link.
+      assert find("a[href='#{monitor_path(monitor)}']")[:class].include?("before:inset-0")
+      click_on monitor.name
+    end
+
+    assert_current_path monitor_path(monitor)
+    assert_selector "[data-testid='ping-url-card']"
+  end
+
   # S7 — at the cap, the New-monitor action shows the at-limit state and "5 / 5".
   test "S7: at the cap the dashboard shows the count and the at-limit state" do
     Stablemate::MAX_MONITORS_PER_USER.times do |i|
