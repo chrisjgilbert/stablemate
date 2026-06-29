@@ -22,11 +22,7 @@
     </div>
 
     <p class="text-[13px] text-muted mt-1">
-      <% if Stablemate.monitor_cap_enabled? %>
-        Free — up to <%= Stablemate::MAX_MONITORS_PER_USER %> monitors. No credit card.
-      <% else %>
-        Free — unlimited monitors. No credit card.
-      <% end %>
+      Free — <%= free_plan_monitors_phrase %>. No credit card.
     </p>
   </div>
 
