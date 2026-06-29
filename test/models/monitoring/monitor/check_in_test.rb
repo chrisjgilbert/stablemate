@@ -99,6 +99,23 @@ class Monitoring::Monitor::CheckInTest < ActiveSupport::TestCase
     assert paused.reload.paused?
   end
 
+  # Issue #19 — a suspended (plan-downgraded) monitor records the event but stays
+  # suspended and alerts nothing. A stray ping must NOT silently flip it back to
+  # `up`: that would re-enter the cap count and resume free monitoring for a user
+  # who is over the Free cap, defeating the downgrade gate.
+  test "a suspended monitor records the ping but stays suspended and alerts nothing" do
+    suspended = monitors(:up)
+    suspended.suspend!
+
+    assert_difference -> { suspended.ping_events.count }, 1 do
+      assert_enqueued_emails 0 do
+        suspended.check_in!(received_at: Time.current)
+      end
+    end
+
+    assert suspended.reload.suspended?
+  end
+
   # Spec §3.7 — a down monitor with NO open incident recovers to up but must not
   # emit a spurious incident-less recovery email or Notification row.
   test "an incident-less down monitor recovers to up with no recovery alert" do

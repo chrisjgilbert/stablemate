@@ -9,10 +9,12 @@ module Monitoring
     #      - down    -> up: resolve the open incident, create + dispatch a
     #                       `recovered` Notification;
     #      - up      -> up: timestamps only, no alert (no per-ping noise);
-    #      - paused        : record the event + timestamps but DO NOT change
-    #                       status or alert — paused means "don't monitor". The
-    #                       user explicitly stopped monitoring, so a stray ping
-    #                       must not silently resume it. (Pinned by a test.)
+    #      - paused/
+    #        suspended     : record the event + timestamps but DO NOT change
+    #                       status or alert — both mean "don't monitor" (user-paused
+    #                       or plan-suspended), so a stray ping must not silently
+    #                       resume it. For `suspended` this also guards the billing
+    #                       cap. (Pinned by tests.)
     #   3. broadcast a Turbo Stream badge/row update over Solid Cable.
     class CheckIn
       def initialize(monitor)
@@ -46,8 +48,13 @@ module Monitoring
         # Returns a `recovered` Notification to dispatch (down -> up only), else nil.
         def apply_transition(received_at)
           case @monitor.status
-          when "paused"
-            nil # paused stays paused: record the event, no transition, no alert.
+          when "paused", "suspended"
+            # paused/suspended record the event but never transition or alert: the
+            # monitor is deliberately not monitored (user-paused or plan-suspended),
+            # so a stray ping must not silently resume it. For `suspended` this also
+            # guards the billing cap — reactivating here would let a downgraded
+            # over-cap user monitor for free just by continuing to ping.
+            nil
           when "down"
             recover(received_at)
           else # pending or up
