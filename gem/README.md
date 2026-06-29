@@ -63,3 +63,9 @@ bundle exec rake   # or: ruby -Ilib -Itest -e 'Dir["test/**/*_test.rb"].each { |
 ```
 
 Tests make no real network calls — the HTTP client is stubbed.
+
+## License
+
+The companion gem is released under the **MIT License** (see [`LICENSE`](LICENSE))
+so it can be embedded freely in any Rails app, including closed-source ones. This
+is intentionally more permissive than the Stablemate server, which is AGPLv3.

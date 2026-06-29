@@ -1,33 +1,40 @@
 # Stablemate — Product Requirements Document (V1)
 
 > **Dead simple cron monitoring for Rails applications.**
-> A hosted, multi-tenant Rails 8 SaaS + a companion Ruby gem that auto-registers
-> heartbeat monitors from `config/recurring.yml`.
+> An open-source, multi-tenant Rails 8 app + a companion Ruby gem that
+> auto-registers heartbeat monitors from `config/recurring.yml`.
 >
 > **Positioning:** Dead simple. The whole product is one promise — *if a
 > scheduled job stops running, we email you.* Every V1 decision is filtered
 > against that: if a feature doesn't serve "a Rails dev's cron job went quiet and
 > they found out fast," it waits for V2.
 >
-> **Hosting model:** Stablemate is a single hosted instance that *we* operate.
-> Customers sign up on the public site and never touch infrastructure. We deploy
-> and run the app on our own Hetzner box via Kamal — that is our internal ops
-> choice, not part of the product. Customers do **not** self-host their own
-> copies in V1.
+> **Hosting model (decided): open source + paid hosting.** The Stablemate server
+> app is **free and self-hostable** under AGPLv3 — run your own instance, no caps,
+> your infrastructure. We *also* run a **paid, managed hosted version**
+> (`stablemate.dev`) for teams who'd rather not operate it; that's the business.
+> The same codebase powers both. Our Hetzner-via-Kamal setup is just how *we* run
+> the managed instance, not part of the product.
+>
+> The **companion gem is MIT-licensed** (it embeds in users' apps); the **server
+> is AGPLv3** (so a competitor can't run a closed fork as a rival hosted service).
+> The paid tier's exact shape (managed-hosting-only vs. open-core feature-gating)
+> is **not yet decided** — see §11.
 
 **Status:** Draft for V1
-**Last updated:** 2026-06-27
+**Last updated:** 2026-06-29
 **Owner:** Chris Gilbert
 
 ---
 
 ## 1. Summary
 
-Stablemate is a hosted cron/background-job monitoring tool for Rails developers.
-A monitored job sends a lightweight "ping" to a unique URL each time it runs; if
-no ping arrives within the expected interval plus a grace period, Stablemate
-emails the owner. The owner sees each monitor's status and uptime history in
-their authenticated dashboard. That's the whole product.
+Stablemate is an open-source cron/background-job monitoring tool for Rails
+developers, offered both self-hosted (free) and as a paid managed service. A
+monitored job sends a lightweight "ping" to a unique URL each time it runs; if no
+ping arrives within the expected interval plus a grace period, Stablemate emails
+the owner. The owner sees each monitor's status and uptime history in their
+authenticated dashboard. That's the whole product.
 
 The product's wedge is the **companion gem**: Rails/Solid Queue apps drop it in,
 and it auto-registers a heartbeat monitor for every recurring job in
@@ -57,15 +64,18 @@ yet.
 - **Email-only alerting in V1**, architected so webhook channels are additive in
   V2.
 - **Multi-tenant from day one**, single owner per monitor. No teams in V1.
-- **One Free plan in V1, capped at 5 monitors/user; no payment/checkout.** V1
-  ships a single Free tier with a per-user monitor cap (`MAX_MONITORS_PER_USER =
-  5`, a tunable constant). A paid tier comes later; `User.plan` (default `free`)
-  exists now purely for forward-compatibility, so adding billing is non-
-  destructive. No Stripe, no checkout, no metering in V1.
-- **Launch signup cap to bound cost.** Free sign-ups are gated by a global,
-  config-driven limit (`SIGNUP_ACCOUNT_CAP`, default 100). When the account count
-  reaches it, the sign-up form switches to a **waitlist** (email capture), not a
-  hard close — protecting the hosting bill while building a launch list.
+- **Open source + paid hosting (decided).** The server app is free and
+  self-hostable (AGPLv3); we also run a paid managed instance. Same codebase. The
+  paid tier's exact differentiation is still open (§11); V1 has **no Stripe, no
+  checkout, no metering**.
+- **Monitor cap and signup cap are hosted-instance policy, not product limits.**
+  The per-user monitor cap (`MAX_MONITORS_PER_USER`) and the global signup cap +
+  waitlist (`SIGNUP_ACCOUNT_CAP`) exist only to bound *our* managed-hosting bill
+  at launch. They must be **config-driven and default to OFF / unlimited**, so a
+  **self-hoster has no caps and no waitlist** on their own instance; we switch
+  them on only for `stablemate.dev`. (`User.plan`, default `free`, stays for
+  forward-compat when billing arrives.) *Implementation note: the current build
+  bakes these in for the hosted model — they now need to be gated behind config.*
 - The `Monitor` model uses a `monitor_type` discriminator (`heartbeat` only for
   now) so HTTP monitors slot in later without a destructive migration.
 - **Gem execution tracking is built on ActiveJob**, not Solid Queue directly —
@@ -100,10 +110,11 @@ yet.
 5. Ship a **companion gem** that auto-registers heartbeats from
    `config/recurring.yml` and pings on successful Solid Queue job completion via
    `ActiveSupport::Notifications`, requiring no manual code in jobs.
-6. Run as a single **hosted, multi-tenant SaaS** that we operate and deploy to
-   our own Hetzner box via Kamal (PostgreSQL + Solid Queue), with no external
-   service dependencies beyond outbound SMTP. Customers sign up; they do not
-   deploy anything.
+6. Be **straightforwardly self-hostable**: a multi-tenant Rails 8 app (PostgreSQL
+   + Solid Queue) that runs from a single Docker image with env-based config and
+   no external dependencies beyond outbound SMTP. The same app also runs as our
+   **paid managed instance** on Hetzner via Kamal; self-hosting must be a
+   first-class, documented path, not an afterthought.
 7. Keep the alerting layer **channel-agnostic internally** so V2 channels are
    purely additive.
 
@@ -117,16 +128,20 @@ yet.
   owner's authenticated dashboard only. (See §9 for the rationale.)
 - **Webhook / Slack alert channels.** → V2 (architected for, not built).
 - **Teams, organisations, shared ownership, roles/permissions.** → later.
-- **Payment / checkout / metered billing.** V1 has one Free plan and a fixed
-  5-monitor cap; there is no Stripe integration, no paid tier, no usage metering.
-  (The per-user monitor cap and the launch signup cap *are* in V1 — see §1.)
+- **Payment / checkout / metered billing.** There is no Stripe integration, no
+  in-app upgrade, and no usage metering in V1 — the paid managed tier is sold/run
+  out-of-band for now. (`User.plan` exists for forward-compat; the monitor/signup
+  caps are hosted-instance policy, off by default for self-hosters — see §1, §11.)
 - **Aggregated multi-monitor status sites, custom domains / CNAMEs.** → V2.
 - **Cron-expression schedule parsing** (e.g. validating that pings line up with
   a `* * * *` spec). V1 uses a simple expected-interval model.
 - **SMS/phone/PagerDuty escalation, on-call rotations.**
 - **Periodic "still down" reminder emails.** → fast-follow.
-- **Customer self-hosting / on-prem distribution.** Stablemate is a single hosted
-  instance we operate; we do not ship a deployable copy for customers to run.
+
+> **Note — reversed decision:** earlier drafts listed *customer self-hosting* as a
+> non-goal. That is reversed: self-hosting is now a **core goal** (Goal 6). What
+> remains out of V1 is only the *paid* side's plumbing (billing/checkout above)
+> and managed-tier niceties; the free self-hostable app is in scope.
 
 ---
 
@@ -667,3 +682,42 @@ in the thinnest possible V1.
 **When it returns:** V2, bundled with HTTP/uptime monitoring, where "show the
 world your *service* is up" is a coherent story. (The deferred `slug` /
 public-toggle fields slot back onto `Monitor` then, non-destructively.)
+
+---
+
+## 11. Hosting & licensing model (open source + paid hosting)
+
+**Decided:** Stablemate is **open source and free to self-host**, and we **also**
+sell a **managed hosted version**. The same codebase serves both — this is the
+Plausible / PostHog / Sentry-style model, which fits a Rails-developer audience
+that values self-hostable OSS.
+
+**Licensing.**
+- **Server app → AGPLv3** (`/LICENSE`). The copyleft + §13 network clause means
+  anyone who hosts a *modified* version must publish their changes — deterring a
+  competitor from running a closed fork as a rival hosted service.
+- **Companion gem → MIT** (`/gem/LICENSE`). Users embed it in their own (often
+  closed-source) apps, so it must be permissive; AGPL on a client library would
+  kill adoption.
+
+**Self-host vs. managed.**
+- **Self-hosted instance:** no monitor cap, no signup cap, no waitlist — it's the
+  operator's own infrastructure. These limits are config-driven and default OFF.
+- **Managed instance (`stablemate.dev`):** we turn the caps/waitlist ON to bound
+  cost at launch (§1). Deployed by us via Kamal on Hetzner.
+
+**Still OPEN — paid-tier differentiation (was going to ask; deferred):**
+1. **Managed-hosting-only (full feature parity)** — every feature is in the OSS
+   app; you pay purely for "we run it" (ops, backups, upgrades, deliverable
+   email). Simplest, most goodwill. *(My recommendation.)*
+2. **Open-core** — some features (teams/SSO/extra channels/longer retention) are
+   reserved for the paid tier. More revenue leverage, more complexity, risk of
+   community friction.
+Until this is decided, build for parity (option 1) — it's the non-committal path
+and nothing about V1 depends on choosing yet.
+
+**Implications still to work through (not all V1):**
+- Docker image + `docker-compose` + env-based config + a self-host install guide
+  (`docs/install.md`) as a first-class, tested path.
+- The baked-in monitor/signup caps need to become **config-gated** (default off).
+- Decide where the managed tier's billing eventually lives (out of band for now).

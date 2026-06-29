@@ -17,7 +17,7 @@ Gem::Specification.new do |spec|
   # (lib/stablemate/tasks/stablemate.rake), which the railtie loads, ships with
   # the installed gem. Globbing only *.rb left it out and broke `rake` in a real
   # install.
-  spec.files = Dir["lib/**/*", "README.md"]
+  spec.files = Dir["lib/**/*", "README.md", "LICENSE"]
   spec.require_paths = [ "lib" ]
 
   # Fugit parses the recurring.yml cron schedules into intervals.
