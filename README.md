@@ -21,7 +21,11 @@ a companion gem that auto-registers heartbeat monitors from `config/recurring.ym
 
 ## License
 
-Stablemate is licensed under the **GNU Affero General Public License v3.0**
-(AGPL-3.0). See [`LICENSE`](LICENSE) for the full text.
+The Stablemate **server application** is licensed under the **GNU Affero General
+Public License v3.0** (AGPL-3.0) — see [`LICENSE`](LICENSE).
+
+The **companion gem** (in [`gem/`](gem/)) is licensed under the more permissive
+**MIT License** — see [`gem/LICENSE`](gem/LICENSE) — so it can be embedded freely
+in any Rails app, including closed-source ones.
 
 Copyright (C) 2026 Chris Gilbert.
