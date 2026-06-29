@@ -65,6 +65,12 @@ All Test Plan scenarios pass · Required system tests pass · `bin/ci` green (in
 verified via `/verify`/`/run`.
 
 ## State of the repo right now
-Docs + guardrails only — **no Rails app yet**. Phase 0 runs `rails new` and builds
-the walking skeleton. The SessionStart hook and `bin/ci` already no-op cleanly
-until the app exists, then activate automatically.
+**Phases 0–4 are built and merged to `main`** — the Rails app, the companion gem,
+and the test suite all exist. Licensing is set (server AGPLv3, gem MIT). Work now
+proceeds as **follow-up issues**, not phases; the per-issue loop and guardrails
+above still apply. The current batch (#16 caps config-gating, #17 self-host
+packaging, #19 hosted billing) and how to coordinate it is in
+[`followups-coordination.md`](followups-coordination.md).
+
+**`main` is a protected branch** — direct pushes are rejected. Every change lands
+via **push-to-branch → PR → squash-merge**. The pre-push hook still runs `bin/ci`.
