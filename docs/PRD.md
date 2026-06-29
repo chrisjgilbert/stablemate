@@ -79,7 +79,7 @@ yet.
   waitlist (`SIGNUP_ACCOUNT_CAP`) are **config-driven and default to OFF /
   unlimited**, so a **self-hoster has no caps and no waitlist**. On
   `stablemate.dev` the monitor cap becomes the **plan boundary** (Free = 5; Pro =
-  higher/unlimited), driven by `User.plan` synced from the Stripe subscription.
+  Pro = 100), driven by `User.plan` synced from the Stripe subscription.
   *Implementation note: the current build bakes the caps in — they need
   config-gating (issue #16).*
 - The `Monitor` model uses a `monitor_type` discriminator (`heartbeat` only for
@@ -177,7 +177,7 @@ The tenant. Owns everything.
 Auth uses the **Rails 8 built-in authentication generator** (sessions +
 `has_secure_password`). No Devise, no OAuth in V1.
 
-**Monitor cap.** The cap is keyed off `plan` (Free = 5, Pro = higher/unlimited),
+**Monitor cap.** The cap is keyed off `plan` (Free = 5, Pro = 100),
 enforced on creation in both the UI and the API (§6.2). When caps are disabled by
 config (the self-host default), there is no limit (issue #16).
 
@@ -233,7 +233,7 @@ monitors can join later.
 | `ping_token` | string, unique, not null | Secret; embedded in the ping URL |
 | `expected_interval_seconds` | integer, not null | How often a ping is expected |
 | `grace_period_seconds` | integer, not null | Lateness tolerated before `down` |
-| `status` | string, not null | `up` / `down` / `paused` / `pending` |
+| `status` | string, not null | `up` / `down` / `paused` / `pending` / `suspended` |
 | `last_ping_at` | datetime, null | Drives detection |
 | `next_due_at` | datetime, null | `last_ping_at + interval` (indexed) |
 | `registration_key` | string, null | Stable key for gem idempotent upsert |
@@ -246,6 +246,11 @@ Notes:
 - `registration_key` is the recurring job's key/name from `config/recurring.yml`,
   scoped per `(user, app)` — used by the gem to upsert without duplicating.
 - `pending` = created but never pinged yet (don't alert until first ping seen).
+- **`suspended`** = deactivated by a **plan downgrade** (§5.6), distinct from
+  user-initiated `paused`. A `suspended` monitor is **not monitored, sends no
+  alerts, and does NOT count toward the monitor cap**; it is retained so it can be
+  reactivated on re-upgrade. (Contrast `paused`, which *does* count toward the cap
+  — §8 Q8.) Only the hosted tier ever produces `suspended` monitors.
 - Indexes: `ping_token` (unique),
   `(user_id, registration_key)` (unique, where present), `next_due_at`,
   `(status, next_due_at)`.
@@ -339,7 +344,11 @@ pending ──first ping──▶ up ──interval+grace elapsed, no ping──
 - **`up`**: last ping within `interval + grace`.
 - **`down`**: `now > last_ping_at + interval + grace`. Opens an `Incident`,
   sends a `down` email.
-- **`paused`**: user-suspended; excluded from detection and alerting.
+- **`paused`**: user-suspended; excluded from detection and alerting. Still counts
+  toward the monitor cap.
+- **`suspended`**: deactivated by a plan downgrade (hosted only, §5.6); excluded
+  from detection and alerting, and **does not count toward the cap**. Reactivated
+  on re-upgrade. Not reachable on a self-hosted instance.
 
 ### 4.2 Detection
 
@@ -419,16 +428,27 @@ On ping receipt for a monitor:
    prompt). We create/refresh their Stripe customer and redirect to a **Stripe
    Checkout** session (Stripe Tax computes VAT/sales tax at checkout).
 2. On success, Stripe fires a webhook → Pay updates the subscription → `User.plan`
-   becomes `pro` → the monitor cap lifts. The user lands back on a confirmation.
-3. To change card, view invoices, or cancel, the user opens the **Stripe Customer
-   Portal** (a hosted page) from billing settings. Cancellation/expiry fires a
-   webhook → `plan` reverts to `free`.
-4. **Downgrade over the cap:** if a now-Free user has more than the Free cap of
-   monitors, existing monitors keep running, but **creating new ones is blocked**
-   until they're back under the cap. We do not auto-delete or auto-pause. *(Policy
-   choice — see §8 open questions.)*
+   becomes `pro` → the monitor cap rises to the Pro cap (100). The user lands back
+   on a confirmation. **No free trial** — Pro is paid from the first day.
+3. To change card or view invoices, the user opens the **Stripe Customer Portal**
+   (a hosted page) from billing settings.
+4. **Downgrade is gated by a "choose your 5" step.** A Pro user with more than the
+   Free cap (5) of monitors cannot simply drop to Free and keep them all — that
+   would let someone go Pro, add 100, cancel, and keep 100 for free. Instead:
+   - The user initiates downgrade **in-app**. If they have >5 monitors, they must
+     **select exactly 5 to keep active** before the downgrade completes.
+   - On confirmation, the chosen 5 stay active; the rest are **plan-suspended**
+     (retained, not monitored, not counted against the cap — §3.3) — *not* deleted.
+     Then we cancel the Stripe subscription and `plan` → `free`.
+   - If they re-upgrade later, suspended monitors can be reactivated (subject to
+     the Pro cap).
+   - **Involuntary downgrade** (card expiry/failure, or cancel via the Stripe
+     Portal) reaches us by webhook. If the account is then over the Free cap, it
+     enters a **locked "choose your 5" state**: over-cap monitors are immediately
+     plan-suspended (no silent free monitoring) and normal use is blocked until the
+     user picks the 5 to keep active.
 5. This entire flow is **absent on a self-hosted instance** (no Stripe keys → no
-   billing UI, no plans).
+   billing UI, no plans, no cap).
 
 ---
 
@@ -616,13 +636,15 @@ payments → run `/security-review`.**
 - **Pay gem + Stripe** backend; `pay_*` tables; Stripe **Checkout** (upgrade) and
   **Customer Portal** (manage/cancel), plus **Stripe Tax** for VAT/sales tax.
 - Webhook endpoint syncing `Pay::Subscription` → `User.plan`; the monitor cap
-  follows the plan (Free = 5, Pro = higher/unlimited).
-- Billing settings UI; the at-limit "Upgrade to Pro" prompt (§5.6); downgrade-
-  over-cap handling (§8).
+  follows the plan (Free = 5, Pro = 100).
+- Billing settings UI; the at-limit "Upgrade to Pro" prompt; the **gated
+  "choose your 5" downgrade flow** with the `suspended` monitor state (§5.6, §3.3).
+- No free trial (paid from day one).
 - All of it dormant unless Stripe keys are configured (self-host = no billing).
 - **Exit:** on a Stripe-keyed instance, a Free user upgrades via Checkout → plan
-  flips to Pro via webhook → cap lifts; cancel via Portal → reverts to Free. A
-  keyless (self-host) instance shows no billing and stays unlimited.
+  flips to Pro via webhook → cap rises to 100; on downgrade with >5 monitors the
+  user must pick 5 to keep and the rest become `suspended`. A keyless (self-host)
+  instance shows no billing and stays unlimited.
 
 ### Deferred to V2 (explicitly)
 > The live, triageable version of this list — grouped, with source refs and the
@@ -706,14 +728,14 @@ Recorded so future scope decisions don't drift into a neighbour's lane.
 8. **Paused monitors and the cap.** Does a `paused` monitor count toward the
    5-monitor limit? Proposal: **yes** (it still occupies a slot and could be
    resumed); pausing is not a way to exceed the cap. Confirm.
-9. **Pro price & shape (billing).** What is Pro's monthly price, is there an annual
-   discount, and is Pro "unlimited monitors" or a high fixed cap (e.g. 100)? Also:
-   offer a free trial on Pro, or straight to paid? Needed before Phase 5.
-10. **Downgrade over the cap.** When a Pro user cancels and is left with more than
-    the Free cap of monitors, proposal: existing monitors keep running but **no new
-    ones** until back under the cap (no auto-delete/auto-pause). Confirm — the
-    alternative (auto-pause the newest over-cap monitors) risks silently dropping
-    monitoring on a downgrade.
+9. **Pro £ price (billing).** *Decided:* Pro = up to **100** monitors, **no free
+   trial**. *Still open:* the actual monthly £ price and whether to offer an annual
+   discount. Needed before Phase 5.
+10. **Downgrade over the cap.** *Decided (§5.6):* gated "choose your 5" — a Pro
+    user over the Free cap must pick 5 to keep active; the rest become `suspended`
+    (retained, unmonitored, uncounted), closing the add-100-then-cancel loophole.
+    *Open detail:* retention/auto-purge policy for `suspended` monitors (keep
+    forever, or delete after N days if never reactivated?).
 11. **Stripe-direct tax burden.** We chose Stripe-direct over a Merchant of Record,
     so VAT/sales-tax **registration and remittance are ours** (Stripe Tax only
     calculates). Confirm comfort with that ongoing admin; revisit an MoR (Paddle/
@@ -802,7 +824,11 @@ unlimited.
 | Plan | Monitors | Price | Notes |
 |---|---|---|---|
 | **Free** | 5 | £0 | The hosted on-ramp; bounded at launch by the signup cap/waitlist (§1). |
-| **Pro** | higher / unlimited | flat £/mo (+ annual) | Lifts the cap. **Exact price + whether Pro is "unlimited" or a high cap are open — see §8.** |
+| **Pro** | up to **100** | flat £/mo (+ annual) | Raises the cap to 100 (decided — not unlimited). **No free trial** — paid from day one. **Exact £ price still open — see §8 Q9.** |
+
+Downgrade from Pro to Free is **gated** (§5.6): a user over the Free cap must
+choose 5 monitors to keep; the rest become `suspended` (§3.3). This closes the
+"go Pro → add 100 → cancel → keep 100" loophole.
 
 No usage metering, no per-seat pricing (teams are V2). The monitor cap *is* the
 plan boundary, driven by `User.plan`.
