@@ -1,0 +1,28 @@
+module Billing
+  # Upgrade to Pro — creating a checkout *is* starting a Stripe Checkout session
+  # (no custom "upgrade" verb). We redirect the user to Stripe's hosted page;
+  # Stripe Tax computes VAT/sales tax there, and no card data ever touches us.
+  # The plan only actually changes later, via the verified webhook.
+  class CheckoutsController < BaseController
+    def create
+      price_id = Stablemate.pro_price_id
+      return redirect_back_or_to(billing_subscription_path, alert: "Pro plan isn't configured.") if price_id.blank?
+
+      session = current_user.stripe_customer.checkout(
+        mode: "subscription",
+        line_items: price_id,
+        # One Pro subscription per customer.
+        subscription_data: { metadata: { user_id: current_user.id } },
+        # Stripe Tax (PRD §12): compute VAT/sales tax at checkout.
+        automatic_tax: { enabled: true },
+        customer_update: { address: "auto" },
+        success_url: billing_subscription_url,
+        cancel_url: billing_subscription_url
+      )
+
+      redirect_to session.url, allow_other_host: true, status: :see_other
+    rescue ::Stripe::StripeError
+      redirect_back_or_to billing_subscription_path, alert: "Couldn't start checkout. Please try again."
+    end
+  end
+end

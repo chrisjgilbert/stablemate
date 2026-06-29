@@ -12,30 +12,11 @@ module Monitoring
         update!(status: "paused")
       end
 
-      # Resume monitoring, re-evaluated against the grace window:
-      #   - never pinged                -> pending
-      #   - within interval + grace     -> up
-      #   - already past it (overdue)   -> open an incident and alert, exactly as
-      #     the detection sweep would. We route through flag_missed! rather than
-      #     flipping the column straight to "down" so the incident invariant and
-      #     the down alert always hold; a bare status="down" would leave an
-      #     incident-less, alert-less outage that detection (status="up" only)
-      #     never revisits.
+      # Resume monitoring, re-evaluated against the grace window (shared rule —
+      # see HeartbeatStates#reactivate_heartbeat!).
       def resume!
-        unless ever_pinged?
-          update!(status: "pending")
-          return
-        end
-
-        update!(status: "up")
-        flag_missed! if overdue_now?
+        reactivate_heartbeat!
       end
-
-      private
-        def overdue_now?
-          due = due_with_grace_at
-          due.present? && Time.current > due
-        end
     end
   end
 end

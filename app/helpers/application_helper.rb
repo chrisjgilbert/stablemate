@@ -9,4 +9,10 @@ module ApplicationHelper
       "unlimited monitors"
     end
   end
+
+  # Whether to render any billing UI. False on a keyless self-host instance, where
+  # there are no plans and nothing to link to (issue #19 config-gate).
+  def billing_enabled?
+    Stablemate.billing_enabled?
+  end
 end

@@ -21,10 +21,23 @@
 </div>
 
 <% if at_cap %>
-  <%# Matter-of-fact note (no upgrade/pricing — there's nothing to link to). %>
-  <p class="mb-6 text-[13px] text-muted" data-testid="at-limit-note">
-    <%= monitor_limit_note(current_user) %> Delete a monitor to add another.
-  </p>
+  <% if billing_enabled? && current_user.free? %>
+    <%# Hosted tier: the at-limit prompt is an upgrade nudge (PRD §5.6). %>
+    <div class="mb-6 flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 shadow-sm" data-testid="at-limit-note">
+      <p class="text-[13px] text-muted">
+        You're at the <%= current_user.monitor_limit %>-monitor limit for the Free plan.
+        Upgrade to Pro for up to <%= Stablemate::PRO_PLAN_MONITOR_LIMIT %>.
+      </p>
+      <%= button_to "Upgrade to Pro", billing_checkout_path,
+            class: "ml-auto h-8 px-3 inline-flex items-center rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover whitespace-nowrap",
+            data: { testid: "upgrade-button" } %>
+    </div>
+  <% else %>
+    <%# Self-host (or Pro at the 100 cap): matter-of-fact, nothing to upgrade to. %>
+    <p class="mb-6 text-[13px] text-muted" data-testid="at-limit-note">
+      <%= monitor_limit_note(current_user) %> Delete a monitor to add another.
+    </p>
+  <% end %>
 <% end %>
 
 <% if @monitors.any? %>
@@ -37,4 +50,20 @@
   </div>
 <% else %>
   <%= render "monitors/empty_state" %>
+<% end %>
+
+<% if @suspended_monitors.present? %>
+  <%# Plan-suspended monitors (hosted tier): retained, not monitored, don't count
+      toward the cap. Re-upgrading reactivates them. (PRD §3.3 / §5.6.) %>
+  <div class="mt-8" data-testid="suspended-section">
+    <h2 class="mb-2 text-[13px] font-semibold text-muted">Suspended <span class="font-mono">(<%= @suspended_monitors.size %>)</span></h2>
+    <p class="mb-3 text-[12px] text-muted">Kept but not monitored after a plan downgrade. Upgrade to Pro to reactivate.</p>
+    <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm opacity-70">
+      <div class="divide-y divide-hairline">
+        <% @suspended_monitors.each do |monitor| %>
+          <%= render "monitors/row", monitor: monitor, mini_ticks: @mini_ticks[monitor.id] || [] %>
+        <% end %>
+      </div>
+    </div>
+  </div>
 <% end %>

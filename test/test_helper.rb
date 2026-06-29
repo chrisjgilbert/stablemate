@@ -3,6 +3,59 @@ require_relative "../config/environment"
 require "rails/test_help"
 require_relative "test_helpers/session_test_helper"
 
+# Toggle the hosted-tier billing config-gate around a block. Stripe keys drive
+# Stablemate.billing_enabled? at runtime; rather than poke ENV/credentials we
+# swap the predicate (and the keys callers read) for the duration of the block.
+# Mirrors how the cap tests use stub_const for the #16 gate.
+module BillingGateTestHelper
+  def with_billing_enabled
+    Stablemate.stub_billing(true) { yield }
+  end
+
+  def with_billing_disabled
+    Stablemate.stub_billing(false) { yield }
+  end
+
+  # Neutralise the only Pay handler steps that would reach the Stripe API, so a
+  # webhook can be processed end to end in tests without network. The test sets up
+  # the Pay subscription mirror directly; in production these calls keep it fresh.
+  def without_pay_stripe_network
+    sub_original = Pay::Stripe::Subscription.method(:sync)
+    Pay::Stripe::Subscription.define_singleton_method(:sync) { |*, **| nil }
+    yield
+  ensure
+    Pay::Stripe::Subscription.define_singleton_method(:sync, sub_original)
+  end
+end
+
+module Stablemate
+  # Test-only fixed Stripe credentials used when billing is forced on. Never real
+  # keys — just enough for the config-gate and signature verification in tests.
+  TEST_STRIPE_PUBLISHABLE_KEY = "pk_test_stablemate".freeze
+  TEST_STRIPE_SECRET_KEY      = "sk_test_stablemate".freeze
+  TEST_STRIPE_WEBHOOK_SECRET  = "whsec_stablemate_test".freeze
+
+  # Test-only: force billing_enabled? (and the Stripe keys it reads) for the
+  # duration of a block, restoring the originals afterward (exception-safe).
+  def self.stub_billing(value)
+    originals = %i[billing_enabled? stripe_publishable_key stripe_secret_key stripe_webhook_secret]
+      .to_h { |m| [ m, method(m) ] }
+
+    if value
+      define_singleton_method(:billing_enabled?)       { true }
+      define_singleton_method(:stripe_publishable_key) { TEST_STRIPE_PUBLISHABLE_KEY }
+      define_singleton_method(:stripe_secret_key)      { TEST_STRIPE_SECRET_KEY }
+      define_singleton_method(:stripe_webhook_secret)  { TEST_STRIPE_WEBHOOK_SECRET }
+    else
+      define_singleton_method(:billing_enabled?) { false }
+    end
+
+    yield
+  ensure
+    originals.each { |m, impl| define_singleton_method(m, impl) }
+  end
+end
+
 module ActiveSupport
   class TestCase
     # Run tests in parallel with specified workers
@@ -14,6 +67,8 @@ module ActiveSupport
 
     # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
     fixtures :all
+
+    include BillingGateTestHelper
 
     # Add more helper methods to be used by all tests here...
   end

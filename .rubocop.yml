@@ -6,6 +6,10 @@ inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 AllCops:
   Exclude:
     - "gem/**/*"
+    # Vendored migrations copied verbatim from the Pay gem's install generator
+    # (issue #19). We keep them as generated rather than drift from upstream, so
+    # they are exempt from our house style. (CLAUDE.md "Use Rails, don't fight it".)
+    - "db/migrate/*.pay.rb"
 
 # Overwrite or add rules to create your own house style
 #
