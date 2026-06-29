@@ -78,6 +78,44 @@ class BillingTest < ApplicationSystemTestCase
     end
   end
 
+  # (d) A plan-suspended monitor is inert in the UI: it sits in the Suspended
+  # section with no pause/resume control, and a stray ping (the downgraded user's
+  # cron still firing) must NOT resurrect it into the active list or the cap count.
+  # Guards the issue-#19 check-in fix at the browser level.
+  test "a suspended monitor has no pause control and a stray ping cannot resurrect it" do
+    with_billing_enabled do
+      @user.update!(plan: "free")
+      suspended = @user.monitors.create!(name: "Old cron job", **ATTRS)
+      suspended.check_in!  # give it a ping history (status: up) before suspending
+      suspended.suspend!
+
+      sign_in @user
+
+      # Dashboard: it's listed under Suspended, not among the active monitors.
+      within "[data-testid='suspended-section']" do
+        assert_text "Old cron job"
+      end
+      assert_equal 0, @user.monitors.counting_toward_cap.count
+
+      # Show page: a suspended monitor offers neither Pause nor Resume — it can't be
+      # resumed without re-upgrading, and pausing would push it back into the cap.
+      visit monitor_path(suspended)
+      assert_no_button "Pause"
+      assert_no_button "Resume"
+
+      # A stray ping arrives (cron job still running after the downgrade).
+      suspended.check_in!
+
+      # It stays suspended: still in the Suspended section, still uncounted.
+      visit monitors_path
+      within "[data-testid='suspended-section']" do
+        assert_text "Old cron job"
+      end
+      assert suspended.reload.suspended?, "a stray ping must not resurrect a suspended monitor"
+      assert_equal 0, @user.monitors.counting_toward_cap.count
+    end
+  end
+
   # (c) Keyless self-host instance: no billing UI anywhere.
   test "keyless instance shows no billing UI" do
     with_billing_disabled do

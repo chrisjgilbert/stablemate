@@ -48,14 +48,18 @@ module Monitoring
       private
         # The seconds of this day the monitor was being measured. Days before
         # creation are no-data; the creation day is measured only from created_at
-        # onward. A currently paused OR pending monitor's day counts as no-data
-        # ONLY when it has no evidence of activity (no pings, no incident overlap)
-        # — so a real, already-recorded active day is never wiped by a later
-        # pause, and a never-pinged (pending) monitor never shows false 100% up.
+        # onward. A currently paused, suspended, OR pending monitor's day counts as
+        # no-data ONLY when it has no evidence of activity (no pings, no incident
+        # overlap) — so a real, already-recorded active day is never wiped by a
+        # later pause/suspend, and a never-pinged (pending) monitor never shows
+        # false 100% up. `suspended` (plan-downgrade, issue #19) is a not-monitored
+        # state just like `paused`: without a status-history table we can't know
+        # the past suspended windows, so an evidence-free suspended day is no-data,
+        # not a phantom 100%-up day.
         def measured_seconds(day_start, day_end, pings, down)
           window_start = [ @monitor.created_at, day_start ].max
           return 0 if window_start >= day_end
-          return 0 if (@monitor.paused? || @monitor.pending?) && pings.zero? && down.zero?
+          return 0 if (@monitor.paused? || @monitor.suspended? || @monitor.pending?) && pings.zero? && down.zero?
 
           (day_end - window_start).to_i
         end

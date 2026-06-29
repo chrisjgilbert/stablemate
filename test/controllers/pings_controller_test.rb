@@ -49,6 +49,24 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "up", @monitor.reload.status
   end
 
+  # Issue #19 — pinging a suspended (plan-downgraded) monitor via the public
+  # endpoint records the event but must NOT flip it back to `up`: that would
+  # re-enter the cap count and resume free monitoring after a downgrade. The
+  # response stays the opaque 200 (the token never leaks monitor state).
+  test "a ping on a suspended monitor records the event but leaves it suspended" do
+    suspended = monitors(:up)
+    suspended.suspend!
+
+    assert_difference -> { suspended.ping_events.count }, 1 do
+      assert_enqueued_emails 0 do
+        get ping_path(suspended.ping_token)
+      end
+    end
+
+    assert_response :success
+    assert suspended.reload.suspended?
+  end
+
   # Scenario 4 — duration_ms captured from the query string.
   test "duration_ms query param is captured on the PingEvent" do
     get ping_path(@monitor.ping_token, duration_ms: 1234)

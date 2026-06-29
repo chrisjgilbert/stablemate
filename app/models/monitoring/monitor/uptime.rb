@@ -129,10 +129,12 @@ module Monitoring
         end
 
         # The live status of the current, not-yet-rolled day, derived from the
-        # monitor's present state: paused/pending → no-data; an open incident today
-        # → down (or partial if the day also saw up time); otherwise up.
+        # monitor's present state: paused/suspended/pending → no-data; an open
+        # incident today → down (or partial if the day also saw up time); otherwise
+        # up. `suspended` (plan-downgrade, issue #19) is not-monitored like `paused`,
+        # so today's segment is no-data, not a phantom green `up`.
         def live_today_status
-          return :no_data if paused? || pending?
+          return :no_data if paused? || suspended? || pending?
 
           incident = open_incident
           if incident

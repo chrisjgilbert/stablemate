@@ -14,12 +14,19 @@
       <%= render "shared/gem_chip", monitor: @monitor, variant: :full %>
     </div>
     <div class="flex items-center gap-2">
-      <% if @monitor.paused? %>
-        <%= button_to "Resume", monitor_pause_path(@monitor), method: :delete,
-              class: "h-8 px-3 rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
-      <% else %>
-        <%= button_to "Pause", monitor_pause_path(@monitor), method: :post,
-              class: "h-8 px-3 rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+      <%# Pause/Resume is user-driven monitoring control. A `suspended` monitor
+          (plan-downgrade, issue #19) has no pause/resume affordance: it can't be
+          resumed without re-upgrading, and pausing it would flip it to `paused`,
+          which DOES count toward the cap — letting a downgraded user quietly push
+          suspended monitors back into their cap. So hide it entirely when suspended. %>
+      <% unless @monitor.suspended? %>
+        <% if @monitor.paused? %>
+          <%= button_to "Resume", monitor_pause_path(@monitor), method: :delete,
+                class: "h-8 px-3 rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+        <% else %>
+          <%= button_to "Pause", monitor_pause_path(@monitor), method: :post,
+                class: "h-8 px-3 rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+        <% end %>
       <% end %>
       <%= link_to "Edit", edit_monitor_path(@monitor),
             class: "h-8 px-3 inline-flex items-center rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>

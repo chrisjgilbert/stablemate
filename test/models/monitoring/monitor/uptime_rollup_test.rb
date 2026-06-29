@@ -81,6 +81,19 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
     assert_equal :no_data, stat.status
   end
 
+  # Issue #19 — a plan-suspended monitor is "not monitored" just like paused, so a
+  # day with no evidence (no pings, no incident) is no-data, NOT a phantom 100%-up
+  # day. Without this a suspended monitor would back-fill false historical uptime.
+  test "a fully suspended day is no-data, not down" do
+    @monitor.update!(status: "suspended")
+
+    stat = @monitor.roll_up_uptime(@day)
+
+    assert_equal 0, stat.up_seconds
+    assert_equal 0, stat.down_seconds
+    assert_equal :no_data, stat.status
+  end
+
   # Spec §3.1 — a pending (created, never pinged) monitor's evidence-free day is
   # no-data, not a false 100%-up day, and is excluded from uptime_percent.
   test "a pending never-pinged monitor's day is no-data, not a full up-day" do
