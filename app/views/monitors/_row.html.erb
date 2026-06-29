@@ -5,11 +5,15 @@
   broadcast target (dom_id(monitor, :row)).
 %>
 <%= turbo_stream_from monitor %>
-<div id="<%= dom_id(monitor, :row) %>" class="flex items-center justify-between px-[18px] py-[13px] hover:bg-surface-subtle">
+<%# `relative` anchors the stretched link below so the whole row is one click
+    target into the monitor; the name stays the accessible link text. %>
+<div id="<%= dom_id(monitor, :row) %>" class="relative flex items-center justify-between px-[18px] py-[13px] hover:bg-surface-subtle">
   <div class="flex items-center gap-3 min-w-0">
     <%= render "shared/status_badge", status: monitor.status %>
+    <%# before:absolute before:inset-0 stretches the link over the entire row, so
+        clicking anywhere on the row opens the monitor — not just the name. %>
     <%= link_to monitor.name, monitor_path(monitor),
-          class: "font-mono text-[13px] text-ink truncate hover:text-brand" %>
+          class: "font-mono text-[13px] text-ink truncate hover:text-brand before:absolute before:inset-0" %>
     <%= render "shared/gem_chip", monitor: monitor, variant: :compact %>
   </div>
   <div class="flex items-center gap-4 text-[12px] text-muted shrink-0">
