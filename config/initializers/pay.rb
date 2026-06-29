@@ -13,6 +13,20 @@
 # available here. stablemate.rb self-guards against the redundant second load.
 require_relative "stablemate"
 
+# Hand Stripe its keys from our single config-gate source. Pay 8 has no key
+# setters — `Pay::Stripe.public_key/private_key/signing_secret` are *readers* that
+# resolve via `find_value_by_name(:stripe, …)`, i.e. ENV["STRIPE_PUBLIC_KEY"] /
+# ["STRIPE_PRIVATE_KEY"] / ["STRIPE_SIGNING_SECRET"] (then Rails credentials). So
+# we bridge our own names (Stablemate.stripe_*) onto the ones Pay reads, keeping a
+# single place keys live. `||=` so an operator who sets Pay's native names wins.
+# Guarded by billing_enabled? so a keyless (self-host) instance never touches the
+# Stripe SDK and Pay stays dormant.
+if Stablemate.billing_enabled?
+  ENV["STRIPE_PUBLIC_KEY"]     ||= Stablemate.stripe_publishable_key
+  ENV["STRIPE_PRIVATE_KEY"]    ||= Stablemate.stripe_secret_key
+  ENV["STRIPE_SIGNING_SECRET"] ||= Stablemate.stripe_webhook_secret
+end
+
 Pay.setup do |config|
   config.application_name = "Stablemate"
   config.support_email    = "support@stablemate.dev"
@@ -22,15 +36,7 @@ Pay.setup do |config|
   config.default_product_name = "pro"
 
   # Only register the Stripe backend when keys are present; otherwise Pay has no
-  # processor and the billing surface stays dormant.
+  # processor and the billing surface stays dormant. Pay::Stripe.setup reads the
+  # keys bridged above and sets ::Stripe.api_key itself.
   config.enabled_processors = Stablemate.billing_enabled? ? %i[stripe] : []
-end
-
-# Hand Stripe its keys from our config gate. Guarded so a keyless (self-host)
-# instance never touches the Stripe SDK.
-if Stablemate.billing_enabled?
-  Stripe.api_key = Stablemate.stripe_secret_key
-  Pay::Stripe.public_key      = Stablemate.stripe_publishable_key
-  Pay::Stripe.private_key     = Stablemate.stripe_secret_key
-  Pay::Stripe.signing_secret  = Stablemate.stripe_webhook_secret
 end
