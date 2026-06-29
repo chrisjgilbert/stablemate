@@ -65,17 +65,23 @@ yet.
   V2.
 - **Multi-tenant from day one**, single owner per monitor. No teams in V1.
 - **Open source + paid hosting (decided).** The server app is free and
-  self-hostable (AGPLv3); we also run a paid managed instance. Same codebase. The
-  paid tier's exact differentiation is still open (§11); V1 has **no Stripe, no
-  checkout, no metering**.
+  self-hostable (AGPLv3); we also run a paid managed instance. Same codebase.
+  Model is **managed-hosting / feature parity** — the *only* gate is monitor
+  count, no features are paywalled (§11).
+- **Self-serve billing IS in V1 (Stripe-direct).** The hosted tier sells via
+  **Stripe Checkout + Customer Portal**, with **Stripe Tax** for VAT/sales tax;
+  flat tiers gated on monitor count (Free + Pro). Built with the **Pay gem**.
+  Billing is **hosted-only and config-gated** (Stripe keys present → on); a
+  self-hoster has no billing and no plan enforcement. Full detail in §12.
+  Sequenced **last** (Phase 5) so the core product ships and is validated first.
 - **Monitor cap and signup cap are hosted-instance policy, not product limits.**
   The per-user monitor cap (`MAX_MONITORS_PER_USER`) and the global signup cap +
-  waitlist (`SIGNUP_ACCOUNT_CAP`) exist only to bound *our* managed-hosting bill
-  at launch. They must be **config-driven and default to OFF / unlimited**, so a
-  **self-hoster has no caps and no waitlist** on their own instance; we switch
-  them on only for `stablemate.dev`. (`User.plan`, default `free`, stays for
-  forward-compat when billing arrives.) *Implementation note: the current build
-  bakes these in for the hosted model — they now need to be gated behind config.*
+  waitlist (`SIGNUP_ACCOUNT_CAP`) are **config-driven and default to OFF /
+  unlimited**, so a **self-hoster has no caps and no waitlist**. On
+  `stablemate.dev` the monitor cap becomes the **plan boundary** (Free = 5; Pro =
+  higher/unlimited), driven by `User.plan` synced from the Stripe subscription.
+  *Implementation note: the current build bakes the caps in — they need
+  config-gating (issue #16).*
 - The `Monitor` model uses a `monitor_type` discriminator (`heartbeat` only for
   now) so HTTP monitors slot in later without a destructive migration.
 - **Gem execution tracking is built on ActiveJob**, not Solid Queue directly —
@@ -117,6 +123,10 @@ yet.
    first-class, documented path, not an afterthought.
 7. Keep the alerting layer **channel-agnostic internally** so V2 channels are
    purely additive.
+8. On the managed instance, let a Free user **self-serve upgrade to Pro** (Stripe
+   Checkout) and manage/cancel their subscription (Stripe Customer Portal), with
+   their monitor cap following their plan. Billing is hosted-only and invisible to
+   self-hosters (§12).
 
 ### 2.2 Non-Goals (V1)
 
@@ -128,10 +138,11 @@ yet.
   owner's authenticated dashboard only. (See §9 for the rationale.)
 - **Webhook / Slack alert channels.** → V2 (architected for, not built).
 - **Teams, organisations, shared ownership, roles/permissions.** → later.
-- **Payment / checkout / metered billing.** There is no Stripe integration, no
-  in-app upgrade, and no usage metering in V1 — the paid managed tier is sold/run
-  out-of-band for now. (`User.plan` exists for forward-compat; the monitor/signup
-  caps are hosted-instance policy, off by default for self-hosters — see §1, §11.)
+- **Usage / metered billing.** Pricing is flat tiers gated on monitor count — we
+  do **not** meter pings or bill by usage. (Self-serve subscription billing itself
+  *is* in V1 for the hosted tier — see Goal 8 and §12.)
+- **In-app team billing, seats, multiple payment methods, marketplace billing.**
+  V1 is a single Pro tier per account; teams/seats are V2.
 - **Aggregated multi-monitor status sites, custom domains / CNAMEs.** → V2.
 - **Cron-expression schedule parsing** (e.g. validating that pings line up with
   a `* * * *` spec). V1 uses a simple expected-interval model.
@@ -160,15 +171,25 @@ The tenant. Owns everything.
 | `email_address` | string, unique, not null | Rails 8 auth convention |
 | `password_digest` | string | `has_secure_password` |
 | `verified_at` | datetime, null | Set when email confirmed; not enforced in V1 |
-| `plan` | string, not null, default `free` | Forward-compat for a paid tier; V1 is always `free` |
+| `plan` | string, not null, default `free` | `free` or `pro`; on the hosted tier synced from the Stripe subscription via webhook (§12). Always `free` on a self-hosted instance. |
 | `created_at` / `updated_at` | datetime | |
 
 Auth uses the **Rails 8 built-in authentication generator** (sessions +
 `has_secure_password`). No Devise, no OAuth in V1.
 
-**Monitor cap.** A user may own at most `MAX_MONITORS_PER_USER` (5 in V1) active
-monitors, enforced on creation in both the UI and the API (§6.2). The cap is a
-constant keyed off `plan`, so a future paid tier raises it without a migration.
+**Monitor cap.** The cap is keyed off `plan` (Free = 5, Pro = higher/unlimited),
+enforced on creation in both the UI and the API (§6.2). When caps are disabled by
+config (the self-host default), there is no limit (issue #16).
+
+### 3.1b Billing (hosted-only, via the Pay gem)
+The managed tier uses the **[Pay gem](https://github.com/pay-rails/pay)** with the
+Stripe backend, which provides its own tables — `pay_customers`,
+`pay_subscriptions`, `pay_charges`, `pay_payment_methods` — associated polymorphically
+to `User`. We do **not** hand-roll subscription state. `User.plan` is **derived
+from the active `Pay::Subscription`** (kept in sync by Stripe webhooks, §12): an
+active Pro subscription ⇒ `plan = "pro"`; none/cancelled ⇒ `free`. On a
+self-hosted instance the Pay tables simply stay empty and everyone is `free` with
+caps off. No new bespoke billing columns on `User` beyond `plan`.
 
 ### 3.1a `WaitlistSignup`
 Captures interested emails once the launch signup cap is reached.
@@ -360,8 +381,10 @@ On ping receipt for a monitor:
    the form instead captures a `WaitlistSignup` and shows a "you're on the list"
    confirmation — no account is created (§3.1a). Otherwise a verification email is
    sent (non-blocking).
-2. Creates a monitor: name, expected interval, grace period. **Blocked with an
-   "at your 5-monitor limit" message** once the cap is hit (§3.1).
+2. Creates a monitor: name, expected interval, grace period. On the hosted tier,
+   once the Free cap is hit the form is **blocked with an "at your 5-monitor
+   limit — upgrade to Pro" prompt** linking to checkout (§5.6). Self-hosted: no
+   cap.
 3. Stablemate shows the **unique ping URL** and a `curl` snippet.
 4. User wires the URL into their cron/job. First ping flips `pending → up`.
 
@@ -390,6 +413,22 @@ On ping receipt for a monitor:
 
 ### 5.5 Manage monitors
 - List / edit / pause / resume / delete; rotate `ping_token`; manage API keys.
+
+### 5.6 Upgrade & manage subscription (hosted tier only)
+1. A Free user clicks **Upgrade to Pro** (from billing settings or the at-limit
+   prompt). We create/refresh their Stripe customer and redirect to a **Stripe
+   Checkout** session (Stripe Tax computes VAT/sales tax at checkout).
+2. On success, Stripe fires a webhook → Pay updates the subscription → `User.plan`
+   becomes `pro` → the monitor cap lifts. The user lands back on a confirmation.
+3. To change card, view invoices, or cancel, the user opens the **Stripe Customer
+   Portal** (a hosted page) from billing settings. Cancellation/expiry fires a
+   webhook → `plan` reverts to `free`.
+4. **Downgrade over the cap:** if a now-Free user has more than the Free cap of
+   monitors, existing monitors keep running, but **creating new ones is blocked**
+   until they're back under the cap. We do not auto-delete or auto-pause. *(Policy
+   choice — see §8 open questions.)*
+5. This entire flow is **absent on a self-hosted instance** (no Stripe keys → no
+   billing UI, no plans).
 
 ---
 
@@ -537,7 +576,8 @@ travels end-to-end before any feature breadth is added.
 ### Phase 1 — Auth, monitors CRUD, detection & email alert
 - Rails 8 authentication (sign up / in / out); tenant scoping; `User.plan`.
 - Monitor CRUD UI (name, interval, grace, pause/resume, token rotation), with the
-  **5-monitor per-user cap** enforced and an at-limit message.
+  **plan-based monitor cap** enforced (Free = 5) and an at-limit message. Cap is
+  config-gated and off by default for self-hosters (#16).
 - Detection recurring job; `up/down/pending/paused` state machine; `Incident`.
 - Action Mailer `down` + `recovered` emails via a channel-agnostic dispatcher.
 - **Exit:** create a monitor, stop pinging, receive a down email; resume pinging,
@@ -558,14 +598,31 @@ travels end-to-end before any feature breadth is added.
   subscriber also fires on a non-Solid-Queue ActiveJob backend against a
   manually-created monitor.
 
-### Phase 4 — Launch hardening & polish
-- **Launch signup cap + waitlist** (`SIGNUP_ACCOUNT_CAP`, `WaitlistSignup`, the
-  capacity-reached sign-up state) — cost protection for public launch.
+### Phase 4 — Launch hardening, self-host packaging & polish
+- **Launch signup cap + waitlist** (`SIGNUP_ACCOUNT_CAP`, `WaitlistSignup`,
+  capacity-reached sign-up state) — config-gated cost protection; off for
+  self-hosters (#16).
+- **Self-host packaging:** Docker image + `docker-compose`, env-based config, a
+  tested `docs/install.md` (#17).
 - Ping rate-limiting; abuse/opaque-error review; mailer deliverability
-  (SPF/DKIM); dashboards/empty states; docs + install guide; backup/restore
-  runbook for the Hetzner box.
-- **Exit:** documented, deployable, dog-fooded on Stablemate's own jobs; with the
-  cap set low, the Nth+1 sign-up lands on the waitlist.
+  (SPF/DKIM); dashboards/empty states; backup/restore runbook for our Hetzner box.
+- **Exit:** documented and deployable both ways — a self-hoster can stand it up
+  from the guide with no caps; our managed instance has caps/waitlist on.
+
+### Phase 5 — Hosted tier billing (Stripe self-serve)
+The revenue layer; hosted-only and config-gated, so it never affects self-hosters.
+Sequenced last so the core product ships and is validated first. **Touches
+payments → run `/security-review`.**
+- **Pay gem + Stripe** backend; `pay_*` tables; Stripe **Checkout** (upgrade) and
+  **Customer Portal** (manage/cancel), plus **Stripe Tax** for VAT/sales tax.
+- Webhook endpoint syncing `Pay::Subscription` → `User.plan`; the monitor cap
+  follows the plan (Free = 5, Pro = higher/unlimited).
+- Billing settings UI; the at-limit "Upgrade to Pro" prompt (§5.6); downgrade-
+  over-cap handling (§8).
+- All of it dormant unless Stripe keys are configured (self-host = no billing).
+- **Exit:** on a Stripe-keyed instance, a Free user upgrades via Checkout → plan
+  flips to Pro via webhook → cap lifts; cancel via Portal → reverts to Free. A
+  keyless (self-host) instance shows no billing and stays unlimited.
 
 ### Deferred to V2 (explicitly)
 > The live, triageable version of this list — grouped, with source refs and the
@@ -649,6 +706,18 @@ Recorded so future scope decisions don't drift into a neighbour's lane.
 8. **Paused monitors and the cap.** Does a `paused` monitor count toward the
    5-monitor limit? Proposal: **yes** (it still occupies a slot and could be
    resumed); pausing is not a way to exceed the cap. Confirm.
+9. **Pro price & shape (billing).** What is Pro's monthly price, is there an annual
+   discount, and is Pro "unlimited monitors" or a high fixed cap (e.g. 100)? Also:
+   offer a free trial on Pro, or straight to paid? Needed before Phase 5.
+10. **Downgrade over the cap.** When a Pro user cancels and is left with more than
+    the Free cap of monitors, proposal: existing monitors keep running but **no new
+    ones** until back under the cap (no auto-delete/auto-pause). Confirm — the
+    alternative (auto-pause the newest over-cap monitors) risks silently dropping
+    monitoring on a downgrade.
+11. **Stripe-direct tax burden.** We chose Stripe-direct over a Merchant of Record,
+    so VAT/sales-tax **registration and remittance are ours** (Stripe Tax only
+    calculates). Confirm comfort with that ongoing admin; revisit an MoR (Paddle/
+    Lemon Squeezy, both supported by Pay) if it becomes a burden.
 
 ---
 
@@ -706,18 +775,69 @@ that values self-hostable OSS.
 - **Managed instance (`stablemate.dev`):** we turn the caps/waitlist ON to bound
   cost at launch (§1). Deployed by us via Kamal on Hetzner.
 
-**Still OPEN — paid-tier differentiation (was going to ask; deferred):**
-1. **Managed-hosting-only (full feature parity)** — every feature is in the OSS
-   app; you pay purely for "we run it" (ops, backups, upgrades, deliverable
-   email). Simplest, most goodwill. *(My recommendation.)*
-2. **Open-core** — some features (teams/SSO/extra channels/longer retention) are
-   reserved for the paid tier. More revenue leverage, more complexity, risk of
-   community friction.
-Until this is decided, build for parity (option 1) — it's the non-committal path
-and nothing about V1 depends on choosing yet.
+**Paid-tier differentiation — DECIDED: managed-hosting / feature parity.** Every
+feature lives in the OSS app; the paid tier is purely "we run it" plus a higher
+monitor cap. **No features are paywalled** — the *only* difference between Free
+and Pro is the monitor count. (We rejected open-core: it adds complexity and
+community friction for little gain at this stage. Feature-gating could be
+revisited far later, but is explicitly out of scope.)
 
-**Implications still to work through (not all V1):**
-- Docker image + `docker-compose` + env-based config + a self-host install guide
-  (`docs/install.md`) as a first-class, tested path.
-- The baked-in monitor/signup caps need to become **config-gated** (default off).
-- Decide where the managed tier's billing eventually lives (out of band for now).
+Full billing design (Stripe-direct, flat tiers, self-serve in V1) is in **§12**.
+
+**Implications (tracked):**
+- Docker image + `docker-compose` + env config + tested `docs/install.md` — issue
+  **#17**.
+- Caps must be config-gated, default off for self-hosters — issue **#16**.
+- Self-serve billing — **§12**, Phase 5.
+
+---
+
+## 12. Hosted tier & billing (decided)
+
+Revenue layer for the managed instance only. **Hosted-only and config-gated** —
+dormant unless Stripe keys are present, so self-hosters never see billing and stay
+unlimited.
+
+### Plans (flat tiers gated on monitor count)
+| Plan | Monitors | Price | Notes |
+|---|---|---|---|
+| **Free** | 5 | £0 | The hosted on-ramp; bounded at launch by the signup cap/waitlist (§1). |
+| **Pro** | higher / unlimited | flat £/mo (+ annual) | Lifts the cap. **Exact price + whether Pro is "unlimited" or a high cap are open — see §8.** |
+
+No usage metering, no per-seat pricing (teams are V2). The monitor cap *is* the
+plan boundary, driven by `User.plan`.
+
+### Provider & stack — Stripe-direct via the Pay gem
+- **[Pay gem](https://github.com/pay-rails/pay)** (Stripe backend) for subscription
+  state — we don't hand-roll it. Idiomatic vanilla Rails; provides the `pay_*`
+  tables (§3.1b).
+- **Stripe Checkout** (hosted) for upgrade and **Stripe Customer Portal** (hosted)
+  for card changes / invoices / cancellation — we build **no** card forms,
+  dunning, or invoice UI. **No card data ever touches our servers** (PCI scope
+  stays minimal).
+- **Stripe Tax** computes VAT/sales tax at checkout. *Compliance note:* Stripe Tax
+  calculates and collects, but as seller of record **we own registration and
+  remittance** in the relevant jurisdictions (the deliberate trade-off vs. a
+  Merchant of Record — see §8 for revisiting if admin gets heavy).
+- **Webhooks** (`Billing::WebhooksController`) with **signature verification** are
+  the source of truth: `checkout.session.completed`, `customer.subscription.*`,
+  `invoice.*` → Pay updates `Pay::Subscription` → a thin sync sets `User.plan`.
+
+### Architecture (vanilla Rails, per CLAUDE.md)
+- Plan logic lives on the record: a `User::Plan` concern (cap keyed off `plan`)
+  and a `User::Subscription` concern wrapping Pay. Checkout/portal are RESTful
+  sub-resources (`Billing::CheckoutsController#create`,
+  `Billing::PortalSessionsController#create`) — no `BillingService` bucket.
+- Config-gate: a single `billing_enabled?` (true when Stripe keys are set). Off ⇒
+  routes/UI hidden, caps unlimited, Pay tables empty. This is the self-host path.
+
+### Security
+Payments touch sensitive surface → **`/security-review` is required for Phase 5**:
+verified webhook signatures, idempotent webhook handling, no trusting client-side
+plan claims (plan only ever changes via a verified webhook), and the usual
+opaque-error discipline.
+
+### Out of scope for V1 billing
+Coupons/credits, proration edge-case UI beyond Stripe defaults, multiple
+currencies beyond Stripe's checkout defaults, invoicing/PO flows, team seats,
+and feature-gating (parity model, §11).
