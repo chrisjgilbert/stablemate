@@ -84,21 +84,32 @@ test:
 # Read https://guides.rubyonrails.org/configuring.html#configuring-a-database
 # for a full overview on how database connection configuration can be specified.
 #
+# Stablemate runs four logical databases (primary + Solid Cache/Queue/Cable) on a
+# single PostgreSQL server. They're all configured from the environment so a
+# self-hoster (docker-compose) just sets DB_HOST / DB_USERNAME / DB_PASSWORD and
+# the managed Kamal deploy keeps supplying DB_HOST + STABLEMATE_DATABASE_PASSWORD.
+#
+# The primary database NAME is driven by the SAME variable the Postgres container
+# uses (POSTGRES_DB) so the two can never drift; STABLEMATE_DATABASE is kept as a
+# legacy fallback. The cache/queue/cable databases derive their names from it.
+<% db_name = ENV["POSTGRES_DB"].presence || ENV["STABLEMATE_DATABASE"].presence || "stablemate_production" %>
 production:
   primary: &primary_production
     <<: *default
-    database: stablemate_production
-    username: stablemate
-    password: <%= ENV["STABLEMATE_DATABASE_PASSWORD"] %>
+    database: <%= db_name %>
+    host: <%= ENV["DB_HOST"] %>
+    port: <%= ENV.fetch("DB_PORT", 5432) %>
+    username: <%= ENV.fetch("DB_USERNAME", "stablemate") %>
+    password: <%= ENV["DB_PASSWORD"] || ENV["STABLEMATE_DATABASE_PASSWORD"] %>
   cache:
     <<: *primary_production
-    database: stablemate_production_cache
+    database: <%= db_name %>_cache
     migrations_paths: db/cache_migrate
   queue:
     <<: *primary_production
-    database: stablemate_production_queue
+    database: <%= db_name %>_queue
     migrations_paths: db/queue_migrate
   cable:
     <<: *primary_production
-    database: stablemate_production_cable
+    database: <%= db_name %>_cable
     migrations_paths: db/cable_migrate

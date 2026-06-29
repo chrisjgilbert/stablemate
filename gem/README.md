@@ -14,7 +14,7 @@ gem "stablemate"
 # config/initializers/stablemate.rb
 Stablemate.configure do |c|
   c.api_key  = Rails.application.credentials.dig(:stablemate, :api_key) # sm_live_…
-  c.endpoint = "https://stablemate.dev"
+  c.endpoint = "https://stablemate.dev" # your own domain if self-hosting
   c.ping_on_success = true
 end
 ```
@@ -49,7 +49,7 @@ created** monitor whose `registration_key` equals the job class name (e.g.
 | Option | Default | Meaning |
 |---|---|---|
 | `api_key` | – | `sm_live_…` bearer token (registration only; never on the ping path) |
-| `endpoint` | `https://stablemate.dev` | Server base URL |
+| `endpoint` | `https://stablemate.dev` (or `STABLEMATE_ENDPOINT` env) | Server base URL — set to your own domain when self-hosting |
 | `ping_on_success` | `true` | Ping when a monitored job completes cleanly |
 | `recurring_path` | `config/recurring.yml` | Solid Queue recurring config |
 | `timeout` | `2` | HTTP timeout (seconds) |

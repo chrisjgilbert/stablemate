@@ -16,7 +16,8 @@ a companion gem that auto-registers heartbeat monitors from `config/recurring.ym
 
 - Product spec: [`docs/PRD.md`](docs/PRD.md)
 - Roadmap: [`docs/roadmap.md`](docs/roadmap.md)
-- Self-hosting / install: [`docs/install.md`](docs/install.md)
+- Self-hosting (Docker / compose): [`docs/install.md`](docs/install.md)
+- Integrating your jobs (gem + ping URLs): [`docs/integrating.md`](docs/integrating.md)
 - Companion gem: [`gem/README.md`](gem/README.md)
 
 ## License
