@@ -1,4 +1,4 @@
-<% content_for :title, "Stablemate — heartbeat monitoring for your cron jobs" %>
+<% content_for :title, "Stablemate — simple Rails job monitoring" %>
 
 <div class="max-w-3xl mx-auto text-center pt-10 pb-16">
   <div class="flex flex-col items-center gap-4">
@@ -9,9 +9,8 @@
     </h1>
 
     <p class="text-[15px] text-secondary max-w-xl leading-relaxed">
-      Stablemate is heartbeat monitoring for your scheduled jobs. Each job pings a
-      URL when it finishes; if a ping is late, we email you. No agents, no dashboards
-      to babysit — just a calm signal when something stops.
+      Add one gem. Your jobs ping a URL when they finish — if a ping is late,
+      you get one email. No noise, no dashboards to babysit.
     </p>
 
     <div class="flex items-center gap-3 mt-4">
@@ -29,7 +28,7 @@
   <!-- Gem-first path: recurring jobs register themselves. -->
   <div class="mt-14 text-left max-w-xl mx-auto">
     <p class="text-[12px] font-semibold uppercase tracking-wide text-muted mb-2">
-      Recommended — install the gem
+      Install the gem
     </p>
     <div class="rounded-xl border border-border bg-[#1c1c22] text-[#d4d4dc] font-mono text-[12px] leading-relaxed p-4 overflow-x-auto shadow-sm">
 <pre class="whitespace-pre"># config/recurring.yml
@@ -44,8 +43,8 @@ daily_digest:
 
   <div class="mt-12 grid sm:grid-cols-3 gap-4 text-left">
     <div class="rounded-xl border border-border bg-surface p-5 shadow-sm">
-      <h3 class="text-[14px] font-semibold text-ink mb-1">Heartbeat, not polling</h3>
-      <p class="text-[13px] text-secondary leading-relaxed">Your job tells us it ran. A missed check-in is the signal — no false alarms from network blips.</p>
+      <h3 class="text-[14px] font-semibold text-ink mb-1">Zero per-job config</h3>
+      <p class="text-[13px] text-secondary leading-relaxed">One gem line registers all your recurring jobs automatically. No boilerplate, no manual setup.</p>
     </div>
     <div class="rounded-xl border border-border bg-surface p-5 shadow-sm">
       <h3 class="text-[14px] font-semibold text-ink mb-1">Email when it matters</h3>
@@ -53,7 +52,7 @@ daily_digest:
     </div>
     <div class="rounded-xl border border-border bg-surface p-5 shadow-sm">
       <h3 class="text-[14px] font-semibold text-ink mb-1">90-day uptime history</h3>
-      <p class="text-[13px] text-secondary leading-relaxed">See each job's track record at a glance, with a day-by-day uptime bar.</p>
+      <p class="text-[13px] text-secondary leading-relaxed">A day-by-day uptime bar for every job. Spot a flaky schedule before it becomes a problem.</p>
     </div>
   </div>
 

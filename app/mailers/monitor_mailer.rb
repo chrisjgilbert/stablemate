@@ -6,7 +6,7 @@ class MonitorMailer < ApplicationMailer
     @expected_by = monitor.due_with_grace_at
 
     mail to: monitor.user.email_address,
-         subject: "[Stablemate] #{monitor.name} is DOWN"
+         subject: "#{monitor.name} missed its check-in"
   end
 
   # Alert: a previously-down monitor pinged again and has recovered.
@@ -14,6 +14,6 @@ class MonitorMailer < ApplicationMailer
     @monitor = monitor
 
     mail to: monitor.user.email_address,
-         subject: "[Stablemate] #{monitor.name} has recovered"
+         subject: "#{monitor.name} is back up"
   end
 end

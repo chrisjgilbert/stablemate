@@ -1,14 +1,14 @@
-<h1 style="font-family: sans-serif; color: #177a3d;">Your monitor has recovered</h1>
-
-<p style="font-family: sans-serif; color: #26262c;">
-  <strong style="font-family: monospace;"><%= @monitor.name %></strong>
-  pinged again and is back <strong>up</strong>.
-</p>
+<h1 style="font-family: sans-serif; color: #177a3d;"><%= @monitor.name %> is back up.</h1>
 
 <% if @monitor.last_ping_at %>
   <p style="font-family: sans-serif; color: #62626c;">
-    Last ping
+    A ping arrived at
     <span style="font-family: monospace;"><%= @monitor.last_ping_at.utc.strftime("%Y-%m-%d %H:%M UTC") %></span>.
+    Your job is running again.
+  </p>
+<% else %>
+  <p style="font-family: sans-serif; color: #62626c;">
+    Your job is running again.
   </p>
 <% end %>
 

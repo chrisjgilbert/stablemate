@@ -1,15 +1,14 @@
-<h1 style="font-family: sans-serif; color: #c0282d;">Your monitor is down</h1>
-
-<p style="font-family: sans-serif; color: #26262c;">
-  <strong style="font-family: monospace;"><%= @monitor.name %></strong>
-  has missed its expected check-in and is now marked <strong>down</strong>.
-</p>
+<h1 style="font-family: sans-serif; color: #c0282d;"><%= @monitor.name %> is down.</h1>
 
 <% if @expected_by %>
   <p style="font-family: sans-serif; color: #62626c;">
-    Expected by
-    <span style="font-family: monospace;"><%= @expected_by.utc.strftime("%Y-%m-%d %H:%M UTC") %></span>,
-    but no ping arrived.
+    No ping arrived by
+    <span style="font-family: monospace;"><%= @expected_by.utc.strftime("%Y-%m-%d %H:%M UTC") %></span>.
+    Check your job logs to see what happened.
+  </p>
+<% else %>
+  <p style="font-family: sans-serif; color: #62626c;">
+    The job missed its expected check-in. Check your job logs to see what happened.
   </p>
 <% end %>
 
