@@ -73,10 +73,10 @@ env:
     # Split this out to a dedicated `job` role once you add a second machine.
     SOLID_QUEUE_IN_PUMA: true
 
-    # Launch signup cap (issue #16 / phase-4): cap new accounts at 5 while
+    # Launch signup cap (issue #16 / phase-4): cap new accounts at 1 while
     # validating demand. Raise (or remove) manually to re-open signups
     # (locked decision #7).
-    STABLEMATE_SIGNUP_ACCOUNT_CAP: 5
+    STABLEMATE_SIGNUP_ACCOUNT_CAP: 1
 
     # Cores available to the app on the server (default: 1). Bump for a bigger VM.
     WEB_CONCURRENCY: 2
