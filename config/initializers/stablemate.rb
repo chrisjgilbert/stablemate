@@ -100,6 +100,18 @@ module Stablemate
   def self.pro_price_id(annual: false)
     annual ? STRIPE_PRICE_ID_PRO_ANNUAL : STRIPE_PRICE_ID_PRO
   end
+
+  # Slack incoming-webhook URL for team alerts (e.g. new sign-ups). Config-gated
+  # like the launch cap — unset by default, so self-hosters never see it; the
+  # managed instance turns it on via env or credentials.
+  def self.slack_webhook_url
+    ENV["SLACK_WEBHOOK_URL"].presence ||
+      Rails.application.credentials.dig(:slack, :webhook_url)
+  end
+
+  def self.slack_notifications_enabled?
+    slack_webhook_url.present?
+  end
 end
 
 Rails.application.config.x.stablemate.tap do |c|

@@ -16,6 +16,24 @@ class SignupTest < ActiveSupport::TestCase
     assert_nil user.verified_at
   end
 
+  # The Slack alert job is queued for every successful signup; whether it
+  # actually posts anywhere is gated inside User::SignupAlert (off by default
+  # in test, like self-host — see test/models/user/signup_alert_test.rb), not
+  # at enqueue time here.
+  test "run queues a Slack alert job for a successfully created user" do
+    user = nil
+    assert_enqueued_with(job: NotifySignupJob, args: ->(args) { args == [ user.id ] }) do
+      user = Signup.new(email: "with-slack@example.com", password: "password1234", password_confirmation: "password1234").run
+    end
+  end
+
+  # Never fires for a failed/waitlisted signup — only a successfully created User.
+  test "run does not queue a Slack alert job when signup fails" do
+    assert_no_enqueued_jobs only: NotifySignupJob do
+      Signup.new(email: users(:alice).email_address, password: "password1234", password_confirmation: "password1234").run
+    end
+  end
+
   test "run returns an invalid, unpersisted user when the email is taken" do
     assert_no_enqueued_emails do
       user = Signup.new(email: users(:alice).email_address, password: "password1234", password_confirmation: "password1234").run

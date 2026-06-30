@@ -40,10 +40,18 @@ registry:
 env:
   secret:
     - RAILS_MASTER_KEY
+    # Slack incoming-webhook URL for sign-up alerts (config/initializers/stablemate.rb).
+    # Uncomment once .kamal/secrets exports SLACK_WEBHOOK_URL.
+    # - SLACK_WEBHOOK_URL
   clear:
     # Run the Solid Queue Supervisor inside the web server's Puma process to do jobs.
     # When you start using multiple servers, you should split out job processing to a dedicated machine.
     SOLID_QUEUE_IN_PUMA: true
+
+    # Launch signup cap (issue #16 / phase-4): cap new accounts at 5 while
+    # validating demand. Raise (or remove) manually to re-open signups
+    # (locked decision #7).
+    STABLEMATE_SIGNUP_ACCOUNT_CAP: 5
 
     # Set number of processes dedicated to Solid Queue (default: 1)
     # JOB_CONCURRENCY: 3

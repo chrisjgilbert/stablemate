@@ -37,12 +37,37 @@ module BillingGateTestHelper
   end
 end
 
+module SlackGateTestHelper
+  def with_slack_enabled
+    Stablemate.stub_slack(true) { yield }
+  end
+
+  def with_slack_disabled
+    Stablemate.stub_slack(false) { yield }
+  end
+end
+
 module Stablemate
   # Test-only fixed Stripe credentials used when billing is forced on. Never real
   # keys — just enough for the config-gate and signature verification in tests.
   TEST_STRIPE_PUBLISHABLE_KEY = "pk_test_stablemate".freeze
   TEST_STRIPE_SECRET_KEY      = "sk_test_stablemate".freeze
   TEST_STRIPE_WEBHOOK_SECRET  = "whsec_stablemate_test".freeze
+
+  # Test-only fake Slack webhook URL used when Slack notifications are forced on.
+  TEST_SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/test".freeze
+
+  # Test-only: force slack_notifications_enabled? (and the webhook URL it reads)
+  # for the duration of a block, restoring the original afterward. Mirrors
+  # stub_billing — minitest 6 dropped Object#stub, so config-gate predicates are
+  # swapped by hand rather than mocked.
+  def self.stub_slack(value)
+    original = method(:slack_webhook_url)
+    define_singleton_method(:slack_webhook_url) { value ? TEST_SLACK_WEBHOOK_URL : nil }
+    yield
+  ensure
+    define_singleton_method(:slack_webhook_url, original)
+  end
 
   # Test-only: force billing_enabled? (and the Stripe keys it reads) for the
   # duration of a block, restoring the originals afterward (exception-safe).
@@ -84,6 +109,7 @@ module ActiveSupport
     fixtures :all
 
     include BillingGateTestHelper
+    include SlackGateTestHelper
 
     # Add more helper methods to be used by all tests here...
   end

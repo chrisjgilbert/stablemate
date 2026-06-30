@@ -4,7 +4,8 @@
 # returned record's type.
 #
 # Below SIGNUP_ACCOUNT_CAP: create the user, send a non-blocking verification
-# email, return the User. At/over the cap (locked decision #7 — re-opened manually
+# email, queue a Slack alert for the team (NotifySignupJob -> User::SignupAlert,
+# also non-blocking), and return the User. At/over the cap (locked decision #7 — re-opened manually
 # by raising the constant): create a WaitlistSignup instead — no User, no session,
 # no email — and return it. A duplicate waitlist email is a friendly no-op success
 # (find-then-create), never an error and never an enumeration oracle.
@@ -44,7 +45,10 @@ class Signup
         password_confirmation: @password_confirmation
       )
 
-      user.send_verification_email if user.save
+      if user.save
+        user.send_verification_email
+        NotifySignupJob.perform_later(user.id)
+      end
       user
     end
 
