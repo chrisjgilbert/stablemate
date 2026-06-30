@@ -26,7 +26,7 @@ class RegistrationsController < ApplicationController
     def join_waitlist(signup)
       if signup.persisted?
         redirect_to sign_up_path,
-          notice: "You're on the list — we'll email you an invite. Need it sooner? Email support@stablemate.dev."
+          notice: "You're on the list — we'll email you an invite. Need it sooner? Email chris@chrisgilbert.dev."
       else
         # A blank/invalid email at capacity: re-render the waitlist form. (Errors
         # are generic — "can't be blank" — so this never becomes an enumeration

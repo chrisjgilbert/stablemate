@@ -29,7 +29,8 @@ end
 
 Pay.setup do |config|
   config.application_name = "Stablemate"
-  config.support_email    = "support@stablemate.dev"
+  # TODO: switch back to support@stablemate.dev once that mailbox exists.
+  config.support_email    = "chris@chrisgilbert.dev"
 
   # We have exactly one paid product — Pro. Naming every subscription "pro" lets
   # User::Subscription#subscribed_to_pro? ask Pay a single, plan-agnostic question.
