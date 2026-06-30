@@ -1,7 +1,5 @@
-Your monitor has recovered
+<%= @monitor.name %> is back up.
 
-<%= @monitor.name %> pinged again and is back UP.
-<% if @monitor.last_ping_at %>
-Last ping <%= @monitor.last_ping_at.utc.strftime("%Y-%m-%d %H:%M UTC") %>.
-<% end %>
+<% if @monitor.last_ping_at %>A ping arrived at <%= @monitor.last_ping_at.utc.strftime("%Y-%m-%d %H:%M UTC") %>. <% end %>Your job is running again.
+
 View monitor: <%= monitor_url(@monitor) %>

@@ -41,7 +41,7 @@ class OutageRecoveryTest < ApplicationSystemTestCase
     assert monitor.reload.down?
 
     # A down email was sent.
-    assert_equal 1, ActionMailer::Base.deliveries.count { |m| m.subject.include?("DOWN") }
+    assert_equal 1, ActionMailer::Base.deliveries.count { |m| m.subject.include?("missed its check-in") }
 
     ActionMailer::Base.deliveries.clear
 
@@ -52,7 +52,7 @@ class OutageRecoveryTest < ApplicationSystemTestCase
 
     assert_selector "##{dom_id(monitor, :row)}", text: "Up"
     assert monitor.reload.up?
-    assert_equal 1, ActionMailer::Base.deliveries.count { |m| m.subject.include?("recovered") }
+    assert_equal 1, ActionMailer::Base.deliveries.count { |m| m.subject.include?("is back up") }
   end
 
   # S6 (detail page) — the monitor-detail header badge flips live too (spec §3.8:
