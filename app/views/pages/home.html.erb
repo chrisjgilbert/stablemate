@@ -66,12 +66,7 @@
 
       <%# product window mockup %>
       <div class="bg-surface border border-[#e8e8ee] rounded-[14px] overflow-hidden" style="box-shadow:0 24px 60px -20px rgba(28,24,90,.22),0 6px 20px rgba(20,20,40,.06)">
-        <div class="flex items-center gap-[7px] h-[38px] px-3.5 bg-surface-subtle border-b border-[#f0f0f3]">
-          <span class="w-[11px] h-[11px] rounded-full bg-border"></span>
-          <span class="w-[11px] h-[11px] rounded-full bg-border"></span>
-          <span class="w-[11px] h-[11px] rounded-full bg-border"></span>
-          <span class="ml-2.5 font-mono text-[11px] text-[#b0b0bb]">stablemate.dev/monitors</span>
-        </div>
+        <%= render "pages/browser_chrome", url: "stablemate.dev/monitors" %>
         <div class="px-4 py-3.5">
           <div class="flex items-center justify-between mb-3">
             <span class="font-bold text-[14px] text-ink">Monitors</span>
@@ -226,16 +221,11 @@
 <div class="max-w-[1140px] mx-auto px-6 py-[74px]">
   <div class="grid lg:grid-cols-[1.1fr_.9fr] gap-12 items-center">
     <div class="bg-surface border border-[#e8e8ee] rounded-[14px] overflow-hidden" style="box-shadow:0 16px 40px -18px rgba(28,24,90,.18)">
-      <div class="flex items-center gap-[7px] h-[38px] px-3.5 bg-surface-subtle border-b border-[#f0f0f3]">
-        <span class="w-[11px] h-[11px] rounded-full bg-border"></span>
-        <span class="w-[11px] h-[11px] rounded-full bg-border"></span>
-        <span class="w-[11px] h-[11px] rounded-full bg-border"></span>
-        <span class="ml-2.5 font-mono text-[11px] text-[#b0b0bb]">stablemate.dev/monitors/daily-digest-email</span>
-      </div>
+      <%= render "pages/browser_chrome", url: "stablemate.dev/monitors/daily-digest-email" %>
       <div class="px-[22px] py-5">
         <div class="flex items-center gap-2.5 mb-4">
           <span class="font-mono font-bold text-[15px] text-ink">daily-digest-email</span>
-          <span class="inline-flex items-center gap-1.5 h-[21px] pl-1.5 pr-2 rounded-md bg-up-bg text-up-text text-[11px] font-semibold"><span class="w-[5px] h-[5px] rounded-full bg-up-dot"></span>Up</span>
+          <%= render "shared/status_badge", status: "up" %>
           <span title="Registered from config/recurring.yml" class="inline-flex items-center gap-1 h-[19px] pl-1.5 pr-[7px] rounded-[5px] bg-brand-tint text-gem font-mono font-semibold text-[10px]"><span aria-hidden="true">◆</span>gem</span>
         </div>
         <div class="flex items-center justify-between mb-2.5">
