@@ -103,6 +103,85 @@ that `STABLEMATE_MAIL_FROM` is a sender your provider authorises.
 
 ---
 
+## Deploying on a single VM with Kamal (e.g. Hetzner)
+
+The Docker Compose path above is the quickest self-host. [Kamal](https://kamal-deploy.org)
+is the alternative used for the managed instance: it provisions **kamal-proxy** on
+the box, which terminates TLS and load-balances to the app container — so you do
+**not** need Caddy, nginx, or a separate `cloudflared`. `config/deploy.yml` is
+pre-wired for a single VM; fill in the `PLACEHOLDER_*` values.
+
+### TLS — two options
+
+kamal-proxy serves the certificate; pick how it's obtained:
+
+**Origin Certificate (what the committed `deploy.yml` is set to).** Best when you
+front the app with Cloudflare *and* lock the firewall to Cloudflare's IPs (below):
+with ACME unable to reach the box, Let's Encrypt can't issue/renew, so a
+Cloudflare-issued cert — which needs no challenge and never renews — is the clean
+fit. Set it up:
+
+1. **SSL/TLS → Origin Server → Create Certificate** (take the 15-year default).
+   Save the two PEM blocks as the gitignored files `.kamal/cloudflare-origin.pem`
+   (certificate) and `.kamal/cloudflare-origin.key` (private key) — `.kamal/secrets`
+   already reads them.
+2. **SSL/TLS → Overview** → encryption mode **Full (strict)**.
+3. DNS → an **A record** for your host → the VM's IP, **Proxied** (orange cloud).
+4. `STABLEMATE_BEHIND_CLOUDFLARE=true` is already in `deploy.yml`'s env, so the app
+   trusts Cloudflare's edge and logs/rate-limits on the **real** client IP rather
+   than a Cloudflare address.
+
+No grey-cloud dance, no renewals.
+
+**Automatic Let's Encrypt (simpler, for a box reached directly).** If you're *not*
+behind Cloudflare (or not locking the firewall), replace the `proxy.ssl` block in
+`config/deploy.yml` with a bare `ssl: true`, comment out the two SSL cert lines in
+`.kamal/secrets`, and point DNS straight at the VM — kamal-proxy issues and renews
+automatically. Behind Cloudflare you *can* still use this (keep Full (strict),
+issue the first cert with DNS set to **DNS only**, then flip to **Proxied**), but a
+locked-down firewall would block the challenge — that's exactly why we default to
+the Origin Cert.
+
+### Lock the origin to Cloudflare (recommended hardening)
+
+So nobody bypasses Cloudflare by hitting the raw IP — skipping its WAF and
+rate-limiting — create a firewall (e.g. a Hetzner Cloud Firewall) that allows
+inbound **80**/**443** **only** from
+[Cloudflare's published ranges](https://www.cloudflare.com/ips/), plus **22** from
+your own admin IP. Everything else (including Postgres :5432, bound to `127.0.0.1`
+and never exposed) stays closed. Keep the Cloudflare ranges under review — they
+change rarely, but an outdated allowlist can drop legitimate traffic.
+
+> IP-allowlisting is defense-in-depth, not airtight: Cloudflare's IPs are shared by
+> all its customers. If you later want a hard guarantee that requests came from
+> *your* Cloudflare zone, look at
+> [Authenticated Origin Pulls (mTLS)](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/).
+
+### Secrets
+
+`config/deploy.yml` uses **`RAILS_MASTER_KEY`** — with it present, Rails derives
+`secret_key_base` from `config/credentials.yml.enc`, and SMTP can live in
+credentials too (`bin/rails credentials:edit`, key `smtp`). The one secret
+credentials can't supply is the database password (Active Record reads it from the
+environment), so `STABLEMATE_DATABASE_PASSWORD` is passed as a Kamal secret and
+reused as the Postgres accessory's `POSTGRES_PASSWORD`. See `.kamal/secrets` for
+where each value is sourced — keep real secrets in a password manager or ENV, never
+in the repo.
+
+### Deploy
+
+```sh
+bin/kamal setup     # first run: installs kamal-proxy + the Postgres accessory, deploys
+bin/kamal deploy    # every release after that
+curl -fsS https://<your-host>/up   # expect 200
+```
+
+The app's entrypoint runs `db:prepare` on boot, creating and migrating the
+primary plus the Solid Cache/Queue/Cable databases. Backups, restore, and
+redeploy/rollback are in [`runbook.md`](runbook.md).
+
+---
+
 ## Pointing the companion gem at your instance
 
 In a Rails app using the [`stablemate` gem](../gem/README.md), set the endpoint to

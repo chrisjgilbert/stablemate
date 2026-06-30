@@ -1,4 +1,5 @@
 require "active_support/core_ext/integer/time"
+require "ipaddr"
 
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
@@ -86,6 +87,38 @@ Rails.application.configure do
   unless allowed_hosts.empty?
     allowed_hosts.each { |h| config.hosts << h.split(":").first }
     config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
+  end
+
+  # request.remote_ip when running behind a reverse proxy / CDN. By DEFAULT we add
+  # nothing to Rails' built-in private ranges: a directly-exposed instance must not
+  # trust a client-supplied X-Forwarded-For, or an attacker could forge their
+  # source IP. Operators behind a proxy opt in so remote_ip is the real client —
+  # without it the per-IP ping rate limiter (pings_controller) collapses to a few
+  # buckets and the session audit log records the proxy's address:
+  #   STABLEMATE_BEHIND_CLOUDFLARE=true → also trust Cloudflare's published ranges
+  #   STABLEMATE_TRUSTED_PROXIES=cidr,…  → trust arbitrary extra proxy CIDRs (an
+  #                                        LB, another CDN, or to track CF's list
+  #                                        without a redeploy)
+  # Whatever is listed is ADDED to Rails' private ranges (which already cover the
+  # kamal-proxy hop). Cloudflare ranges: https://www.cloudflare.com/ips/
+  trusted_proxies = ENV.fetch("STABLEMATE_TRUSTED_PROXIES", "").split(",").map(&:strip).reject(&:empty?)
+  if ActiveModel::Type::Boolean.new.cast(ENV["STABLEMATE_BEHIND_CLOUDFLARE"])
+    trusted_proxies.concat(%w[
+      173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22
+      141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20
+      197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13
+      104.24.0.0/14 172.64.0.0/13 131.0.72.0/22
+      2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32
+      2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+    ])
+  end
+  # NB: assigning trusted_proxies *replaces* Rails' defaults, so prepend the
+  # built-in private ranges (TRUSTED_PROXIES) — otherwise the kamal-proxy hop's
+  # private IP stops being stripped and remote_ip resolves to the proxy, not the
+  # client. (https://api.rubyonrails.org/classes/ActionDispatch/RemoteIp.html)
+  if trusted_proxies.any?
+    config.action_dispatch.trusted_proxies =
+      ActionDispatch::RemoteIp::TRUSTED_PROXIES + trusted_proxies.map { |proxy| IPAddr.new(proxy) }
   end
 
   # Outgoing SMTP. A self-hoster wires this entirely from the environment (no
