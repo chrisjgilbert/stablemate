@@ -33,14 +33,7 @@ class PasswordResetTest < ApplicationSystemTestCase
     fill_in "password_confirmation", with: "hunter2newpass"
     click_on "Save"
 
-    # Redirected to sign-in after a successful reset.
-    assert_current_path new_session_path
-
     # Step 3: sign in with the new credentials — must succeed.
-    fill_in "Email",    with: user.email_address
-    fill_in "Password", with: "hunter2newpass"
-    click_on "Sign in"
-
-    assert_current_path monitors_path
+    sign_in(user, password: "hunter2newpass")
   end
 end

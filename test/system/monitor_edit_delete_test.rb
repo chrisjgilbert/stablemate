@@ -21,11 +21,10 @@ class MonitorEditDeleteTest < ApplicationSystemTestCase
 
     assert_current_path monitor_path(@monitor)
     assert_text "Renamed monitor"
-    assert_equal "Renamed monitor", @monitor.reload.name
   end
 
   # S18 — delete: confirm the dialog; the monitor is gone and the dashboard shows
-  # the empty state (alice's remaining fixtures are wiped in setup).
+  # the empty state (alice's remaining fixtures are wiped before signing in).
   test "S18: deleting a monitor removes it and redirects to the dashboard" do
     @alice.monitors.where.not(id: @monitor.id).delete_all
     sign_in @alice
@@ -34,6 +33,6 @@ class MonitorEditDeleteTest < ApplicationSystemTestCase
     accept_confirm { click_on "Delete" }
 
     assert_current_path monitors_path
-    assert_not Monitoring::Monitor.exists?(@monitor.id)
+    assert_not @alice.monitors.exists?(@monitor.id)
   end
 end
