@@ -232,3 +232,13 @@ grep, because there is no junk drawer.
   [`docs/specs/README.md`](docs/specs/README.md).
 - **Secrets:** `ping_token` and API keys are secrets — random, hashed where the
   spec says, constant-time compare, shown raw once, opaque `404`/`401` on failure.
+- **Third-party integration secrets (Stripe, Slack, etc.) live in Rails encrypted
+  credentials, not Kamal.** Add them with `bin/rails credentials:edit` and read
+  them via an `ENV["X"].presence || Rails.application.credentials.dig(...)`
+  method on `Stablemate` (`config/initializers/stablemate.rb`) — see
+  `stripe_secret_key` / `slack_webhook_url` for the pattern. Don't add these to
+  `config/deploy.yml`'s `env:` or `.kamal/secrets`; that path is for
+  infrastructure secrets the container itself needs to boot (`RAILS_MASTER_KEY`,
+  registry credentials). Self-hosters may still set the `ENV` var directly
+  (`.env.example`) since they have no credentials file — the env-first fallback
+  is what makes both paths work without branching code.
