@@ -90,11 +90,16 @@ Rails.application.configure do
   end
 
   # request.remote_ip when running behind a reverse proxy / CDN. By DEFAULT we add
-  # nothing to Rails' built-in private ranges: a directly-exposed instance must not
-  # trust a client-supplied X-Forwarded-For, or an attacker could forge their
-  # source IP. Operators behind a proxy opt in so remote_ip is the real client —
-  # without it the per-IP ping rate limiter (pings_controller) collapses to a few
-  # buckets and the session audit log records the proxy's address:
+  # nothing to Rails' built-in private ranges and leave ActionDispatch::RemoteIp at
+  # its stock behaviour. (NB: that stock behaviour still derives remote_ip from a
+  # client-supplied X-Forwarded-For — it only strips *trusted* proxy hops — so a
+  # directly-exposed instance does NOT get a forgery-proof remote_ip from the
+  # default. remote_ip here only feeds the coarse ping limiter + session log;
+  # forgery-resistance comes from fronting the app with a proxy whose ranges are
+  # trusted below, plus a firewall that blocks direct origin access.) Operators
+  # behind a proxy opt in so remote_ip is the real client — without it the per-IP
+  # ping rate limiter (pings_controller) collapses to a few buckets and the session
+  # audit log records the proxy's address:
   #   STABLEMATE_BEHIND_CLOUDFLARE=true → also trust Cloudflare's published ranges
   #   STABLEMATE_TRUSTED_PROXIES=cidr,…  → trust arbitrary extra proxy CIDRs (an
   #                                        LB, another CDN, or to track CF's list
