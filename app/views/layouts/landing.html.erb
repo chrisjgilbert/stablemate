@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <%= render "layouts/head" %>
+
+    <%# Geist / Geist Mono — the design typefaces (the @theme tokens reference them).
+        Scoped to the marketing page so the authenticated app keeps its system-ui
+        fallback and no render-blocking external request. %>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  </head>
+
+  <body class="bg-app text-ink font-sans antialiased min-h-screen overflow-x-hidden">
+    <% if notice %>
+      <div class="rounded-none border-b border-up-bg bg-up-bg/60 px-4 py-2.5 text-center text-[13px] text-up-text" role="status">
+        <%= notice %>
+      </div>
+    <% end %>
+    <% if alert %>
+      <div class="rounded-none border-b border-down-bg bg-down-bg/60 px-4 py-2.5 text-center text-[13px] text-down-text" role="alert">
+        <%= alert %>
+      </div>
+    <% end %>
+
+    <%= yield %>
+  </body>
+</html>

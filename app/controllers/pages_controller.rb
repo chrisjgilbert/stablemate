@@ -3,6 +3,10 @@ class PagesController < ApplicationController
   # to their dashboard.
   allow_unauthenticated_access only: :home
 
+  # The marketing landing renders full-bleed — its own nav/footer and full-width
+  # dark sections — so it opts out of the constrained authenticated app chrome.
+  layout "landing", only: :home
+
   def home
     if authenticated?
       # Keep any flash (e.g. the post-signup "Welcome") alive across this bounce
