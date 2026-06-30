@@ -111,6 +111,11 @@ the box, which terminates TLS and load-balances to the app container — so you 
 **not** need Caddy, nginx, or a separate `cloudflared`. `config/deploy.yml` is
 pre-wired for a single VM; fill in the `PLACEHOLDER_*` values.
 
+> For a full start-to-finish walkthrough of the Cloudflare-fronted Hetzner
+> deployment (provision the VM → DNS + Origin Cert → firewall → deploy → smoke
+> test), see [`deploy-hetzner-cloudflare.md`](deploy-hetzner-cloudflare.md). The
+> sections below summarise the key decisions.
+
 ### TLS — two options
 
 kamal-proxy serves the certificate; pick how it's obtained:
