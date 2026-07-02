@@ -115,9 +115,10 @@ Using a registry other than Docker Hub? Uncomment and set `registry.server`
 `STABLEMATE_HOST` must match the Cloudflare hostname exactly — ping URLs, email
 links, and Host-header authorization are all built from it.
 
-**Alert email From address.** The committed `deploy.yml` does not set the mail
-From, so it would default to `alerts@stablemate.dev`. Add your own to
-`env.clear`:
+**Alert email From address.** The mailer's built-in default From is currently
+`chris@chrisgilbert.dev` (a temporary stand-in until a dedicated sending domain
+has SPF/DKIM). Set your own in `deploy.yml`'s `env.clear` so alerts come from an
+address you control:
 
 ```yaml
     STABLEMATE_MAIL_FROM: "Stablemate <alerts@example.com>"
@@ -150,6 +151,40 @@ smtp:
 Saving writes `config/master.key` locally (gitignored). `.kamal/secrets` reads
 that file for `RAILS_MASTER_KEY`. (Alternatively, set the `SMTP_*` env vars in
 `deploy.yml`; env takes precedence over credentials.)
+
+#### Quick start: send via a personal account
+
+You don't need a transactional provider on day one — a personal mailbox works as
+an SMTP relay to validate alerts. The catch: you must send **as** the
+authenticated account (providers rewrite or reject a mismatched From), and you
+need an **app-specific password**, not your login password.
+
+Example with a Google (Workspace/Gmail) mailbox at `chris@chrisgilbert.dev`:
+
+1. Enable 2-Step Verification on the account, then create an **App Password**
+   (Google Account → Security → App passwords → "Mail").
+2. Credentials (`bin/rails credentials:edit`):
+   ```yaml
+   smtp:
+     address: smtp.gmail.com
+     port: 587
+     user_name: chris@chrisgilbert.dev
+     password: your-16-char-app-password
+     domain: chrisgilbert.dev
+   ```
+3. `deploy.yml` env — send **as** that same address:
+   ```yaml
+       STABLEMATE_MAIL_FROM: "Stablemate <chris@chrisgilbert.dev>"
+       STABLEMATE_MAIL_REPLY_TO: chris@chrisgilbert.dev
+   ```
+
+Not on Google? Same shape — swap `address`/`domain` for your provider's SMTP host
+(Fastmail/iCloud also require an app-specific password). Because you're sending as
+your own address, the provider's SPF/DKIM apply and mail lands fine.
+
+Limits to keep in mind: Gmail sends ~500/day (Workspace ~2000). Fine for a few
+monitors; move to Postmark/SES/Mailgun with your domain before real users rely on
+it (higher limits + a neutral sender). Nothing else in the deploy changes.
 
 ### 4c · Secrets — `.kamal/secrets`
 
@@ -200,8 +235,8 @@ bin/kamal deploy
 
 1. **Create your account.** There's no admin seed — the first person to sign up
    registers normally. Open `https://<your-host>/`, **Sign up**, land on the
-   dashboard. (Note: `STABLEMATE_SIGNUP_ACCOUNT_CAP: 5` in `deploy.yml` caps total
-   accounts at 5 while validating demand — raise or remove it to open signups.)
+   dashboard. (Note: `STABLEMATE_SIGNUP_ACCOUNT_CAP: 1` in `deploy.yml` caps total
+   accounts at 1 while validating demand — raise or remove it to open signups.)
 2. **Create a monitor**, copy its **Ping URL** (contains a secret token), and hit
    it:
    ```sh
@@ -245,7 +280,7 @@ bin/kamal dbc                # bin/rails dbconsole
 | Redirect loop / `too many redirects` | Cloudflare SSL set to **Flexible** — change to **Full (strict)**. |
 | `Blocked hosts` / 403 on every page | `STABLEMATE_HOST` must equal the hostname you visit; add extras via `STABLEMATE_HOSTS`. |
 | Ping URLs / email links show `stablemate.dev` | `STABLEMATE_HOST` not set to your domain — fix and `bin/kamal deploy`. |
-| Alert emails come from `alerts@stablemate.dev` | Set `STABLEMATE_MAIL_FROM` in `deploy.yml` env (step 4a). |
+| Alert emails come from the default `chris@chrisgilbert.dev` stand-in | Set `STABLEMATE_MAIL_FROM` in `deploy.yml` env (step 4a). |
 | No alert emails at all | SMTP not configured — add it to credentials (step 4b); check `bin/kamal logs -f`. |
 | `kamal setup` can't reach the server | Check `ssh root@<ip>` works and port 22 is open to your IP in the firewall. |
 | Site unreachable but `/up` works locally on the box | Firewall too tight or DNS not **Proxied** — confirm the A record is orange-clouded and 443 is open to Cloudflare ranges. |
