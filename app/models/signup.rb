@@ -7,8 +7,10 @@
 # email, queue a Slack alert for the team (NotifySignupJob -> User::SignupAlert,
 # also non-blocking), and return the User. At/over the cap (locked decision #7 — re-opened manually
 # by raising the constant): create a WaitlistSignup instead — no User, no session,
-# no email — and return it. A duplicate waitlist email is a friendly no-op success
-# (find-then-create), never an error and never an enumeration oracle.
+# no email — queue the same kind of Slack alert (NotifyWaitlistSignupJob ->
+# WaitlistSignup::SlackAlert) — and return it. A duplicate waitlist email is a
+# friendly no-op success (find-then-create), never an error, never an
+# enumeration oracle, and never a second Slack alert.
 #
 # Session creation stays in the controller because it needs the request (cookies).
 class Signup
@@ -60,7 +62,10 @@ class Signup
     # index is the backstop for the find/create race.
     def join_waitlist
       signup = WaitlistSignup.new(email_address: @email)
-      return signup if signup.save
+      if signup.save
+        NotifyWaitlistSignupJob.perform_later(signup.id)
+        return signup
+      end
 
       # save failed: a duplicate is a success (return the existing row); anything
       # else (e.g. blank email) keeps its validation errors for the form.
