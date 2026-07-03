@@ -61,6 +61,18 @@ class SignupTest < ActiveSupport::TestCase
     end
   end
 
+  # The Slack alert job is queued for every successful waitlist join, mirroring
+  # the User signup alert; whether it actually posts anywhere is gated inside
+  # WaitlistSignup::SlackAlert (see test/models/waitlist_signup/slack_alert_test.rb).
+  test "at the cap, run queues a Slack alert job for a new waitlist signup" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
+      result = nil
+      assert_enqueued_with(job: NotifyWaitlistSignupJob, args: ->(args) { args == [ result.id ] }) do
+        result = Signup.new(email: "waitlist-slack@example.com", password: "password1234").run
+      end
+    end
+  end
+
   # Scenario 3 (model) — a duplicate waitlist email is a friendly success, not an
   # error, and creates no second row.
   test "at the cap, a duplicate waitlist email is a friendly no-op success" do
@@ -75,6 +87,17 @@ class SignupTest < ActiveSupport::TestCase
       assert_kind_of WaitlistSignup, result
       assert result.persisted?
       assert result.errors.empty?, "duplicate waitlist signup must not surface errors"
+    end
+  end
+
+  # Never fires a second alert for a duplicate — only a genuinely new row.
+  test "at the cap, run does not queue a Slack alert job for a duplicate waitlist email" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
+      WaitlistSignup.create!(email_address: "already-alerted@example.com")
+
+      assert_no_enqueued_jobs only: NotifyWaitlistSignupJob do
+        Signup.new(email: "ALREADY-ALERTED@example.com", password: "password1234").run
+      end
     end
   end
 
