@@ -8,6 +8,8 @@ module Stablemate
   # HTTP client for the bearer-authed /api/v1 surface and the public ping hot path.
   # All calls use short timeouts; the ping path swallows everything (fire-and-forget).
   class Client
+    include Logging
+
     Error = Class.new(StandardError)
 
     def initialize(config = Stablemate.config)
@@ -66,10 +68,6 @@ module Stablemate
         http.open_timeout = config.timeout
         http.read_timeout = config.timeout
         http
-      end
-
-      def log_warn(message)
-        (config.logger || Stablemate.logger).warn("[stablemate] #{message}")
       end
   end
 end

@@ -17,6 +17,8 @@ module Stablemate
     #   false alarm.
     # - grace_period_seconds = max(interval * DEFAULT_GRACE_FRACTION, 5 minutes).
     class SolidQueueRecurring < Registrar
+      include Logging
+
       DEFAULT_GRACE_FRACTION = 0.15
       MIN_GRACE_SECONDS = 5 * 60
       # How many consecutive occurrences to sample when measuring the largest gap
@@ -99,14 +101,6 @@ module Stablemate
         def job_class(task)
           name = task["class"].to_s.strip
           name.empty? ? nil : name
-        end
-
-        def log_info(message)
-          (config.logger || Stablemate.logger).info("[stablemate] #{message}")
-        end
-
-        def log_warn(message)
-          (config.logger || Stablemate.logger).warn("[stablemate] #{message}")
         end
 
         def grace_seconds(interval)

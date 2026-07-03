@@ -3,6 +3,10 @@
 require_relative "../test_helper"
 
 class SubscriberTest < StablemateTest
+  # Runs the ping block synchronously, so by the time handle_event returns the
+  # ping has already hit the fake client — deterministic, nothing to wait for.
+  SYNC_DISPATCHER = ->(blk) { blk.call }
+
   # A stand-in for an ActiveJob instance — only #class.name is read.
   def job(class_name)
     klass = Class.new { define_singleton_method(:name) { class_name } }
@@ -20,9 +24,9 @@ class SubscriberTest < StablemateTest
     Event.new(payload)
   end
 
-  def subscriber(class_to_keys:, ping_urls:, client:)
+  def subscriber(class_to_keys:, ping_urls:, client:, dispatcher: SYNC_DISPATCHER)
     Stablemate::Execution::Subscriber.new(
-      class_to_keys:, ping_urls:, client:, config: Stablemate.config
+      class_to_keys:, ping_urls:, client:, config: Stablemate.config, dispatcher:
     )
   end
 
@@ -37,7 +41,6 @@ class SubscriberTest < StablemateTest
     )
 
     sub.handle_event(event("DailyDigestJob"))
-    sub.wait!
 
     assert_equal [ "https://sm.test/ping/abc" ], client.pinged
   end
@@ -52,16 +55,14 @@ class SubscriberTest < StablemateTest
     )
 
     sub.handle_event(event("DailyDigestJob", exception: RuntimeError.new("nope")))
-    sub.wait!
 
     assert_empty client.pinged
   end
 
-  # Scenario 19 — ping delivery swallows network errors; nothing propagates.
+  # Scenario 19 — ping delivery swallows errors; nothing propagates into the
+  # host job. The synchronous dispatcher makes this a direct assertion: a
+  # raising client must not raise out of handle_event.
   def test_ping_errors_are_swallowed
-    # The real client swallows; here we drive the real Client#ping with a raising
-    # transport by pointing at an unroutable URL would be slow, so use FakeClient
-    # configured to raise and confirm handle_event still returns without raising.
     client = Stablemate::FakeClient.new(ping_error: SocketError.new("no network"))
     sub = subscriber(
       class_to_keys: { "J" => [ "k" ] },
@@ -69,11 +70,8 @@ class SubscriberTest < StablemateTest
       client:
     )
 
-    sub.handle_event(event("J"))
-    # The ping runs in a thread; joining must not raise into the caller even
-    # though the client raises a network error.
     begin
-      sub.wait!
+      sub.handle_event(event("J"))
     rescue StandardError
       flunk("a network error propagated out of the subscriber")
     end
@@ -97,7 +95,6 @@ class SubscriberTest < StablemateTest
     )
 
     sub.handle_event(event("SomeOtherJob"))
-    sub.wait!
 
     assert_empty client.pinged
   end
@@ -115,7 +112,6 @@ class SubscriberTest < StablemateTest
     )
 
     sub.handle_event(event("ReportJob"))
-    sub.wait!
 
     assert_equal %w[https://sm.test/ping/m https://sm.test/ping/e].sort, client.pinged.sort
     assert(logged.any? { |m| m.include?("ReportJob") && m.include?("multiple") })
@@ -132,7 +128,6 @@ class SubscriberTest < StablemateTest
     )
 
     sub.handle_event(event("CleanupJob"))
-    sub.wait!
 
     assert_equal [ "https://sm.test/ping/cleanup" ], client.pinged
   end
@@ -156,13 +151,36 @@ class SubscriberTest < StablemateTest
     ensure
       sub.unsubscribe!
     end
-    sub.wait!
 
     assert_equal [ "https://sm.test/ping/cleanup" ], client.pinged
   end
 
-  # Thread-safety: many worker threads firing performs concurrently must not tear
-  # the @threads bookkeeping or lose pings.
+  # The production default (no injected dispatcher) is fire-and-forget: the ping
+  # runs on a background thread, not inline in the worker. Pins decision #4.
+  def test_default_dispatcher_pings_on_a_background_thread
+    client = Stablemate::FakeClient.new
+    pinging_thread = nil
+    client.define_singleton_method(:ping) do |url|
+      pinging_thread = Thread.current
+      super(url)
+    end
+
+    sub = Stablemate::Execution::Subscriber.new(
+      class_to_keys: { "J" => [ "k" ] },
+      ping_urls: { "k" => "https://sm.test/ping/k" },
+      client:, config: Stablemate.config
+    )
+    sub.handle_event(event("J"))
+
+    deadline = Time.now + 5
+    sleep 0.01 while client.pinged.empty? && Time.now < deadline
+
+    assert_equal [ "https://sm.test/ping/k" ], client.pinged
+    refute_equal Thread.current, pinging_thread, "ping ran inline instead of on a background thread"
+  end
+
+  # Concurrent performs (Solid Queue runs many worker threads) must not lose
+  # pings — handle_event holds no shared mutable state.
   def test_handles_concurrent_performs_without_losing_pings
     client = Stablemate::FakeClient.new
     sub = subscriber(
@@ -173,7 +191,6 @@ class SubscriberTest < StablemateTest
 
     threads = 20.times.map { Thread.new { sub.handle_event(event("J")) } }
     threads.each(&:join)
-    sub.wait!
 
     assert_equal 20, client.pinged.size
     assert_equal [ "https://sm.test/ping/k" ], client.pinged.uniq
@@ -189,7 +206,6 @@ class SubscriberTest < StablemateTest
       client:
     )
     sub.handle_event(event("J"))
-    sub.wait!
     assert_empty client.pinged
   end
 end

@@ -16,6 +16,7 @@ class GemspecTest < Minitest::Test
   def test_packages_every_lib_source_file
     %w[
       lib/stablemate.rb
+      lib/stablemate/logging.rb
       lib/stablemate/railtie.rb
       lib/stablemate/registrars/solid_queue_recurring.rb
       lib/stablemate/execution/subscriber.rb
