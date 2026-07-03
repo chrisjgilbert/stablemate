@@ -33,8 +33,22 @@ concurrency:
 
 jobs:
   deploy:
-    # Only when CI actually passed. workflow_run also fires on failure/cancelled.
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Deploy only for a CI run that (a) passed, (b) was triggered by a `push`
+    # (not a pull_request), and (c) came from THIS repo — never a fork.
+    #
+    # The `branches: [main]` filter above is NOT a security control: it matches
+    # the triggering run's head_branch, which for a fork PR is the attacker's
+    # source-branch name — a fork branch literally named `main` would slip
+    # through. Requiring event == 'push' excludes every fork-PR-triggered run
+    # (only someone with write access can push to main), and the head_repository
+    # check rejects fork provenance outright. Without these, Deploy would check
+    # out workflow_run.head_sha (untrusted fork code) and run it — bundle install
+    # + kamal deploy — with every production secret in scope. Defense in depth:
+    # either guard closes the hole; we keep both.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -50,6 +64,7 @@ jobs:
       STABLEMATE_DATABASE_PASSWORD: ${{ secrets.STABLEMATE_DATABASE_PASSWORD }}
       STABLEMATE_SSL_CERT: ${{ secrets.STABLEMATE_SSL_CERT }}
       STABLEMATE_SSL_KEY: ${{ secrets.STABLEMATE_SSL_KEY }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
     steps:
       - name: Check out the commit CI validated
@@ -72,11 +87,16 @@ jobs:
           password: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
 
       - name: Add the server's SSH key
+        # Read the secret from env (never inline ${{ }} into the script) and
+        # write it with a guaranteed trailing newline — ssh rejects a key that
+        # lacks one. Fail loudly if key-scanning the host turns up nothing,
+        # rather than leaving known_hosts empty for kamal to trip over later.
         run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          install -m 600 /dev/stdin ~/.ssh/id_ed25519 <<< "${{ secrets.SSH_PRIVATE_KEY }}"
-          ssh-keyscan -H "$STABLEMATE_SERVER_IP" >> ~/.ssh/known_hosts 2>/dev/null
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$STABLEMATE_SERVER_IP" >> ~/.ssh/known_hosts
+          grep -q . ~/.ssh/known_hosts || { echo "ssh-keyscan found no host key for $STABLEMATE_SERVER_IP (is port 22 reachable from the runner?)" >&2; exit 1; }
 
       - name: kamal deploy
         run: bin/kamal deploy
