@@ -34,32 +34,36 @@ module Stablemate
     # The task key (or fallback job-class name) -> ping URL map. The map is an
     # immutable snapshot: merge_ping_urls builds a new frozen hash and swaps the
     # reference atomically, so subscriber threads reading mid-re-sync always see
-    # a complete map (old or new, never torn) — no locks needed.
+    # a complete map (old or new, never torn). Reads are lock-free and never
+    # write (no lazy init) — only merge_ping_urls/reset! assign the ivar.
     def ping_urls
-      @ping_urls ||= {}.freeze
-    end
-
-    # Read one ping URL by key (hot path).
-    def ping_url_for(key)
-      ping_urls[key]
+      @ping_urls || EMPTY_PING_URLS
     end
 
     # Fold new key -> url pairs into the cache (boot / re-sync) by swapping in a
-    # fresh frozen snapshot.
+    # fresh frozen snapshot. Writers are serialized: without the lock, two
+    # concurrent sync! calls could each merge into the same base snapshot and
+    # the second swap would silently drop the first's URLs. Readers never take
+    # this lock.
     def merge_ping_urls(pairs)
-      @ping_urls = ping_urls.merge(pairs).freeze
+      MERGE_LOCK.synchronize { @ping_urls = ping_urls.merge(pairs).freeze }
     end
 
     def logger
       config.logger || default_logger
     end
 
-    # Convenience: run a sync now (boot / rake task). Never raises.
+    # Convenience: run a sync now (used by the rake task; boot wires its own
+    # Registration in the railtie so it can reuse the registrar for Layer 1).
+    # Never raises.
     def sync!
       Registration.new.sync!
     end
 
     private
+      EMPTY_PING_URLS = {}.freeze
+      MERGE_LOCK = Mutex.new
+
       def default_logger
         @default_logger ||= Logger.new($stderr).tap { |l| l.progname = "stablemate" }
       end

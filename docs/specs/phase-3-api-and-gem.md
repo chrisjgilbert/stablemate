@@ -133,8 +133,16 @@ Stablemate.configure do |c|
   c.api_key  = Rails.application.credentials.dig(:stablemate, :api_key) # sm_live_…
   c.endpoint = "https://stablemate.dev"   # overridable for self-test
   c.ping_on_success = true
+  # c.environments = ["production"]       # default; where the railtie auto-wires
 end
 ```
+
+Boot auto-wiring is gated on **api_key presence AND an environment allow-list**
+(`environments`, default `["production"]`; `nil` = key-presence only). A key
+visible in every environment (shared credentials) must not make dev/test boots
+register or ping — a laptop pinging a production monitor masks real outages.
+(Amended when the environments gate shipped; the original contract was
+key-presence only.)
 
 ### 4.2 Layer 1 — execution tracking (backend-agnostic)
 - A single subscriber to `ActiveSupport::Notifications` event
@@ -150,14 +158,21 @@ end
 - A `Registrar` interface producing
   `{registration_key, name, expected_interval_seconds, grace_period_seconds}`
   tuples and calling `POST /api/v1/monitors/sync`.
-- **`SolidQueueRecurring` adapter:** reads `config/recurring.yml` task entries.
+- **`SolidQueueRecurring` adapter:** reads `config/recurring.yml` task entries,
+  resolving environment sections with **Solid Queue's own rule** — the current
+  environment's section when one exists, the whole file otherwise — so only
+  tasks Solid Queue would actually run in this environment are registered.
+  (Amended when env scoping shipped; originally all sections were merged, which
+  registered other environments' tasks as never-pinging monitors.)
   - `registration_key` = the **task key** (decision #6) — e.g. `daily_digest`.
   - `name` defaults to the task key.
   - `expected_interval_seconds` parsed from the task `schedule:` via **Fugit**.
     For **irregular crons** (uneven gaps), use the **largest gap** (decision #5).
   - `grace_period_seconds` default = `max(interval * DEFAULT_GRACE_FRACTION,
     5.minutes)` unless the user overrides in the UI.
-- Runs on boot and via a `rails stablemate:sync` rake task. Idempotent.
+- Runs on boot (in `environments`-enabled environments — §4.1) and via a
+  `rails stablemate:sync` rake task (ungated, but environment-scoped like any
+  sync). Idempotent.
 
 ### 4.4 Mapping execution → registration (decision #6)
 Both layers key on the **Solid Queue task key**:
@@ -230,6 +245,14 @@ Both layers key on the **Solid Queue task key**:
     notice** — execution tracking resolves pings by job class, so a command
     task's monitor could never be pinged. (Amended from "one tuple per task"
     when the skip shipped.)
+21b. Environment sections follow Solid Queue's resolution rule: with a section
+    for the current environment, only its tasks register; without one, the
+    whole file is used. Degenerate sections (empty, nil, scalar garbage) never
+    crash boot. (Added with env scoping.)
+21c. The railtie only auto-wires when `api_key` is set AND the current
+    environment is allowed by `environments` (default production-only); a
+    misconfigured `environments` value (bare string/symbol) still gates
+    correctly instead of raising. (Added with the environments gate.)
 22. An irregular cron (`0 9,17 * * *`) yields the **largest gap** as the interval.
 23. Grace defaults to `max(interval * DEFAULT_GRACE_FRACTION, 5.minutes)`.
 24. `sync!` posts to `/api/v1/monitors/sync` with bearer auth and caches the

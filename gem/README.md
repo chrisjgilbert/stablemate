@@ -34,11 +34,11 @@ staging too, add it: `c.environments = %w[production staging]`.
 Two layers, both keyed on the Solid Queue **task key**:
 
 - **Layer 2 — registration.** On boot (and via `rails stablemate:sync`) the gem
-  reads `config/recurring.yml` — for environment-keyed files, only the current
-  environment's section, matching Solid Queue itself — turns each
-  `class:`-backed task into a monitor (`registration_key` = task key, interval
-  parsed from `schedule:` via Fugit — for irregular crons the *largest* gap is
-  used), and upserts them via
+  reads `config/recurring.yml` with Solid Queue's own section rule — the
+  current environment's section when one exists, the whole file otherwise —
+  turns each `class:`-backed task into a monitor (`registration_key` = task
+  key, interval parsed from `schedule:` via Fugit — for irregular crons the
+  *largest* gap is used), and upserts them via
   `POST /api/v1/monitors/sync`. Idempotent; a sync failure logs a warning and
   never crashes boot. `command:`-only tasks are **skipped with a logged
   notice** — they run as `SolidQueue::RecurringJob`, so execution tracking
@@ -64,10 +64,12 @@ created** monitor whose `registration_key` equals the job class name (e.g.
 |---|---|---|
 | `api_key` | – | `sm_live_…` bearer token (registration only; never on the ping path) |
 | `endpoint` | `https://stablemate.dev` (or `STABLEMATE_ENDPOINT` env) | Server base URL — set to your own domain when self-hosting |
-| `environments` | `["production"]` | Environments where the railtie auto-wires (boot sync + subscriber). `nil` = wherever an `api_key` is set. The explicit `rails stablemate:sync` task is not gated |
+| `environments` | `["production"]` | Environments where the railtie auto-wires (boot sync + subscriber). Array, bare string/symbol, or `nil` (= wherever an `api_key` is set). `rails stablemate:sync` runs regardless — but it still reads the *current* environment's `recurring.yml` section, so run it in the environment you mean to register |
+| `environment` | `Rails.env` (else `RAILS_ENV`/`RACK_ENV`, else `development`) | The environment name used by the gate above and for `recurring.yml` section scoping |
 | `ping_on_success` | `true` | Ping when a monitored job completes cleanly |
 | `recurring_path` | `config/recurring.yml` | Solid Queue recurring config |
 | `timeout` | `2` | HTTP timeout (seconds) |
+| `logger` | stderr logger | Where gem warnings go (sync failures, skipped tasks) — set `Rails.logger` to fold into app logs |
 
 ## Development
 

@@ -10,13 +10,6 @@ class SolidQueueRecurringTest < StablemateTest
     Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: fixture(file), environment:, config:)
   end
 
-  # A config whose logger writes to the returned StringIO, for log assertions.
-  def logging_config(out)
-    config = Stablemate::Configuration.new
-    config.logger = Logger.new(out)
-    config
-  end
-
   # Scenario 21 — one tuple per class-backed task; registration_key == task key;
   # interval via Fugit. The command-only db_backup task is NOT registered (see
   # test_command_only_task_is_skipped_with_a_warning).
@@ -115,10 +108,11 @@ class SolidQueueRecurringTest < StablemateTest
     end
   end
 
-  # An env-keyed file yields only the CURRENT environment's tasks (matching
-  # Solid Queue's own semantics) — a development-only task must never become a
-  # monitor in the production account, where it would sit pending (eating a cap
-  # slot) or false-alarm after a single stray ping.
+  # A file with a section for the current environment yields ONLY that
+  # section's tasks (Solid Queue's exact rule: `config[env] ? config[env] :
+  # config`) — a development-only task must never become a monitor in the
+  # production account, where it would sit pending (eating a cap slot) or
+  # false-alarm after a single stray ping.
   def test_env_keyed_file_yields_only_the_current_environments_tasks
     prod = registrar("recurring_multi_env.yml", environment: "production")
     dev = registrar("recurring_multi_env.yml", environment: "development")
@@ -128,9 +122,93 @@ class SolidQueueRecurringTest < StablemateTest
     assert_equal [ "DailyDigestJob" ], prod.class_to_keys.keys
   end
 
+  # No section for the current env -> Solid Queue falls back to the WHOLE file;
+  # the other envs' sections then look like tasks without class:/schedule: and
+  # are skipped, so nothing registers — but never crashes.
   def test_env_keyed_file_without_a_section_for_the_current_env_yields_nothing
     r = registrar("recurring_multi_env.yml", environment: "staging")
     assert_empty r.tuples
     assert_empty r.class_to_keys
+  end
+
+  # A mixed file (top-level tasks + an env section) must match Solid Queue: in
+  # an env WITH a section, only the section's tasks run, so only they register;
+  # in an env WITHOUT one, the whole file is used and the top-level tasks run.
+  # Registering top-level tasks in production would create monitors Solid Queue
+  # never pings — permanent false alarms.
+  def test_mixed_file_follows_solid_queue_section_precedence
+    Tempfile.create([ "mixed", ".yml" ]) do |f|
+      f.write(<<~YML)
+        stray_task:
+          class: StrayJob
+          schedule: every hour
+        production:
+          daily_digest:
+            class: DailyDigestJob
+            schedule: every day at 9am
+      YML
+      f.flush
+
+      prod = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: f.path, environment: "production")
+      dev = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: f.path, environment: "development")
+
+      assert_equal [ "daily_digest" ], prod.tuples.map { |t| t[:registration_key] }
+      assert_equal [ "stray_task" ], dev.tuples.map { |t| t[:registration_key] }
+    end
+  end
+
+  # Degenerate sections must never crash boot: an explicitly empty section
+  # (`development: {}`) yields nothing in that env, and a nil section
+  # (`development:`) falls back to the whole file, Solid Queue-style.
+  def test_empty_and_nil_sections_are_handled_without_crashing
+    Tempfile.create([ "degenerate", ".yml" ]) do |f|
+      f.write("production:\n  daily:\n    class: DailyJob\n    schedule: every day\ndevelopment: {}\nstaging:\n")
+      f.flush
+
+      { "production" => [ "daily" ], "development" => [], "staging" => [] }.each do |env, expected|
+        r = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: f.path, environment: env)
+        assert_equal expected, r.tuples.map { |t| t[:registration_key] }, "environment #{env}"
+        r.class_to_keys # must not raise on section-shaped or nil pseudo-tasks
+      end
+    end
+  end
+
+  # Scalar garbage where a task hash should be (bad indentation, templating
+  # accidents) is skipped, not crashed on.
+  def test_non_hash_task_entries_are_skipped
+    Tempfile.create([ "garbage", ".yml" ]) do |f|
+      f.write("nightly:\n  class: NightlyJob\n  schedule: every day at 2am\nbroken: just-a-string\nempty:\n")
+      f.flush
+      r = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: f.path)
+
+      assert_equal [ "nightly" ], r.tuples.map { |t| t[:registration_key] }
+      assert_equal({ "NightlyJob" => [ "nightly" ] }, r.class_to_keys)
+    end
+  end
+
+  # tuples + class_to_keys are both called on every boot; the file is read and
+  # parsed once per registrar instance, not once per call.
+  def test_recurring_file_is_parsed_once_per_registrar
+    Tempfile.create([ "memo", ".yml" ]) do |f|
+      f.write("nightly:\n  class: NightlyJob\n  schedule: every day at 2am\n")
+      f.flush
+      r = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: f.path)
+      refute_empty r.tuples
+
+      File.write(f.path, "changed:\n  class: OtherJob\n  schedule: every hour\n")
+      assert_equal({ "NightlyJob" => [ "nightly" ] }, r.class_to_keys)
+    end
+  end
+
+  # The registrar defaults its environment to the shared Configuration#environment
+  # resolver, so the railtie gate and the file scoping can never disagree.
+  def test_environment_defaults_to_the_configurations_environment
+    config = Stablemate::Configuration.new
+    config.environment = "development"
+    r = Stablemate::Registrars::SolidQueueRecurring.new(
+      recurring_path: fixture("recurring_multi_env.yml"), config: config
+    )
+
+    assert_equal [ "dev_smoke" ], r.tuples.map { |t| t[:registration_key] }
   end
 end

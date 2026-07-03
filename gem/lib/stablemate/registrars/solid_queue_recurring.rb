@@ -7,8 +7,9 @@ require_relative "registrar"
 module Stablemate
   module Registrars
     # V1 registrar (architecture.md §9): reads Solid Queue's config/recurring.yml
-    # and turns each task into a registration tuple. Env-keyed files are scoped
-    # to the current environment's section, matching Solid Queue's own semantics.
+    # and turns each task into a registration tuple. Environment sections are
+    # resolved with Solid Queue's exact rule — the current env's section when
+    # present, the whole file otherwise (see #tasks).
     #
     # - registration_key = the task key (decision #6).
     # - name             = the task key (default).
@@ -29,12 +30,19 @@ module Stablemate
 
       def initialize(recurring_path: nil, environment: nil, config: Stablemate.config)
         @recurring_path = recurring_path || config.recurring_path
-        @environment = (environment || default_environment).to_s
+        # Shared resolver (Configuration#environment) so the railtie gate and
+        # this file scoping always answer "what environment?" identically.
+        @environment = (environment || config.environment).to_s
         @config = config
       end
 
       def tuples
         tasks.filter_map do |key, task|
+          # Non-Hash entries (scalar garbage, nil sections seen through the
+          # whole-file fallback) and schedule-less ones (other envs' sections
+          # posing as tasks) can't be sized; skip, never crash boot.
+          next unless task.is_a?(Hash)
+
           schedule = task["schedule"]
           next if schedule.nil?
 
@@ -72,6 +80,8 @@ module Stablemate
       # (decision #6; a class shared by two tasks maps to both.)
       def class_to_keys
         tasks.each_with_object({}) do |(key, task), map|
+          next unless task.is_a?(Hash)
+
           class_name = job_class(task)
           next if class_name.nil?
 
@@ -124,39 +134,22 @@ module Stablemate
           gaps.max
         end
 
+        # Solid Queue's exact section rule (configuration.rb#config_from):
+        # `config[env] ? config[env] : config` — the current environment's
+        # section when one is present, the WHOLE file otherwise. Mirroring it
+        # exactly means we register precisely the tasks Solid Queue will run:
+        # a development-only task never becomes a production monitor (pending
+        # forever, eating a cap slot, or false-alarming after a stray ping),
+        # and a mixed file's top-level tasks aren't registered in an env whose
+        # section supersedes them. Memoized: tuples and class_to_keys are both
+        # called on every boot, and one parse also means they can't see two
+        # different versions of the file.
         def tasks
-          raw = YAML.safe_load_file(@recurring_path, aliases: true) || {}
-          return {} if raw.empty?
-
-          if env_keyed?(raw)
-            # Keyed by environment (production:, development:, …) — like Solid
-            # Queue itself, only the current environment's section counts. A
-            # development-only task must never be registered in the production
-            # account, where it would sit pending forever (eating a cap slot) or
-            # false-alarm after a single stray ping.
-            raw[@environment] || {}
-          else
-            # Flat file: task keys at the top level.
-            raw
-          end
-        rescue Errno::ENOENT
-          {}
-        end
-
-        def default_environment
-          if defined?(Rails) && Rails.respond_to?(:env)
-            Rails.env
-          else
-            ENV["RAILS_ENV"] || ENV["RACK_ENV"] || "production"
-          end
-        end
-
-        # A recurring.yml is environment-keyed when every top-level value is itself
-        # a Hash of task definitions (Hashes). A task entry, by contrast, has
-        # scalar leaves like `class:`/`schedule:`.
-        def env_keyed?(raw)
-          raw.values.all? do |section|
-            section.is_a?(Hash) && section.any? && section.values.all? { |task| task.is_a?(Hash) }
+          @tasks ||= begin
+            raw = YAML.safe_load_file(@recurring_path, aliases: true) || {}
+            raw[@environment] || raw
+          rescue Errno::ENOENT
+            {}
           end
         end
     end

@@ -20,13 +20,15 @@ module Stablemate
       # @param class_to_keys [Hash{String=>Array<String>}] job class name -> task keys.
       # @param ping_urls     [Hash{String=>String}, nil] task key -> ping URL. When
       #   nil (the production default) URLs are resolved LIVE from the shared
-      #   Stablemate.ping_url_for snapshot, so a re-sync that refreshes the cache
+      #   Stablemate.ping_urls snapshot, so a re-sync that refreshes the cache
       #   is picked up without rebuilding the subscriber. Tests inject an explicit
       #   hash for determinism.
-      # @param dispatcher    [#call] how a ping block is executed. The production
-      #   default is a fire-and-forget background thread (decision #4: a slow or
-      #   down Stablemate server must never block the host's worker). Tests inject
-      #   ->(blk) { blk.call } to run pings synchronously.
+      # @param dispatcher    [#call] how a ping block is executed. The default is
+      #   a fire-and-forget background thread (decision #4: a slow or down
+      #   Stablemate server must never block the host's worker). Tests inject
+      #   ->(blk) { blk.call } to run pings synchronously; a host wiring the
+      #   subscriber by hand may inject a pooled executor. The block never
+      #   raises — errors are logged and swallowed inside it.
       def initialize(class_to_keys:, ping_urls: nil, client: nil, config: Stablemate.config,
                      dispatcher: ->(blk) { Thread.new(&blk) })
         @class_to_keys = class_to_keys
@@ -73,7 +75,7 @@ module Stablemate
         # Resolve a ping URL by key, from the injected hash (tests) or the live
         # shared cache (production).
         def url_for(key)
-          @ping_urls ? @ping_urls[key] : Stablemate.ping_url_for(key)
+          (@ping_urls || Stablemate.ping_urls)[key]
         end
 
         def resolve_keys(class_name)
@@ -95,12 +97,21 @@ module Stablemate
           url = url_for(key)
           return unless url
 
-          @dispatcher.call(proc { @client.ping(url) })
+          @dispatcher.call(-> { deliver(url) })
         rescue StandardError => e
-          # Client#ping swallows its own errors; this guards the dispatch itself
-          # (e.g. Thread.new raising under resource exhaustion) — nothing may
-          # propagate into the host job.
+          # Guards the dispatch itself (e.g. Thread.new raising under thread
+          # exhaustion) — nothing may propagate into the host job.
           log_warn("ping dispatch failed: #{e.class}: #{e.message}")
+        end
+
+        # The dispatched block. Client#ping swallows its own errors, but an
+        # injected/wrapping client is public API and may raise; uncaught, that
+        # would escape the background thread — spewing via report_on_exception
+        # and, under a host's Thread.abort_on_exception, killing the worker.
+        def deliver(url)
+          @client.ping(url)
+        rescue StandardError => e
+          log_warn("ping thread failed: #{e.class}: #{e.message}")
         end
     end
   end

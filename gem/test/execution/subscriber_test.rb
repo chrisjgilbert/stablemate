@@ -3,10 +3,6 @@
 require_relative "../test_helper"
 
 class SubscriberTest < StablemateTest
-  # Runs the ping block synchronously, so by the time handle_event returns the
-  # ping has already hit the fake client — deterministic, nothing to wait for.
-  SYNC_DISPATCHER = ->(blk) { blk.call }
-
   # A stand-in for an ActiveJob instance — only #class.name is read.
   def job(class_name)
     klass = Class.new { define_singleton_method(:name) { class_name } }
@@ -75,6 +71,29 @@ class SubscriberTest < StablemateTest
     rescue StandardError
       flunk("a network error propagated out of the subscriber")
     end
+    assert_empty client.pinged
+  end
+
+  # The same swallow contract on the REAL async path: with the default
+  # Thread.new dispatcher, a raising client must be caught INSIDE the thread
+  # and logged — an escaped exception would spew via report_on_exception and,
+  # under a host's Thread.abort_on_exception = true, kill the worker process.
+  def test_raising_client_on_the_default_dispatcher_is_swallowed_and_logged
+    require "timeout"
+    logged = Queue.new
+    Stablemate.config.logger = Object.new.tap { |l| l.define_singleton_method(:warn) { |m| logged << m } }
+
+    client = Stablemate::FakeClient.new(ping_error: SocketError.new("no network"))
+    sub = Stablemate::Execution::Subscriber.new(
+      class_to_keys: { "J" => [ "k" ] },
+      ping_urls: { "k" => "https://sm.test/ping/x" },
+      client:, config: Stablemate.config
+    )
+
+    sub.handle_event(event("J"))
+
+    message = Timeout.timeout(5) { logged.pop }
+    assert_match(/ping thread failed/, message)
     assert_empty client.pinged
   end
 
@@ -157,12 +176,13 @@ class SubscriberTest < StablemateTest
 
   # The production default (no injected dispatcher) is fire-and-forget: the ping
   # runs on a background thread, not inline in the worker. Pins decision #4.
+  # The Queue blocks until the ping lands — deterministic, no polling.
   def test_default_dispatcher_pings_on_a_background_thread
+    require "timeout"
     client = Stablemate::FakeClient.new
-    pinging_thread = nil
+    pings = Queue.new
     client.define_singleton_method(:ping) do |url|
-      pinging_thread = Thread.current
-      super(url)
+      super(url).tap { pings << Thread.current }
     end
 
     sub = Stablemate::Execution::Subscriber.new(
@@ -172,9 +192,7 @@ class SubscriberTest < StablemateTest
     )
     sub.handle_event(event("J"))
 
-    deadline = Time.now + 5
-    sleep 0.01 while client.pinged.empty? && Time.now < deadline
-
+    pinging_thread = Timeout.timeout(5) { pings.pop }
     assert_equal [ "https://sm.test/ping/k" ], client.pinged
     refute_equal Thread.current, pinging_thread, "ping ran inline instead of on a background thread"
   end
