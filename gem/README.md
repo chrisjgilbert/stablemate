@@ -26,11 +26,15 @@ Get the API key from **Settings → API keys → Generate key** (shown once).
 Two layers, both keyed on the Solid Queue **task key**:
 
 - **Layer 2 — registration.** On boot (and via `rails stablemate:sync`) the gem
-  reads `config/recurring.yml`, turns each task into a monitor
+  reads `config/recurring.yml`, turns each `class:`-backed task into a monitor
   (`registration_key` = task key, interval parsed from `schedule:` via Fugit —
   for irregular crons the *largest* gap is used), and upserts them via
   `POST /api/v1/monitors/sync`. Idempotent; a sync failure logs a warning and
-  never crashes boot.
+  never crashes boot. `command:`-only tasks are **skipped with a logged
+  notice** — they run as `SolidQueue::RecurringJob`, so execution tracking
+  can't attribute their runs; wrap the command in a job class, or create a
+  monitor by hand and ping its URL from the command (details and the upgrade
+  path in `docs/integrating.md`).
 - **Layer 1 — execution tracking.** A subscriber to `perform.active_job` pings
   the matching monitor on every **successful** run. A raised job does **not**
   ping (a missed beat is the signal). Pings are fire-and-forget on a background

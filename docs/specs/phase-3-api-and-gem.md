@@ -224,8 +224,12 @@ Both layers key on the **Solid Queue task key**:
 20. A `perform` with no matching task key fires no ping.
 
 ### Gem — Layer 2 `[gem]`
-21. Parsing a `recurring.yml` produces one tuple per task; `registration_key ==
-    task key`; interval derived from `schedule:` via Fugit.
+21. Parsing a `recurring.yml` produces one tuple per `class:`-backed task;
+    `registration_key == task key`; interval derived from `schedule:` via Fugit.
+    `command:`-only (or blank-`class:`) tasks are **skipped with a logged
+    notice** — execution tracking resolves pings by job class, so a command
+    task's monitor could never be pinged. (Amended from "one tuple per task"
+    when the skip shipped.)
 22. An irregular cron (`0 9,17 * * *`) yields the **largest gap** as the interval.
 23. Grace defaults to `max(interval * DEFAULT_GRACE_FRACTION, 5.minutes)`.
 24. `sync!` posts to `/api/v1/monitors/sync` with bearer auth and caches the

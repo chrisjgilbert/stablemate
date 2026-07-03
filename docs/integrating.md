@@ -73,6 +73,16 @@ The interval is parsed from `schedule:` (via Fugit). For irregular crons the
 **largest** gap between runs is used as the expected interval; tighten it later in
 the monitor's settings if you want a snugger window.
 
+> **`command:`-only tasks are skipped** (with a logged notice). Solid Queue runs
+> them as `SolidQueue::RecurringJob`, so the gem can't attribute a run back to the
+> task and would register a monitor that never gets pinged. Either wrap the command
+> in a small job class and use `class:`, or create a monitor manually and append a
+> `curl` ping to the command (see §2).
+>
+> Upgrading from a gem version that *did* register command tasks? Sync never
+> deletes monitors, so the old monitor lingers (down or pending, alerting, and
+> counting toward your plan's cap) — delete or pause it from its detail page.
+
 ### 1.5 Sync
 
 Registration happens automatically on boot. To force it (e.g. after editing

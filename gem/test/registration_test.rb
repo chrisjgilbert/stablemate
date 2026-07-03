@@ -24,7 +24,9 @@ class RegistrationTest < StablemateTest
     assert_equal 1, client.synced.size
     posted = client.synced.first
     assert_equal "my-app", posted[:app]
-    assert_equal 3, posted[:monitors].size
+    # The fixture's command-only db_backup task is not registered (no class: to
+    # resolve pings by), so only the two class-backed tasks are posted.
+    assert_equal 2, posted[:monitors].size
     assert_equal "https://sm.test/ping/abc", cache["daily_digest"]
     assert_equal "https://sm.test/ping/abc", Stablemate.ping_urls["daily_digest"]
   end

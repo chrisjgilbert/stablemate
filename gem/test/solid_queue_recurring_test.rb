@@ -4,17 +4,26 @@ require_relative "test_helper"
 require "tempfile"
 
 class SolidQueueRecurringTest < StablemateTest
-  def registrar(file = "recurring.yml")
-    Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: fixture(file))
+  def registrar(file = "recurring.yml", config: Stablemate.config)
+    Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: fixture(file), config:)
   end
 
-  # Scenario 21 — one tuple per task; registration_key == task key; interval via Fugit.
+  # A config whose logger writes to the returned StringIO, for log assertions.
+  def logging_config(out)
+    config = Stablemate::Configuration.new
+    config.logger = Logger.new(out)
+    config
+  end
+
+  # Scenario 21 — one tuple per class-backed task; registration_key == task key;
+  # interval via Fugit. The command-only db_backup task is NOT registered (see
+  # test_command_only_task_is_skipped_with_a_warning).
   def test_produces_one_tuple_per_task_keyed_by_task_key
     tuples = registrar.tuples
     keys = tuples.map { |t| t[:registration_key] }
 
-    assert_equal 3, tuples.size
-    assert_equal %w[daily_digest clear_sessions db_backup].sort, keys.sort
+    assert_equal 2, tuples.size
+    assert_equal %w[daily_digest clear_sessions].sort, keys.sort
 
     digest = tuples.find { |t| t[:registration_key] == "daily_digest" }
     assert_equal "daily_digest", digest[:name]
@@ -22,6 +31,36 @@ class SolidQueueRecurringTest < StablemateTest
 
     sessions = tuples.find { |t| t[:registration_key] == "clear_sessions" }
     assert_equal 900, sessions[:expected_interval_seconds]
+  end
+
+  # A command:-only task runs as SolidQueue::RecurringJob, so the execution
+  # subscriber (keyed by job class name) can never ping it. Registering it would
+  # create a monitor that is permanently down — skip it, and log (INFO: command
+  # tasks are routine, e.g. Solid Queue's own housekeeping) so the operator knows
+  # the job is unmonitored.
+  def test_command_only_task_is_skipped_with_a_log_notice
+    out = StringIO.new
+    r = registrar(config: logging_config(out))
+
+    refute_includes r.tuples.map { |t| t[:registration_key] }, "db_backup"
+    assert_match(/INFO/, out.string)
+    assert_match(/db_backup/, out.string)
+    assert_match(/command/, out.string)
+  end
+
+  # A blank class: (e.g. templating that rendered empty) is as unpingable as a
+  # missing one — the subscriber can never resolve a job class of "". Same skip.
+  def test_blank_class_task_is_skipped_like_a_command_task
+    Tempfile.create([ "blank", ".yml" ]) do |f|
+      f.write("broken:\n  class: \"\"\n  command: \"Backup.run\"\n  schedule: every day at 3am\n")
+      f.flush
+      out = StringIO.new
+      r = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: f.path, config: logging_config(out))
+
+      assert_empty r.tuples
+      refute r.class_to_keys.key?("")
+      assert_match(/broken/, out.string)
+    end
   end
 
   # Scenario 22 — irregular cron -> the LARGEST gap is the interval.

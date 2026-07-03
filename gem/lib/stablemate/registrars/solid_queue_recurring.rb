@@ -34,6 +34,18 @@ module Stablemate
           schedule = task["schedule"]
           next if schedule.nil?
 
+          if job_class(task).nil?
+            # A command:-only task runs as SolidQueue::RecurringJob, so the
+            # execution subscriber (which resolves pings by job class name) can
+            # never ping it — registering it would create a monitor that is
+            # permanently down. Skip it, and say so. INFO, not WARN: command
+            # tasks are a routine Solid Queue pattern (its own housekeeping
+            # tasks use one), so this is expected on most apps.
+            log_info("task '#{key}' has no class: — command tasks can't be auto-pinged; skipping. " \
+                     "Wrap the command in a job class, or create a monitor manually and ping it from the command.")
+            next
+          end
+
           interval = interval_seconds(schedule)
           if interval.nil?
             # Skip rather than register a monitor we can't size — but say so, so a
@@ -56,10 +68,10 @@ module Stablemate
       # (decision #6; a class shared by two tasks maps to both.)
       def class_to_keys
         tasks.each_with_object({}) do |(key, task), map|
-          class_name = task["class"]
+          class_name = job_class(task)
           next if class_name.nil?
 
-          (map[class_name.to_s] ||= []) << key.to_s
+          (map[class_name] ||= []) << key.to_s
         end
       end
 
@@ -79,6 +91,19 @@ module Stablemate
 
       private
         attr_reader :config
+
+        # The task's job class name, or nil when the task can't be tracked by the
+        # execution subscriber (no class:, or a blank one from templating). The
+        # single pingability rule shared by tuples and class_to_keys, so the two
+        # can't disagree about which tasks are trackable.
+        def job_class(task)
+          name = task["class"].to_s.strip
+          name.empty? ? nil : name
+        end
+
+        def log_info(message)
+          (config.logger || Stablemate.logger).info("[stablemate] #{message}")
+        end
 
         def log_warn(message)
           (config.logger || Stablemate.logger).warn("[stablemate] #{message}")
