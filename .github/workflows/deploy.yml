@@ -1,0 +1,82 @@
+# Auto-deploy Stablemate to the Hetzner VM with Kamal — but only once CI is green.
+#
+# This runs on `workflow_run`, i.e. AFTER the CI workflow finishes, and deploys
+# only when that run was on `main` and concluded `success`. So the gate is
+# literally "CI passed on main" — the same bin/ci that guards every push. A red
+# suite never reaches the server.
+#
+# It ships the exact commit CI validated (workflow_run.head_sha), builds the
+# amd64 image on the runner, pushes to Docker Hub, and rolls it out over SSH with
+# `kamal deploy` (migrations run on boot). This replaces the manual
+# `bin/kamal deploy` — the config it uses (config/deploy.yml + .kamal/secrets) is
+# identical; only the values come from repo Secrets/Variables instead of your
+# shell. See docs/deploy-hetzner-cloudflare.md → "Auto-deploy from CI".
+#
+# Required GitHub → Settings → Secrets and variables → Actions
+#   Variables:  KAMAL_REGISTRY_USER, STABLEMATE_SERVER_IP, STABLEMATE_HOST
+#   Secrets:    KAMAL_REGISTRY_PASSWORD, RAILS_MASTER_KEY,
+#               STABLEMATE_DATABASE_PASSWORD, STABLEMATE_SSL_CERT,
+#               STABLEMATE_SSL_KEY, SSH_PRIVATE_KEY
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]        # must match the `name:` in ci.yml
+    types: [completed]
+    branches: [main]
+
+# Never let two deploys race; if a newer green commit lands mid-deploy, let the
+# running one finish (don't cancel a half-applied rollout).
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Only when CI actually passed. workflow_run also fires on failure/cancelled.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # Deployment target — non-secret, from repo Variables. deploy.yml reads
+      # these via ERB (image/registry user, servers + db host, proxy host).
+      KAMAL_REGISTRY_USER: ${{ vars.KAMAL_REGISTRY_USER }}
+      STABLEMATE_SERVER_IP: ${{ vars.STABLEMATE_SERVER_IP }}
+      STABLEMATE_HOST: ${{ vars.STABLEMATE_HOST }}
+      # Secrets — consumed by .kamal/secrets (env-first, file fallback).
+      KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
+      RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
+      STABLEMATE_DATABASE_PASSWORD: ${{ secrets.STABLEMATE_DATABASE_PASSWORD }}
+      STABLEMATE_SSL_CERT: ${{ secrets.STABLEMATE_SSL_CERT }}
+      STABLEMATE_SSL_KEY: ${{ secrets.STABLEMATE_SSL_KEY }}
+
+    steps:
+      - name: Check out the commit CI validated
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Ruby (gives us bin/kamal)
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.KAMAL_REGISTRY_USER }}
+          password: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
+
+      - name: Add the server's SSH key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          install -m 600 /dev/stdin ~/.ssh/id_ed25519 <<< "${{ secrets.SSH_PRIVATE_KEY }}"
+          ssh-keyscan -H "$STABLEMATE_SERVER_IP" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: kamal deploy
+        run: bin/kamal deploy
