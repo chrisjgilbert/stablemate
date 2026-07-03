@@ -51,7 +51,7 @@ Two TLS hops: the browser trusts Cloudflare's public cert; Cloudflare trusts the
 
 1. Create a Cloud Server: **Ubuntu 24.04**, a shared-vCPU type is plenty to start
    (e.g. CX22 — 2 vCPU / 4 GB). Add your SSH key during creation.
-2. Note its **public IPv4** — this is `PLACEHOLDER_SERVER_IP` below.
+2. Note its **public IPv4** — this is `STABLEMATE_SERVER_IP` below.
 3. Confirm SSH works: `ssh root@<vm-ip> 'echo ok'`.
 
 Kamal installs Docker for you on first run (`kamal setup` runs
