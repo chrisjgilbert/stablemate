@@ -4,7 +4,9 @@ require_relative "test_helper"
 
 class RegistrationTest < StablemateTest
   def registrar
-    Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: fixture("recurring.yml"))
+    Stablemate::Registrars::SolidQueueRecurring.new(
+      recurring_path: fixture("recurring.yml"), environment: "production"
+    )
   end
 
   # Scenario 24 — sync! posts to /api/v1/monitors/sync and caches ping URLs;

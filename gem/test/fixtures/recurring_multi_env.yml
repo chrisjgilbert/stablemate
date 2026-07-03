@@ -1,0 +1,8 @@
+production:
+  daily_digest:
+    class: DailyDigestJob
+    schedule: every day at 9am
+development:
+  dev_smoke:
+    class: DevSmokeJob
+    schedule: every 5 minutes

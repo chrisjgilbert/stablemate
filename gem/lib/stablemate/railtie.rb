@@ -23,8 +23,11 @@ module Stablemate
     end
 
     # After the app initializes, sync (caching ping URLs) and attach Layer 1.
+    # Gated on api_key presence AND the environment allow-list — see the
+    # rationale on Configuration#environments (production-only by default).
     config.after_initialize do
       next unless Stablemate.config.api_key
+      next unless Stablemate.config.enabled_in?
 
       registrar = Registrars::SolidQueueRecurring.new
       Registration.new(registrar:).sync!

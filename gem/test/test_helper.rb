@@ -36,6 +36,10 @@ module Stablemate
 end
 
 class StablemateTest < Minitest::Test
+  # Runs a dispatched ping block synchronously, so by the time handle_event
+  # returns the ping has already hit the fake client — deterministic.
+  SYNC_DISPATCHER = ->(blk) { blk.call }
+
   def setup
     Stablemate.reset!
   end
@@ -47,5 +51,12 @@ class StablemateTest < Minitest::Test
   # Path to a fixture recurring.yml.
   def fixture(name)
     File.expand_path("fixtures/#{name}", __dir__)
+  end
+
+  # A config whose logger writes to the given StringIO, for log assertions.
+  def logging_config(out)
+    config = Stablemate::Configuration.new
+    config.logger = Logger.new(out)
+    config
   end
 end

@@ -30,16 +30,23 @@ bundle install
 ### 1.2 Get an API key
 
 In the app: **Settings → API keys → Generate key**. The raw key
-(`sm_live_…`) is shown **once** — copy it immediately. Store it in credentials:
+(`sm_live_…`) is shown **once** — copy it immediately. Store it in
+**production-only** credentials (or an env var set only on production hosts):
 
 ```sh
-bin/rails credentials:edit
+bin/rails credentials:edit --environment production
 ```
 
 ```yaml
 stablemate:
   api_key: sm_live_xxxxxxxxxxxxxxxxxxxx
 ```
+
+The key's presence is the gem's per-environment switch, and as a second
+guard the gem auto-wires **only in production by default** — dev and test
+boots never register monitors or ping them (a laptop pinging a production
+monitor would mask a real outage). To monitor staging too, set
+`c.environments = %w[production staging]` in the initializer.
 
 ### 1.3 Configure the initializer
 
@@ -49,6 +56,7 @@ Stablemate.configure do |c|
   c.api_key         = Rails.application.credentials.dig(:stablemate, :api_key)
   c.endpoint        = "https://stablemate.dev"   # ← your own domain if self-hosting
   c.ping_on_success = true          # ping when a monitored job finishes cleanly
+  # c.environments  = ["production"]  # default; add "staging" to monitor staging
   # c.recurring_path = "config/recurring.yml"  # default
   # c.timeout        = 2                        # HTTP timeout, seconds
 end
@@ -57,6 +65,10 @@ end
 ### 1.4 Declare your jobs in `recurring.yml`
 
 The gem reads Solid Queue's recurring config. Each task key becomes a monitor.
+Environment sections (`production:`, `development:`, …) are resolved exactly as
+Solid Queue resolves them: the current environment's section when one exists,
+the whole file otherwise. Only tasks Solid Queue would actually run in this
+environment get registered.
 
 ```yaml
 # config/recurring.yml
@@ -82,15 +94,25 @@ the monitor's settings if you want a snugger window.
 > Upgrading from a gem version that *did* register command tasks? Sync never
 > deletes monitors, so the old monitor lingers (down or pending, alerting, and
 > counting toward your plan's cap) — delete or pause it from its detail page.
+> The same applies to monitors an older gem registered from *other
+> environments'* sections of an env-keyed `recurring.yml`: they stop receiving
+> pings after the upgrade and must be deleted or paused by hand.
 
 ### 1.5 Sync
 
-Registration happens automatically on boot. To force it (e.g. after editing
+Registration happens automatically on boot (in the environments listed in
+`c.environments` — production only by default). To force it (e.g. after editing
 `recurring.yml`):
 
 ```sh
 bin/rails stablemate:sync
 ```
+
+Run it **in the environment you mean to register** — on a production host (or
+`RAILS_ENV=production` with production credentials available), since both the
+API key lookup and the `recurring.yml` section are environment-scoped. Run
+locally it would see your development credentials (none, with the
+production-only setup above) and your development task section.
 
 Sync is **idempotent** — it upserts monitors keyed on the task key, so running it
 repeatedly is safe. A sync failure logs a warning and never crashes boot.

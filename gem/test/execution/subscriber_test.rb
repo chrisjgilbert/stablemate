@@ -20,9 +20,9 @@ class SubscriberTest < StablemateTest
     Event.new(payload)
   end
 
-  def subscriber(class_to_keys:, ping_urls:, client:)
+  def subscriber(class_to_keys:, ping_urls:, client:, dispatcher: SYNC_DISPATCHER)
     Stablemate::Execution::Subscriber.new(
-      class_to_keys:, ping_urls:, client:, config: Stablemate.config
+      class_to_keys:, ping_urls:, client:, config: Stablemate.config, dispatcher:
     )
   end
 
@@ -37,7 +37,6 @@ class SubscriberTest < StablemateTest
     )
 
     sub.handle_event(event("DailyDigestJob"))
-    sub.wait!
 
     assert_equal [ "https://sm.test/ping/abc" ], client.pinged
   end
@@ -52,16 +51,14 @@ class SubscriberTest < StablemateTest
     )
 
     sub.handle_event(event("DailyDigestJob", exception: RuntimeError.new("nope")))
-    sub.wait!
 
     assert_empty client.pinged
   end
 
-  # Scenario 19 — ping delivery swallows network errors; nothing propagates.
+  # Scenario 19 — ping delivery swallows errors; nothing propagates into the
+  # host job. The synchronous dispatcher makes this a direct assertion: a
+  # raising client must not raise out of handle_event.
   def test_ping_errors_are_swallowed
-    # The real client swallows; here we drive the real Client#ping with a raising
-    # transport by pointing at an unroutable URL would be slow, so use FakeClient
-    # configured to raise and confirm handle_event still returns without raising.
     client = Stablemate::FakeClient.new(ping_error: SocketError.new("no network"))
     sub = subscriber(
       class_to_keys: { "J" => [ "k" ] },
@@ -69,14 +66,34 @@ class SubscriberTest < StablemateTest
       client:
     )
 
-    sub.handle_event(event("J"))
-    # The ping runs in a thread; joining must not raise into the caller even
-    # though the client raises a network error.
     begin
-      sub.wait!
+      sub.handle_event(event("J"))
     rescue StandardError
       flunk("a network error propagated out of the subscriber")
     end
+    assert_empty client.pinged
+  end
+
+  # The same swallow contract on the REAL async path: with the default
+  # Thread.new dispatcher, a raising client must be caught INSIDE the thread
+  # and logged — an escaped exception would spew via report_on_exception and,
+  # under a host's Thread.abort_on_exception = true, kill the worker process.
+  def test_raising_client_on_the_default_dispatcher_is_swallowed_and_logged
+    require "timeout"
+    logged = Queue.new
+    Stablemate.config.logger = Object.new.tap { |l| l.define_singleton_method(:warn) { |m| logged << m } }
+
+    client = Stablemate::FakeClient.new(ping_error: SocketError.new("no network"))
+    sub = Stablemate::Execution::Subscriber.new(
+      class_to_keys: { "J" => [ "k" ] },
+      ping_urls: { "k" => "https://sm.test/ping/x" },
+      client:, config: Stablemate.config
+    )
+
+    sub.handle_event(event("J"))
+
+    message = Timeout.timeout(5) { logged.pop }
+    assert_match(/ping thread failed/, message)
     assert_empty client.pinged
   end
 
@@ -97,7 +114,6 @@ class SubscriberTest < StablemateTest
     )
 
     sub.handle_event(event("SomeOtherJob"))
-    sub.wait!
 
     assert_empty client.pinged
   end
@@ -115,7 +131,6 @@ class SubscriberTest < StablemateTest
     )
 
     sub.handle_event(event("ReportJob"))
-    sub.wait!
 
     assert_equal %w[https://sm.test/ping/m https://sm.test/ping/e].sort, client.pinged.sort
     assert(logged.any? { |m| m.include?("ReportJob") && m.include?("multiple") })
@@ -132,7 +147,6 @@ class SubscriberTest < StablemateTest
     )
 
     sub.handle_event(event("CleanupJob"))
-    sub.wait!
 
     assert_equal [ "https://sm.test/ping/cleanup" ], client.pinged
   end
@@ -156,13 +170,58 @@ class SubscriberTest < StablemateTest
     ensure
       sub.unsubscribe!
     end
-    sub.wait!
 
     assert_equal [ "https://sm.test/ping/cleanup" ], client.pinged
   end
 
-  # Thread-safety: many worker threads firing performs concurrently must not tear
-  # the @threads bookkeeping or lose pings.
+  # The production default (no injected dispatcher) is fire-and-forget: the ping
+  # runs on a background thread, not inline in the worker. Pins decision #4.
+  # The Queue blocks until the ping lands — deterministic, no polling.
+  def test_default_dispatcher_pings_on_a_background_thread
+    require "timeout"
+    client = Stablemate::FakeClient.new
+    pings = Queue.new
+    client.define_singleton_method(:ping) do |url|
+      super(url).tap { pings << Thread.current }
+    end
+
+    sub = Stablemate::Execution::Subscriber.new(
+      class_to_keys: { "J" => [ "k" ] },
+      ping_urls: { "k" => "https://sm.test/ping/k" },
+      client:, config: Stablemate.config
+    )
+    sub.handle_event(event("J"))
+
+    pinging_thread = Timeout.timeout(5) { pings.pop }
+    assert_equal [ "https://sm.test/ping/k" ], client.pinged
+    refute_equal Thread.current, pinging_thread, "ping ran inline instead of on a background thread"
+  end
+
+  # Last line of defense: the logger is pluggable public API, so even a logger
+  # whose #warn raises (closed IO, broken sink) must not let an exception
+  # escape into the host job — the rescues that call log_warn are exactly the
+  # paths that exist to guarantee that.
+  def test_a_raising_logger_cannot_escape_into_the_host_job
+    Stablemate.config.logger = Object.new.tap do |l|
+      l.define_singleton_method(:warn) { |_m| raise IOError, "closed stream" }
+    end
+    client = Stablemate::FakeClient.new(ping_error: SocketError.new("no network"))
+    sub = subscriber(
+      class_to_keys: { "ReportJob" => %w[a b] }, # ambiguous -> warn on the in-job path too
+      ping_urls: { "a" => "u", "b" => "v" },
+      client:
+    )
+
+    begin
+      sub.handle_event(event("ReportJob"))
+    rescue StandardError
+      flunk("a raising logger propagated out of the subscriber")
+    end
+    assert_empty client.pinged
+  end
+
+  # Concurrent performs (Solid Queue runs many worker threads) must not lose
+  # pings — handle_event holds no shared mutable state.
   def test_handles_concurrent_performs_without_losing_pings
     client = Stablemate::FakeClient.new
     sub = subscriber(
@@ -173,7 +232,6 @@ class SubscriberTest < StablemateTest
 
     threads = 20.times.map { Thread.new { sub.handle_event(event("J")) } }
     threads.each(&:join)
-    sub.wait!
 
     assert_equal 20, client.pinged.size
     assert_equal [ "https://sm.test/ping/k" ], client.pinged.uniq
@@ -189,7 +247,6 @@ class SubscriberTest < StablemateTest
       client:
     )
     sub.handle_event(event("J"))
-    sub.wait!
     assert_empty client.pinged
   end
 end

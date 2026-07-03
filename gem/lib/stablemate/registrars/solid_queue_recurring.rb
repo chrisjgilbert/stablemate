@@ -7,7 +7,9 @@ require_relative "registrar"
 module Stablemate
   module Registrars
     # V1 registrar (architecture.md §9): reads Solid Queue's config/recurring.yml
-    # and turns each task into a registration tuple.
+    # and turns each task into a registration tuple. Environment sections are
+    # resolved with Solid Queue's exact rule — the current env's section when
+    # present, the whole file otherwise (see #tasks).
     #
     # - registration_key = the task key (decision #6).
     # - name             = the task key (default).
@@ -17,6 +19,8 @@ module Stablemate
     #   false alarm.
     # - grace_period_seconds = max(interval * DEFAULT_GRACE_FRACTION, 5 minutes).
     class SolidQueueRecurring < Registrar
+      include Logging
+
       DEFAULT_GRACE_FRACTION = 0.15
       MIN_GRACE_SECONDS = 5 * 60
       # How many consecutive occurrences to sample when measuring the largest gap
@@ -24,13 +28,21 @@ module Stablemate
       # daily+ crons are regular so two samples already settle them.
       OCCURRENCE_SAMPLES = 50
 
-      def initialize(recurring_path: nil, config: Stablemate.config)
+      def initialize(recurring_path: nil, environment: nil, config: Stablemate.config)
         @recurring_path = recurring_path || config.recurring_path
+        # Shared resolver (Configuration#environment) so the railtie gate and
+        # this file scoping always answer "what environment?" identically.
+        @environment = (environment || config.environment).to_s
         @config = config
       end
 
       def tuples
         tasks.filter_map do |key, task|
+          # Non-Hash entries (scalar garbage, nil sections seen through the
+          # whole-file fallback) and schedule-less ones (other envs' sections
+          # posing as tasks) can't be sized; skip, never crash boot.
+          next unless task.is_a?(Hash)
+
           schedule = task["schedule"]
           next if schedule.nil?
 
@@ -68,6 +80,8 @@ module Stablemate
       # (decision #6; a class shared by two tasks maps to both.)
       def class_to_keys
         tasks.each_with_object({}) do |(key, task), map|
+          next unless task.is_a?(Hash)
+
           class_name = job_class(task)
           next if class_name.nil?
 
@@ -101,14 +115,6 @@ module Stablemate
           name.empty? ? nil : name
         end
 
-        def log_info(message)
-          (config.logger || Stablemate.logger).info("[stablemate] #{message}")
-        end
-
-        def log_warn(message)
-          (config.logger || Stablemate.logger).warn("[stablemate] #{message}")
-        end
-
         def grace_seconds(interval)
           [ (interval * DEFAULT_GRACE_FRACTION).round, MIN_GRACE_SECONDS ].max
         end
@@ -128,28 +134,38 @@ module Stablemate
           gaps.max
         end
 
+        # Solid Queue's exact section rule (configuration.rb#config_from):
+        # `config[env] ? config[env] : config` — the current environment's
+        # section when one is present, the WHOLE file otherwise. Mirroring it
+        # exactly means we register precisely the tasks Solid Queue will run:
+        # a development-only task never becomes a production monitor (pending
+        # forever, eating a cap slot, or false-alarming after a stray ping),
+        # and a mixed file's top-level tasks aren't registered in an env whose
+        # section supersedes them. Memoized: tuples and class_to_keys are both
+        # called on every boot, and one parse also means they can't see two
+        # different versions of the file.
         def tasks
-          raw = YAML.safe_load_file(@recurring_path, aliases: true) || {}
-          return {} if raw.empty?
-
-          if env_keyed?(raw)
-            # Keyed by environment (production:, development:, …) — merge all
-            # sections so the registrar sees every task regardless of env.
-            raw.values.reduce({}) { |acc, section| acc.merge(section) }
-          else
-            # Flat file: task keys at the top level.
-            raw
+          @tasks ||= begin
+            raw = YAML.safe_load_file(@recurring_path, aliases: true) || {}
+            resolve_section(raw)
+          rescue Errno::ENOENT
+            {}
           end
-        rescue Errno::ENOENT
-          {}
         end
 
-        # A recurring.yml is environment-keyed when every top-level value is itself
-        # a Hash of task definitions (Hashes). A task entry, by contrast, has
-        # scalar leaves like `class:`/`schedule:`.
-        def env_keyed?(raw)
-          raw.values.all? do |section|
-            section.is_a?(Hash) && section.any? && section.values.all? { |task| task.is_a?(Hash) }
+        # Solid Queue's rule, hardened: a scalar where a Hash belongs (a whole-
+        # file string, or `production: true`) yields {} instead of the
+        # NoMethodError that would silently disable the gem via the railtie's
+        # boot rescue. (Solid Queue itself crashes on these; spec 21b doesn't
+        # let us.)
+        def resolve_section(raw)
+          return {} unless raw.is_a?(Hash)
+
+          section = raw[@environment]
+          if section
+            section.is_a?(Hash) ? section : {}
+          else
+            raw
           end
         end
     end

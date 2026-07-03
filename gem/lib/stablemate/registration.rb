@@ -8,6 +8,8 @@ module Stablemate
   # 1 can map job -> URL locally. Idempotent. Runs on boot + via `rails
   # stablemate:sync`. A sync failure logs a warning and never crashes boot.
   class Registration
+    include Logging
+
     def initialize(registrar: nil, client: nil, config: Stablemate.config, app: nil)
       @config = config
       @registrar = registrar || Registrars::SolidQueueRecurring.new(config:)
@@ -50,10 +52,6 @@ module Stablemate
         end
       rescue StandardError
         "app"
-      end
-
-      def log_warn(message)
-        (config.logger || Stablemate.logger).warn("[stablemate] #{message}")
       end
   end
 end

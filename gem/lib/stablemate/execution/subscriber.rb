@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "monitor"
-
 module Stablemate
   module Execution
     # Layer 1 (architecture.md §9): subscribe to ActiveSupport::Notifications'
@@ -12,27 +10,32 @@ module Stablemate
     # so it works on the test/async/inline adapters too (decision #4 / §4.4).
     #
     # Safety: a raising perform does NOT ping (the notification carries the
-    # exception). The ping itself runs in a background thread and swallows every
-    # error — it must never block or raise into the job. No API key on this path.
+    # exception). The ping is dispatched to a background thread and nothing may
+    # propagate into the host job. No API key on this path.
     class Subscriber
+      include Logging
+
       EVENT = "perform.active_job"
 
       # @param class_to_keys [Hash{String=>Array<String>}] job class name -> task keys.
       # @param ping_urls     [Hash{String=>String}, nil] task key -> ping URL. When
-      #   nil (the production default) URLs are resolved LIVE from the shared,
-      #   mutex-guarded Stablemate.ping_url_for, so a re-sync that refreshes the
-      #   cache is picked up without rebuilding the subscriber. Tests inject an
-      #   explicit hash for determinism.
-      def initialize(class_to_keys:, ping_urls: nil, client: nil, config: Stablemate.config)
+      #   nil (the production default) URLs are resolved LIVE from the shared
+      #   Stablemate.ping_urls snapshot, so a re-sync that refreshes the cache
+      #   is picked up without rebuilding the subscriber. Tests inject an explicit
+      #   hash for determinism.
+      # @param dispatcher    [#call] how a ping block is executed. The default is
+      #   a fire-and-forget background thread (decision #4: a slow or down
+      #   Stablemate server must never block the host's worker). Tests inject
+      #   ->(blk) { blk.call } to run pings synchronously; a host wiring the
+      #   subscriber by hand may inject a pooled executor. The block never
+      #   raises — errors are logged and swallowed inside it.
+      def initialize(class_to_keys:, ping_urls: nil, client: nil, config: Stablemate.config,
+                     dispatcher: ->(blk) { Thread.new(&blk) })
         @class_to_keys = class_to_keys
         @ping_urls = ping_urls
         @client = client || Client.new(config)
         @config = config
-        @threads = []
-        # perform.active_job fires from many worker threads concurrently; guard the
-        # @threads prune+append so there's no torn read / "modified during
-        # iteration" under concurrent performs.
-        @threads_lock = Monitor.new
+        @dispatcher = dispatcher
       end
 
       # Attach to ActiveSupport::Notifications. Returns the subscriber handle.
@@ -66,17 +69,13 @@ module Stablemate
         keys.each { |key| ping(key) }
       end
 
-      # Block until any in-flight ping threads finish (test helper).
-      def wait!
-        snapshot = @threads_lock.synchronize { @threads.dup }
-        snapshot.each(&:join)
-      end
-
       private
+        attr_reader :config
+
         # Resolve a ping URL by key, from the injected hash (tests) or the live
         # shared cache (production).
         def url_for(key)
-          @ping_urls ? @ping_urls[key] : Stablemate.ping_url_for(key)
+          (@ping_urls || Stablemate.ping_urls)[key]
         end
 
         def resolve_keys(class_name)
@@ -98,28 +97,21 @@ module Stablemate
           url = url_for(key)
           return unless url
 
-          # Fire-and-forget: a background thread, and a belt-and-braces rescue so
-          # even a client that raises can never propagate into the host job.
-          thread = Thread.new do
-            begin
-              @client.ping(url)
-            rescue StandardError => e
-              log_warn("ping thread failed: #{e.class}: #{e.message}")
-            end
-          end
-
-          # Track only still-running threads so @threads can't grow without bound
-          # over a long-lived process (pruned to the in-flight set on each ping).
-          # Guarded so concurrent performs don't tear the array. wait! joins
-          # whatever is in flight.
-          @threads_lock.synchronize do
-            @threads.select!(&:alive?)
-            @threads << thread
-          end
+          @dispatcher.call(-> { deliver(url) })
+        rescue StandardError => e
+          # Guards the dispatch itself (e.g. Thread.new raising under thread
+          # exhaustion) — nothing may propagate into the host job.
+          log_warn("ping dispatch failed: #{e.class}: #{e.message}")
         end
 
-        def log_warn(message)
-          (@config.logger || Stablemate.logger).warn("[stablemate] #{message}")
+        # The dispatched block. Client#ping swallows its own errors, but an
+        # injected/wrapping client is public API and may raise; uncaught, that
+        # would escape the background thread — spewing via report_on_exception
+        # and, under a host's Thread.abort_on_exception, killing the worker.
+        def deliver(url)
+          @client.ping(url)
+        rescue StandardError => e
+          log_warn("ping thread failed: #{e.class}: #{e.message}")
         end
     end
   end
