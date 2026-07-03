@@ -1,6 +1,11 @@
 # Stablemate — Kamal deploy config for a single Hetzner VM behind Cloudflare.
 #
-# Replace every PLACEHOLDER below, then:
+# The three deployment-specific values (registry user, server IP, public host)
+# are read from ENV so the exact same config drives both a manual deploy and the
+# GitHub Actions auto-deploy (.github/workflows/deploy.yml). Set them once — on
+# your laptop export KAMAL_REGISTRY_USER / STABLEMATE_SERVER_IP / STABLEMATE_HOST
+# (see docs/deploy-hetzner-cloudflare.md), in CI they come from repo Variables —
+# then:
 #   bin/kamal setup     # first time (provisions kamal-proxy + the db accessory)
 #   bin/kamal deploy    # subsequent releases
 #
@@ -12,12 +17,12 @@
 service: stablemate
 
 # Name of the container image. On Docker Hub this is <registry-user>/stablemate.
-image: PLACEHOLDER_REGISTRY_USER/stablemate
+image: <%= ENV.fetch("KAMAL_REGISTRY_USER") %>/stablemate
 
-# Deploy to these servers. PLACEHOLDER_SERVER_IP is your Hetzner VM's public IP.
+# Deploy to these servers. STABLEMATE_SERVER_IP is your Hetzner VM's public IP.
 servers:
   web:
-    - PLACEHOLDER_SERVER_IP
+    - <%= ENV.fetch("STABLEMATE_SERVER_IP") %>
 
 # kamal-proxy terminates TLS on the host and load-balances to the app container —
 # no Caddy, nginx, or extra certs. This box sits behind Cloudflare (orange cloud)
@@ -34,13 +39,13 @@ proxy:
   ssl:
     certificate_pem: STABLEMATE_SSL_CERT
     private_key_pem: STABLEMATE_SSL_KEY
-  host: PLACEHOLDER_HOST   # e.g. status.example.com — must match STABLEMATE_HOST below
+  host: <%= ENV.fetch("STABLEMATE_HOST") %>   # e.g. status.example.com — must match STABLEMATE_HOST below
 
 # Where you keep your container images.
 registry:
   # Alternatives: hub.docker.com (omit server) / ghcr.io / registry.digitalocean.com / ...
   # server: ghcr.io
-  username: PLACEHOLDER_REGISTRY_USER
+  username: <%= ENV.fetch("KAMAL_REGISTRY_USER") %>
 
   # Always use an access token rather than a real password. Pulled from .kamal/secrets.
   password:
@@ -57,7 +62,7 @@ env:
   clear:
     # Public hostname. Ping URLs and every email link are built from this, and it
     # enables Host-header authorization. Must match the Cloudflare host above.
-    STABLEMATE_HOST: PLACEHOLDER_HOST
+    STABLEMATE_HOST: <%= ENV.fetch("STABLEMATE_HOST") %>
     STABLEMATE_PROTOCOL: https
 
     # This box sits behind Cloudflare, so trust CF's edge ranges to recover the
@@ -117,7 +122,7 @@ builder:
 accessories:
   db:
     image: postgres:16
-    host: PLACEHOLDER_SERVER_IP
+    host: <%= ENV.fetch("STABLEMATE_SERVER_IP") %>
     # Bind to localhost only — Postgres is never exposed to the public internet;
     # the app reaches it over the private kamal docker network.
     port: "127.0.0.1:5432:5432"
