@@ -3,12 +3,16 @@
   <head>
     <%= render "layouts/head" %>
 
-    <%# Geist / Geist Mono — the design typefaces (the @theme tokens reference them).
-        Scoped to the marketing page so the authenticated app keeps its system-ui
-        fallback and no render-blocking external request. %>
+    <%# The "Omakase" marketing typefaces (Zilla Slab display, Newsreader reading
+        serif, IBM Plex Mono for data). Scoped to the marketing page so the
+        authenticated app keeps its system-ui fallback and no external request. %>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,wght@0,400;0,500;1,400&family=Zilla+Slab:wght@600;700&display=swap" rel="stylesheet">
+
+    <%# All marketing CSS is scoped under `.lp` (see the wrapper below) so the
+        authenticated app's design tokens are untouched. %>
+    <%= stylesheet_link_tag "landing", "data-turbo-track": "reload" %>
   </head>
 
   <body class="bg-app text-ink font-sans antialiased min-h-screen overflow-x-hidden">
@@ -23,6 +27,6 @@
       </div>
     <% end %>
 
-    <%= yield %>
+    <div class="lp"><%= yield %></div>
   </body>
 </html>

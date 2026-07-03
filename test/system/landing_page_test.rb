@@ -1,6 +1,6 @@
 require "application_system_test_case"
 
-# The public marketing landing page (GET /) recreated from the design handoff.
+# The public marketing landing page (GET /) — the "Omakase" design direction.
 # Anonymous visitors see the full marketing page; signed-in users are bounced to
 # their dashboard. Browser-driven so the rendered nav/sections/CTAs are exercised.
 class LandingPageTest < ApplicationSystemTestCase
@@ -8,15 +8,17 @@ class LandingPageTest < ApplicationSystemTestCase
     visit root_path
 
     # Hero — brand headline and the primary CTA.
-    assert_text "Dead simple job monitoring for Rails applications"
-    assert_link "Start monitoring free"
+    assert_text "Super simple job monitoring for Rails"
+    assert_link "Start monitoring — free"
 
-    # Each marketing section is rendered.
-    assert_text "Live in three steps, no code in your jobs"
-    assert_text "Everything you need, nothing you don't"
-    assert_text "Your recurring.yml is the spec"
-    assert_text "paper trail for every job"
-    assert_text "Know the moment a job goes quiet"
+    # Each marketing section is rendered. Substrings are whitespace-safe:
+    # Capybara normalises nbsp to a plain space.
+    assert_text "It's genuinely this simple"
+    assert_text "already the to-do list"
+    assert_text "it's worth reading"
+    assert_text "No paid tier. No upsell"
+    assert_text "shouldn't be a"
+    assert_text "9 a.m. surprise"
 
     # Nav offers both entry points into the app.
     assert_link "Sign in"
@@ -25,8 +27,8 @@ class LandingPageTest < ApplicationSystemTestCase
 
   test "the Start monitoring free CTA leads to sign up" do
     visit root_path
-    # The CTA appears in both the hero and the final band; the hero one is first.
-    click_on "Start monitoring free", match: :first
+    # The CTA appears in both the hero and the finale; the hero one is first.
+    click_on "Start monitoring — free", match: :first
     assert_current_path sign_up_path
   end
 
