@@ -147,9 +147,25 @@ module Stablemate
         def tasks
           @tasks ||= begin
             raw = YAML.safe_load_file(@recurring_path, aliases: true) || {}
-            raw[@environment] || raw
+            resolve_section(raw)
           rescue Errno::ENOENT
             {}
+          end
+        end
+
+        # Solid Queue's rule, hardened: a scalar where a Hash belongs (a whole-
+        # file string, or `production: true`) yields {} instead of the
+        # NoMethodError that would silently disable the gem via the railtie's
+        # boot rescue. (Solid Queue itself crashes on these; spec 21b doesn't
+        # let us.)
+        def resolve_section(raw)
+          return {} unless raw.is_a?(Hash)
+
+          section = raw[@environment]
+          if section
+            section.is_a?(Hash) ? section : {}
+          else
+            raw
           end
         end
     end

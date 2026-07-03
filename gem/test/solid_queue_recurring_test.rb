@@ -173,6 +173,30 @@ class SolidQueueRecurringTest < StablemateTest
     end
   end
 
+  # A scalar SECTION value (`production: true` — YAML parses `on` as true too)
+  # must yield nothing for that env, not crash boot with NoMethodError. Solid
+  # Queue itself would crash here; spec 21b holds us to a higher bar.
+  def test_scalar_section_value_yields_nothing_without_crashing
+    Tempfile.create([ "scalar-section", ".yml" ]) do |f|
+      f.write("production: true\ndevelopment:\n  dev_task:\n    class: DevJob\n    schedule: every hour\n")
+      f.flush
+
+      prod = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: f.path, environment: "production")
+      assert_empty prod.tuples
+      assert_empty prod.class_to_keys
+    end
+  end
+
+  # A recurring.yml whose entire contents are scalar garbage must not crash.
+  def test_non_hash_file_yields_nothing
+    Tempfile.create([ "scalar-file", ".yml" ]) do |f|
+      f.write("just a string\n")
+      f.flush
+      r = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: f.path)
+      assert_empty r.tuples
+    end
+  end
+
   # Scalar garbage where a task hash should be (bad indentation, templating
   # accidents) is skipped, not crashed on.
   def test_non_hash_task_entries_are_skipped

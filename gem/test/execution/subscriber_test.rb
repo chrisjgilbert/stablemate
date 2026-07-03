@@ -197,6 +197,29 @@ class SubscriberTest < StablemateTest
     refute_equal Thread.current, pinging_thread, "ping ran inline instead of on a background thread"
   end
 
+  # Last line of defense: the logger is pluggable public API, so even a logger
+  # whose #warn raises (closed IO, broken sink) must not let an exception
+  # escape into the host job — the rescues that call log_warn are exactly the
+  # paths that exist to guarantee that.
+  def test_a_raising_logger_cannot_escape_into_the_host_job
+    Stablemate.config.logger = Object.new.tap do |l|
+      l.define_singleton_method(:warn) { |_m| raise IOError, "closed stream" }
+    end
+    client = Stablemate::FakeClient.new(ping_error: SocketError.new("no network"))
+    sub = subscriber(
+      class_to_keys: { "ReportJob" => %w[a b] }, # ambiguous -> warn on the in-job path too
+      ping_urls: { "a" => "u", "b" => "v" },
+      client:
+    )
+
+    begin
+      sub.handle_event(event("ReportJob"))
+    rescue StandardError
+      flunk("a raising logger propagated out of the subscriber")
+    end
+    assert_empty client.pinged
+  end
+
   # Concurrent performs (Solid Queue runs many worker threads) must not lose
   # pings — handle_event holds no shared mutable state.
   def test_handles_concurrent_performs_without_losing_pings

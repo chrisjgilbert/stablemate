@@ -25,9 +25,11 @@ module Stablemate
       @config ||= Configuration.new
     end
 
-    # Reset config + the ping-URL cache (test helper).
+    # Reset config + the ping-URL cache (test helper). The cache write takes
+    # MERGE_LOCK like every other writer — a straggler sync thread's merge must
+    # not resurrect the pre-reset snapshot.
     def reset!
-      @ping_urls = nil
+      MERGE_LOCK.synchronize { @ping_urls = nil }
       @config = Configuration.new
     end
 
