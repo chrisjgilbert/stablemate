@@ -1,6 +1,6 @@
 # Stablemate
 
-**Dead simple cron monitoring for Rails applications.** One promise: *a scheduled
+**Dead simple job monitoring for Rails applications.** One promise: *a scheduled
 job stops running, we email you.*
 
 Stablemate watches your Solid Queue recurring jobs (and any ActiveJob backend) via

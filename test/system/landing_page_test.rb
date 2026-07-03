@@ -8,13 +8,14 @@ class LandingPageTest < ApplicationSystemTestCase
     visit root_path
 
     # Hero — brand headline and the primary CTA.
-    assert_text "Dead simple cron monitoring for Rails applications"
+    assert_text "Dead simple job monitoring for Rails applications"
     assert_link "Start monitoring free"
 
     # Each marketing section is rendered.
-    assert_text "Live in three steps, no agent to install"
+    assert_text "Live in three steps, no code in your jobs"
     assert_text "Everything you need, nothing you don't"
     assert_text "Your recurring.yml is the spec"
+    assert_text "paper trail for every job"
     assert_text "Know the moment a job goes quiet"
 
     # Nav offers both entry points into the app.

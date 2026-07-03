@@ -10,6 +10,13 @@ module ApplicationHelper
     end
   end
 
+  # Ping-history retention in whole days, from the constant the models prune and
+  # chart by, so marketing's "90-day history" claims can't drift from the product
+  # (same idea as free_plan_monitors_phrase).
+  def ping_retention_days
+    (Stablemate::PING_RETENTION / 1.day).to_i
+  end
+
   # Whether to render any billing UI. False on a keyless self-host instance, where
   # there are no plans and nothing to link to (issue #19 config-gate).
   def billing_enabled?

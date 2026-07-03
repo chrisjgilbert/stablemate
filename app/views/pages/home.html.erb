@@ -1,4 +1,4 @@
-<% content_for :title, "Stablemate — dead simple cron monitoring for Rails" %>
+<% content_for :title, "Stablemate — dead simple job monitoring for Rails" %>
 <%#
   Marketing landing page — recreated from the design handoff
   (design/Stablemate Landing.dc.html). Server-rendered ERB + Tailwind tokens; the
@@ -8,9 +8,31 @@
   "No pricing/tier/upgrade UI", phase-4 §6 "one Free plan"): the design's Pricing
   section and its paid-plan claims (Slack/PagerDuty, $19/$49 tiers) are omitted.
   V1 ships one free plan with email alerts only.
+
+  Further copy deviation from the handoff: the page leads with the gem +
+  recurring.yml path (the recommended integration per docs/integrating.md) rather
+  than the handoff's curl-led steps; the curl/ping-URL path is a one-line fallback
+  under "How it works". The handoff's queue-pause-sync bullet is omitted — the
+  product doesn't do that. Positioning reworded from "cron monitoring" to "job
+  monitoring": the audience runs Solid Queue recurring jobs, not crontab, and the
+  page's own examples are job classes.
 %>
 <% docs_url = "https://github.com/chrisjgilbert/stablemate/blob/main/docs/integrating.md" %>
 <% repo_url = "https://github.com/chrisjgilbert/stablemate" %>
+<%# The page's one fictional app: recurring.yml task keys shared by the hero
+    mockup and the trust strip, so the example job names and status counts
+    can't drift apart between sections. Dot classes derive from status
+    (bg-up-dot / bg-down-dot / bg-paused-dot design tokens). %>
+<% demo_monitors = [
+     { name: "stripe_reconcile", status: "up",     last: "12s ago" },
+     { name: "daily_digest",     status: "up",     last: "3m ago" },
+     { name: "nightly_backup",   status: "down",   last: "26h ago", down_ticks: [11, 12, 13] },
+     { name: "clear_sessions",   status: "up",     last: "1m ago" },
+     { name: "sitemap_refresh",  status: "paused", last: "paused" }
+   ] %>
+<% status_counts = demo_monitors.map { |m| m[:status] }.tally %>
+<%# Full literal class names so Tailwind sees them (same pattern as _status_badge). %>
+<% demo_dot = { "up" => "bg-up-dot", "down" => "bg-down-dot", "paused" => "bg-paused-dot" } %>
 
 <%# ===== NAV ===== %>
 <div class="sticky top-0 z-50 bg-app/80 backdrop-blur border-b border-border">
@@ -44,11 +66,12 @@
           <span class="text-[11.5px] font-semibold text-brand">Native Solid Queue integration</span>
         </div>
         <h1 class="text-[44px] sm:text-[50px] leading-[1.06] font-bold tracking-[-.03em] text-[#16161a] mb-[18px]">
-          Dead simple cron monitoring for Rails applications
+          Dead simple job monitoring for Rails applications
         </h1>
         <p class="text-[17px] leading-[1.62] text-secondary mb-[30px] max-w-[480px]">
-          Your scheduled jobs ping Stablemate each time they run. Miss a beat past
-          the grace window and we email you before your users notice. One line per job.
+          Stablemate watches your Solid Queue recurring jobs and emails you the moment
+          a run goes missing — because nobody notices a dead nightly backup until they
+          need it. The gem does the pinging: zero code in your jobs.
         </p>
         <div class="flex items-center gap-3 mb-5">
           <%= link_to sign_up_path,
@@ -70,23 +93,17 @@
         <div class="px-4 py-3.5">
           <div class="flex items-center justify-between mb-3">
             <span class="font-bold text-[14px] text-ink">Monitors</span>
-            <span class="text-[11.5px] text-muted"><span class="text-down-text font-semibold">1 down</span> · 5 up · 1 paused</span>
+            <span class="text-[11.5px] text-muted"><span class="text-down-text font-semibold"><%= status_counts.fetch("down", 0) %> down</span> · <%= status_counts.fetch("up", 0) %> up · <%= status_counts.fetch("paused", 0) %> paused</span>
           </div>
-          <% [
-               { name: "stripe-webhook-sync", dot: "bg-up-dot",     last: "12s ago", down_ticks: [] },
-               { name: "daily-digest-email",  dot: "bg-up-dot",     last: "3m ago",  down_ticks: [] },
-               { name: "nightly-db-backup",   dot: "bg-down-dot",   last: "26h ago", down_ticks: [11, 12, 13] },
-               { name: "clear-sessions",      dot: "bg-up-dot",     last: "1m ago",  down_ticks: [] },
-               { name: "sitemap-refresh",     dot: "bg-paused-dot", last: "paused",  muted: true }
-             ].each do |row| %>
+          <% demo_monitors.each do |row| %>
             <div class="grid grid-cols-[1.5fr_auto_80px] gap-2.5 items-center py-[9px] px-1 border-t border-[#f4f4f6]">
               <div class="flex items-center gap-2 min-w-0">
-                <span class="w-1.5 h-1.5 rounded-full shrink-0 <%= row[:dot] %>"></span>
+                <span class="w-1.5 h-1.5 rounded-full shrink-0 <%= demo_dot.fetch(row[:status]) %>"></span>
                 <span class="font-mono font-semibold text-[12px] text-ink truncate"><%= row[:name] %></span>
               </div>
               <div class="flex items-end gap-[1.5px] h-3.5">
                 <% 14.times do |i| %>
-                  <% fill = if row[:muted] then "bg-[#e4e4e9]"
+                  <% fill = if row[:status] == "paused" then "bg-[#e4e4e9]"
                             elsif row[:down_ticks]&.include?(i) then "bg-down-dot"
                             else "bg-[#3ec06a]" end %>
                   <span class="w-[3.5px] h-[13px] rounded-[1px] <%= fill %>"></span>
@@ -105,9 +122,10 @@
 <div class="border-y border-[#f0f0f3] bg-surface">
   <div class="max-w-[1140px] mx-auto px-6 py-5 flex items-center gap-6 flex-wrap justify-center">
     <span class="text-[11px] font-semibold uppercase tracking-[.06em] text-[#b0b0bb]">Watches the jobs that keep Rails apps alive</span>
-    <% %w[sidekiq:digest db:backup stripe:reconcile sitemap:refresh cache:warm].each_with_index do |job, i| %>
+    <%# Active jobs only — a paused monitor isn't being "kept alive". %>
+    <% demo_monitors.reject { |m| m[:status] == "paused" }.each_with_index do |monitor, i| %>
       <% if i.positive? %><span class="w-1 h-1 rounded-full bg-[#dcdce2]"></span><% end %>
-      <span class="font-mono text-[12.5px] text-muted"><%= job %></span>
+      <span class="font-mono text-[12.5px] text-muted"><%= monitor[:name] %></span>
     <% end %>
   </div>
 </div>
@@ -116,25 +134,30 @@
 <div id="how" class="max-w-[1140px] mx-auto px-6 pt-[84px] pb-[18px]">
   <div class="text-center max-w-[560px] mx-auto mb-[50px]">
     <div class="text-[11.5px] font-semibold uppercase tracking-[.08em] text-brand mb-3">How it works</div>
-    <h2 class="text-[33px] leading-[1.15] font-bold tracking-[-.025em] text-[#16161a] mb-3.5">Live in three steps, no agent to install</h2>
-    <p class="text-[15.5px] leading-[1.6] text-muted">If your job can make an HTTP request, it can be monitored. That's the whole integration.</p>
+    <h2 class="text-[33px] leading-[1.15] font-bold tracking-[-.025em] text-[#16161a] mb-3.5">Live in three steps, no code in your jobs</h2>
+    <p class="text-[15.5px] leading-[1.6] text-muted">Install the gem and keep the schedule you already have. Every recurring job becomes a monitored heartbeat.</p>
   </div>
   <div class="grid md:grid-cols-3 gap-5">
     <div class="bg-surface border border-border rounded-[13px] p-6 shadow-sm">
       <div class="flex items-center gap-2.5 mb-4">
         <span class="flex items-center justify-center w-[26px] h-[26px] rounded-lg bg-brand-tint font-mono font-bold text-[12px] text-brand">1</span>
-        <span class="font-semibold text-[15px] text-ink">Create a monitor</span>
+        <span class="font-semibold text-[15px] text-ink">Add the gem</span>
       </div>
-      <p class="text-[13.5px] leading-[1.6] text-muted mb-4">Name it after your job and set the interval — say <span class="font-mono text-brand">every 1h</span> with a 5-minute grace.</p>
-      <div class="bg-[#1c1c22] rounded-[9px] px-[13px] py-3 font-mono font-medium text-[11.5px] leading-[1.7]"><span class="text-[#6e6e7e]"># you get a unique URL</span><br><span class="text-[#c9c9d3]">stablemate.dev/ping/</span><span class="text-[#8b7cf0]">8f3a…</span></div>
+      <p class="text-[13.5px] leading-[1.6] text-muted mb-4">One gem and an API key from Settings. Registration runs on boot — nothing to add to the jobs themselves.</p>
+      <div class="bg-[#1c1c22] rounded-[9px] px-[13px] py-3 font-mono font-medium text-[11.5px] leading-[1.7]"><span class="text-[#6e6e7e]"># Gemfile</span><br><span class="text-[#5fc77f]">gem</span> <span class="text-[#8b7cf0]">"stablemate"</span></div>
     </div>
     <div class="bg-surface border border-border rounded-[13px] p-6 shadow-sm">
       <div class="flex items-center gap-2.5 mb-4">
         <span class="flex items-center justify-center w-[26px] h-[26px] rounded-lg bg-brand-tint font-mono font-bold text-[12px] text-brand">2</span>
-        <span class="font-semibold text-[15px] text-ink">Ping it from your job</span>
+        <span class="font-semibold text-[15px] text-ink">Point it at your schedule</span>
       </div>
-      <p class="text-[13.5px] leading-[1.6] text-muted mb-4">Add a one-line request at the end of the work. Curl, Net::HTTP, or our tiny helper.</p>
-      <div class="bg-[#1c1c22] rounded-[9px] px-[13px] py-3 font-mono font-medium text-[11.5px] leading-[1.7]"><span class="text-[#6e6e7e]">$ </span><span class="text-[#5fc77f]">curl</span> <span class="text-[#c9c9d3]">-fsS \</span><br><span class="text-[#c9c9d3]">&nbsp;&nbsp;stablemate.dev/ping/</span><span class="text-[#8b7cf0]">8f3a…</span></div>
+      <p class="text-[13.5px] leading-[1.6] text-muted mb-4">Every job class in <span class="font-mono text-brand">recurring.yml</span> auto-registers as a monitor. The schedule sets the expected interval; each successful run pings it.</p>
+      <div class="bg-[#1c1c22] rounded-[9px] px-[13px] py-3 font-mono font-medium text-[11.5px] leading-[1.7]">
+        <div><span class="text-[#6e6e7e]"># config/recurring.yml</span></div>
+        <div><span class="text-[#5f9bf0]">daily_digest</span><span class="text-[#6e6e7e]">:</span></div>
+        <div class="pl-[18px]"><span class="text-[#9a9aa6]">class</span><span class="text-[#6e6e7e]">:</span> <span class="text-[#e0e0ea]">DailyDigestJob</span></div>
+        <div class="pl-[18px]"><span class="text-[#9a9aa6]">schedule</span><span class="text-[#6e6e7e]">:</span> <span class="text-[#5fc77f]">every day at 9am</span></div>
+      </div>
     </div>
     <div class="bg-surface border border-border rounded-[13px] p-6 shadow-sm">
       <div class="flex items-center gap-2.5 mb-4">
@@ -144,10 +167,15 @@
       <p class="text-[13.5px] leading-[1.6] text-muted mb-4">No ping past the grace window? The monitor flips to down and you get an email instantly.</p>
       <div class="flex flex-col gap-[7px]">
         <div class="flex items-center gap-2 px-[11px] py-2 rounded-lg bg-up-bg"><span class="w-1.5 h-1.5 rounded-full bg-up-dot"></span><span class="text-[12px] font-semibold text-up-text">Ping received · 142ms</span></div>
-        <div class="flex items-center gap-2 px-[11px] py-2 rounded-lg bg-down-bg"><span class="w-1.5 h-1.5 rounded-full bg-down-dot status-dot-pulse"></span><span class="text-[12px] font-semibold text-down-text">Down · alert sent to your team</span></div>
+        <div class="flex items-center gap-2 px-[11px] py-2 rounded-lg bg-down-bg"><span class="w-1.5 h-1.5 rounded-full bg-down-dot status-dot-pulse"></span><span class="text-[12px] font-semibold text-down-text">Down · alert email sent</span></div>
       </div>
     </div>
   </div>
+  <p class="mt-9 text-center text-[13.5px] leading-[1.6] text-muted">
+    Not on Rails? Every monitor also has a plain ping URL — hit it with
+    <span class="font-mono">curl</span> from cron, a shell script, anything that speaks HTTP.
+    <a href="<%= docs_url %>" class="font-semibold text-brand hover:text-brand-hover">Integration docs</a>
+  </p>
 </div>
 
 <%# ===== FEATURES ===== %>
@@ -160,7 +188,7 @@
     <% [
          { title: "Heartbeat detection", body: "Expected interval plus a grace period you control. No flapping, no noise — just a clear up or down.",
            icon: '<svg width="18" height="18" viewBox="0 0 30 24" fill="none"><path d="M2 14h7l2.5-7 3 11L21 5.5" stroke="#5b53eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
-         { title: "Email alerts", body: "One email the second a job misses its window, one when it recovers. Transition-only — no flapping, no reminder spam.",
+         { title: "Email alerts", body: "One email the moment a job misses its window, one when it recovers. Transition-only — no reminder spam.",
            icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3a6 6 0 016 6v3l1.5 2.5H4.5L6 12V9a6 6 0 016-6z" stroke="#5b53eb" stroke-width="1.9" stroke-linejoin="round"/><path d="M10 18a2 2 0 004 0" stroke="#5b53eb" stroke-width="1.9" stroke-linecap="round"/></svg>' },
          { title: "Scoped API keys", body: "Generate a key for the gem, see it once, revoke anytime. It registers and pings your jobs on your behalf.",
            icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M14 7a4 4 0 11-3.8 5.2L6 16.4V19H3.6v-2.4l.6-.6h2l1-1 .2-.2A4 4 0 0114 7z" stroke="#5b53eb" stroke-width="1.7" stroke-linejoin="round"/><circle cx="15.5" cy="9.5" r="1.1" fill="#5b53eb"/></svg>' },
@@ -168,7 +196,7 @@
            icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#5b53eb" stroke-width="1.9"/><path d="M12 7v5l3.5 2" stroke="#5b53eb" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
          { title: "Rotatable tokens", body: "Every monitor has a unique, revocable ping URL. Rotate a leaked token without touching the rest.",
            icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M20 11a8 8 0 10-2.3 5.7M20 5v6h-6" stroke="#5b53eb" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
-         { title: "90-day history", body: "A per-day uptime bar and full ping log so you can see patterns, not just the current state.",
+         { title: "#{ping_retention_days}-day history", body: "A per-day uptime bar and full ping log so you can see patterns, not just the current state.",
            icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 20V10M10 20V4M16 20v-7M22 20V8" stroke="#5b53eb" stroke-width="2.1" stroke-linecap="round"/></svg>' }
        ].each do |f| %>
       <div class="bg-surface px-6 py-[26px] flex flex-col gap-[11px]">
@@ -187,12 +215,12 @@
       <div>
         <div class="inline-flex items-center gap-2 h-[26px] px-[11px] rounded-full bg-[#1a1a22] border border-[#2c2c38] mb-5"><span class="w-1.5 h-1.5 rounded-full bg-[#8b7cf0]"></span><span class="text-[11px] font-semibold text-[#a99cf5]">Built for Solid Queue</span></div>
         <h2 class="text-[32px] leading-[1.18] font-bold tracking-[-.025em] text-[#f3f3f6] mb-4">Your <span class="font-mono text-[#8b7cf0]">recurring.yml</span> is the spec</h2>
-        <p class="text-[15px] leading-[1.65] text-[#9a9aa6] mb-[22px]">Stablemate speaks Solid Queue natively. Each recurring task maps to a monitor, and its Fugit cron schedule becomes the expected interval — so a missed scheduler run is a missed heartbeat.</p>
+        <p class="text-[15px] leading-[1.65] text-[#9a9aa6] mb-[22px]">Stablemate speaks Solid Queue natively. Each recurring job maps to a monitor, and its Fugit cron schedule becomes the expected interval — so a missed scheduler run is a missed heartbeat.</p>
         <div class="flex flex-col gap-3">
           <% [
-               "Auto-import every task from your schedule with one command",
+               "Every job class auto-registers on boot — or force it with one command",
                "Schedule changes sync — intervals stay in lockstep with your cron",
-               "Pause a queue in Solid Queue, pause the monitor — no false alarms"
+               "A job that raises never pings — the missed beat is the alert, no rescue blocks needed"
              ].each do |point| %>
             <div class="flex items-start gap-[11px]">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" class="shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#13301f"/><path d="M7.5 12.4l3 3 6-6.4" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -206,10 +234,10 @@
         <div class="px-[18px] py-[18px] font-mono font-medium text-[12.5px] leading-[1.85] text-[#c9c9d3]">
           <div><span class="text-[#8b7cf0]">production</span><span class="text-[#6e6e7e]">:</span></div>
           <div class="pl-[18px]"><span class="text-[#5f9bf0]">daily_digest</span><span class="text-[#6e6e7e]">:</span></div>
-          <div class="pl-9"><span class="text-[#9a9aa6]">class</span><span class="text-[#6e6e7e]">:</span> <span class="text-[#e0e0ea]">DigestMailerJob</span></div>
+          <div class="pl-9"><span class="text-[#9a9aa6]">class</span><span class="text-[#6e6e7e]">:</span> <span class="text-[#e0e0ea]">DailyDigestJob</span></div>
           <div class="pl-9"><span class="text-[#9a9aa6]">schedule</span><span class="text-[#6e6e7e]">:</span> <span class="text-[#5fc77f]">every day at 9am</span> <span class="text-[#3a6a4a]">← monitored</span></div>
-          <div class="pl-[18px] mt-1.5"><span class="text-[#5f9bf0]">db_backup</span><span class="text-[#6e6e7e]">:</span></div>
-          <div class="pl-9"><span class="text-[#9a9aa6]">command</span><span class="text-[#6e6e7e]">:</span> <span class="text-[#5fc77f]">"Backup.run"</span></div>
+          <div class="pl-[18px] mt-1.5"><span class="text-[#5f9bf0]">nightly_backup</span><span class="text-[#6e6e7e]">:</span></div>
+          <div class="pl-9"><span class="text-[#9a9aa6]">class</span><span class="text-[#6e6e7e]">:</span> <span class="text-[#e0e0ea]">NightlyBackupJob</span></div>
           <div class="pl-9"><span class="text-[#9a9aa6]">schedule</span><span class="text-[#6e6e7e]">:</span> <span class="text-[#5fc77f]">every day at 3am</span> <span class="text-[#7a3a3d]">← down 2h</span></div>
         </div>
       </div>
@@ -221,20 +249,20 @@
 <div class="max-w-[1140px] mx-auto px-6 py-[74px]">
   <div class="grid lg:grid-cols-[1.1fr_.9fr] gap-12 items-center">
     <div class="bg-surface border border-[#e8e8ee] rounded-[14px] overflow-hidden" style="box-shadow:0 16px 40px -18px rgba(28,24,90,.18)">
-      <%= render "pages/browser_chrome", url: "stablemate.dev/monitors/daily-digest-email" %>
+      <%= render "pages/browser_chrome", url: "stablemate.dev/monitors/daily_digest" %>
       <div class="px-[22px] py-5">
         <div class="flex items-center gap-2.5 mb-4">
-          <span class="font-mono font-bold text-[15px] text-ink">daily-digest-email</span>
+          <span class="font-mono font-bold text-[15px] text-ink">daily_digest</span>
           <%= render "shared/status_badge", status: "up" %>
           <span title="Registered from config/recurring.yml" class="inline-flex items-center gap-1 h-[19px] pl-1.5 pr-[7px] rounded-[5px] bg-brand-tint text-gem font-mono font-semibold text-[10px]"><span aria-hidden="true">◆</span>gem</span>
         </div>
         <div class="flex items-center justify-between mb-2.5">
-          <span class="text-[10.5px] font-semibold uppercase tracking-[.06em] text-faint">Uptime — last 90 days</span>
+          <span class="text-[10.5px] font-semibold uppercase tracking-[.06em] text-faint">Uptime — last <%= ping_retention_days %> days</span>
           <span class="font-mono font-semibold text-[12px] text-up-text">99.98%</span>
         </div>
-        <% days = Array.new(90, "up"); days[33] = "partial"; days[61] = "partial" %>
+        <% days = Array.new(ping_retention_days, "up"); days[days.size / 3] = "partial"; days[(days.size * 2) / 3] = "partial" %>
         <%= render "shared/uptime_bar", days: days %>
-        <div class="flex justify-between mt-[7px] font-mono font-medium text-[10.5px] text-faint"><span>90 days ago</span><span>today</span></div>
+        <div class="flex justify-between mt-[7px] font-mono font-medium text-[10.5px] text-faint"><span><%= ping_retention_days %> days ago</span><span>today</span></div>
         <div class="flex items-center gap-2.5 mt-3.5 pt-[13px] border-t border-[#f4f4f6]">
           <div class="w-6 h-6 rounded-[7px] bg-brand-tint flex items-center justify-center shrink-0">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3a6 6 0 016 6v3l1.5 2.5H4.5L6 12V9a6 6 0 016-6z" stroke="#5b53eb" stroke-width="1.7" stroke-linejoin="round"/><path d="M10 18.5a2 2 0 004 0" stroke="#5b53eb" stroke-width="1.7" stroke-linecap="round"/></svg>
@@ -245,8 +273,8 @@
     </div>
     <div>
       <div class="text-[11.5px] font-semibold uppercase tracking-[.08em] text-brand mb-3">Uptime history &amp; alerts</div>
-      <h2 class="text-[31px] leading-[1.18] font-bold tracking-[-.025em] text-[#16161a] mb-3.5">Know the moment a job goes quiet</h2>
-      <p class="text-[15px] leading-[1.65] text-muted mb-[22px]">Every monitor keeps a 90-day uptime history and a full ping log, right inside your dashboard. When a run is missed past its grace window, you get an email before your users notice — no flapping, no noise.</p>
+      <h2 class="text-[31px] leading-[1.18] font-bold tracking-[-.025em] text-[#16161a] mb-3.5">A <%= ping_retention_days %>-day paper trail for every job</h2>
+      <p class="text-[15px] leading-[1.65] text-muted mb-[22px]">Every monitor keeps a per-day uptime bar and a full ping log, right inside your dashboard. When something does slip, you can see exactly when — and the alert email will already be in your inbox.</p>
       <a href="#how" class="inline-flex items-center gap-[7px] text-[14px] font-semibold text-brand hover:text-brand-hover">See how it works<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="#5b53eb" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
     </div>
   </div>
@@ -259,7 +287,7 @@
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8.4 4h7.2l3.4 16H5z" fill="#5b53eb"/><path d="M9.8 4h4.4l.4 16H9.4z" fill="#8b7cf0"/></svg>
     </div>
     <h2 class="text-[36px] leading-[1.15] font-bold tracking-[-.03em] text-[#f3f3f6] mb-3.5">Know the moment a job goes quiet</h2>
-    <p class="text-[16px] leading-[1.6] text-[#9a9aa6] mx-auto mb-[30px] max-w-[440px]">Set up your first monitor in two minutes. No credit card, free forever.</p>
+    <p class="text-[16px] leading-[1.6] text-[#9a9aa6] mx-auto mb-[30px] max-w-[440px]">Add the gem, sync your schedule, and your jobs are monitored in two minutes. No credit card, free forever.</p>
     <%= link_to sign_up_path,
           class: "inline-flex items-center gap-[7px] h-[46px] px-[22px] rounded-[9px] bg-brand text-white text-[15px] font-semibold border border-[#6a62f0] shadow-lg" do %>
       Start monitoring free
@@ -274,7 +302,7 @@
     <div class="flex items-center gap-2.5">
       <span class="flex items-center justify-center w-6 h-6 rounded-md bg-[#1c1c22]"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8.4 4h7.2l3.4 16H5z" fill="#8b7cf0"/></svg></span>
       <span class="font-semibold text-[13px] text-[#c4c4cc]">Stablemate</span>
-      <span class="text-[12px] text-[#5a5a66] ml-1.5">Dead simple cron monitoring for Rails</span>
+      <span class="text-[12px] text-[#5a5a66] ml-1.5">Dead simple job monitoring for Rails</span>
     </div>
     <div class="flex items-center gap-[22px]">
       <a href="<%= docs_url %>" class="text-[12.5px] font-medium text-muted hover:text-[#c4c4cc]">Docs</a>
