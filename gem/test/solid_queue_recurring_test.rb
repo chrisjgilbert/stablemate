@@ -4,8 +4,10 @@ require_relative "test_helper"
 require "tempfile"
 
 class SolidQueueRecurringTest < StablemateTest
-  def registrar(file = "recurring.yml", config: Stablemate.config)
-    Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: fixture(file), config:)
+  # environment is pinned explicitly: the fixtures are env-keyed and CI exports
+  # RAILS_ENV=test, so relying on the default would diverge between local and CI.
+  def registrar(file = "recurring.yml", environment: "production", config: Stablemate.config)
+    Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: fixture(file), environment:, config:)
   end
 
   # A config whose logger writes to the returned StringIO, for log assertions.
@@ -111,5 +113,24 @@ class SolidQueueRecurringTest < StablemateTest
       r = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: f.path)
       assert_equal [ "nightly" ], r.tuples.map { |t| t[:registration_key] }
     end
+  end
+
+  # An env-keyed file yields only the CURRENT environment's tasks (matching
+  # Solid Queue's own semantics) — a development-only task must never become a
+  # monitor in the production account, where it would sit pending (eating a cap
+  # slot) or false-alarm after a single stray ping.
+  def test_env_keyed_file_yields_only_the_current_environments_tasks
+    prod = registrar("recurring_multi_env.yml", environment: "production")
+    dev = registrar("recurring_multi_env.yml", environment: "development")
+
+    assert_equal [ "daily_digest" ], prod.tuples.map { |t| t[:registration_key] }
+    assert_equal [ "dev_smoke" ], dev.tuples.map { |t| t[:registration_key] }
+    assert_equal [ "DailyDigestJob" ], prod.class_to_keys.keys
+  end
+
+  def test_env_keyed_file_without_a_section_for_the_current_env_yields_nothing
+    r = registrar("recurring_multi_env.yml", environment: "staging")
+    assert_empty r.tuples
+    assert_empty r.class_to_keys
   end
 end

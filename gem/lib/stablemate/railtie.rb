@@ -23,8 +23,13 @@ module Stablemate
     end
 
     # After the app initializes, sync (caching ping URLs) and attach Layer 1.
+    # Gated on api_key presence AND the environment allow-list (production-only
+    # by default): a key visible in every environment via shared credentials
+    # must not make dev/test boots register monitors or ping them — a laptop
+    # pinging a production monitor masks real outages.
     config.after_initialize do
       next unless Stablemate.config.api_key
+      next unless Stablemate.config.enabled_in?(::Rails.env)
 
       registrar = Registrars::SolidQueueRecurring.new
       Registration.new(registrar:).sync!

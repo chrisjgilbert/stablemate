@@ -21,14 +21,24 @@ end
 
 Get the API key from **Settings → API keys → Generate key** (shown once).
 
+**Store the key where only production can see it** — per-environment
+credentials (`rails credentials:edit --environment production`) or an env var
+set only on production hosts. The gem auto-wires **only in production by
+default** (`c.environments = ["production"]`), so even a key in shared
+credentials won't make dev/test boots register monitors or ping them — a
+laptop pinging a production monitor would mask a real outage. To monitor
+staging too, add it: `c.environments = %w[production staging]`.
+
 ## How it works
 
 Two layers, both keyed on the Solid Queue **task key**:
 
 - **Layer 2 — registration.** On boot (and via `rails stablemate:sync`) the gem
-  reads `config/recurring.yml`, turns each `class:`-backed task into a monitor
-  (`registration_key` = task key, interval parsed from `schedule:` via Fugit —
-  for irregular crons the *largest* gap is used), and upserts them via
+  reads `config/recurring.yml` — for environment-keyed files, only the current
+  environment's section, matching Solid Queue itself — turns each
+  `class:`-backed task into a monitor (`registration_key` = task key, interval
+  parsed from `schedule:` via Fugit — for irregular crons the *largest* gap is
+  used), and upserts them via
   `POST /api/v1/monitors/sync`. Idempotent; a sync failure logs a warning and
   never crashes boot. `command:`-only tasks are **skipped with a logged
   notice** — they run as `SolidQueue::RecurringJob`, so execution tracking
@@ -54,6 +64,7 @@ created** monitor whose `registration_key` equals the job class name (e.g.
 |---|---|---|
 | `api_key` | – | `sm_live_…` bearer token (registration only; never on the ping path) |
 | `endpoint` | `https://stablemate.dev` (or `STABLEMATE_ENDPOINT` env) | Server base URL — set to your own domain when self-hosting |
+| `environments` | `["production"]` | Environments where the railtie auto-wires (boot sync + subscriber). `nil` = wherever an `api_key` is set. The explicit `rails stablemate:sync` task is not gated |
 | `ping_on_success` | `true` | Ping when a monitored job completes cleanly |
 | `recurring_path` | `config/recurring.yml` | Solid Queue recurring config |
 | `timeout` | `2` | HTTP timeout (seconds) |

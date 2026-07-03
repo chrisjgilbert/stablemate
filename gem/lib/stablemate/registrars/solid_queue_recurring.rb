@@ -7,7 +7,8 @@ require_relative "registrar"
 module Stablemate
   module Registrars
     # V1 registrar (architecture.md §9): reads Solid Queue's config/recurring.yml
-    # and turns each task into a registration tuple.
+    # and turns each task into a registration tuple. Env-keyed files are scoped
+    # to the current environment's section, matching Solid Queue's own semantics.
     #
     # - registration_key = the task key (decision #6).
     # - name             = the task key (default).
@@ -26,8 +27,9 @@ module Stablemate
       # daily+ crons are regular so two samples already settle them.
       OCCURRENCE_SAMPLES = 50
 
-      def initialize(recurring_path: nil, config: Stablemate.config)
+      def initialize(recurring_path: nil, environment: nil, config: Stablemate.config)
         @recurring_path = recurring_path || config.recurring_path
+        @environment = (environment || default_environment).to_s
         @config = config
       end
 
@@ -127,15 +129,26 @@ module Stablemate
           return {} if raw.empty?
 
           if env_keyed?(raw)
-            # Keyed by environment (production:, development:, …) — merge all
-            # sections so the registrar sees every task regardless of env.
-            raw.values.reduce({}) { |acc, section| acc.merge(section) }
+            # Keyed by environment (production:, development:, …) — like Solid
+            # Queue itself, only the current environment's section counts. A
+            # development-only task must never be registered in the production
+            # account, where it would sit pending forever (eating a cap slot) or
+            # false-alarm after a single stray ping.
+            raw[@environment] || {}
           else
             # Flat file: task keys at the top level.
             raw
           end
         rescue Errno::ENOENT
           {}
+        end
+
+        def default_environment
+          if defined?(Rails) && Rails.respond_to?(:env)
+            Rails.env
+          else
+            ENV["RAILS_ENV"] || ENV["RACK_ENV"] || "production"
+          end
         end
 
         # A recurring.yml is environment-keyed when every top-level value is itself

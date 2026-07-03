@@ -30,16 +30,23 @@ bundle install
 ### 1.2 Get an API key
 
 In the app: **Settings → API keys → Generate key**. The raw key
-(`sm_live_…`) is shown **once** — copy it immediately. Store it in credentials:
+(`sm_live_…`) is shown **once** — copy it immediately. Store it in
+**production-only** credentials (or an env var set only on production hosts):
 
 ```sh
-bin/rails credentials:edit
+bin/rails credentials:edit --environment production
 ```
 
 ```yaml
 stablemate:
   api_key: sm_live_xxxxxxxxxxxxxxxxxxxx
 ```
+
+The key's presence is the gem's per-environment switch, and as a second
+guard the gem auto-wires **only in production by default** — dev and test
+boots never register monitors or ping them (a laptop pinging a production
+monitor would mask a real outage). To monitor staging too, set
+`c.environments = %w[production staging]` in the initializer.
 
 ### 1.3 Configure the initializer
 
@@ -49,6 +56,7 @@ Stablemate.configure do |c|
   c.api_key         = Rails.application.credentials.dig(:stablemate, :api_key)
   c.endpoint        = "https://stablemate.dev"   # ← your own domain if self-hosting
   c.ping_on_success = true          # ping when a monitored job finishes cleanly
+  # c.environments  = ["production"]  # default; add "staging" to monitor staging
   # c.recurring_path = "config/recurring.yml"  # default
   # c.timeout        = 2                        # HTTP timeout, seconds
 end
@@ -57,6 +65,8 @@ end
 ### 1.4 Declare your jobs in `recurring.yml`
 
 The gem reads Solid Queue's recurring config. Each task key becomes a monitor.
+Environment-keyed files (`production:`, `development:`, …) are scoped to the
+current environment's section, exactly as Solid Queue itself reads them.
 
 ```yaml
 # config/recurring.yml
