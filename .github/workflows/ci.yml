@@ -63,3 +63,67 @@ jobs:
           chmod +x bin/ci
           bin/ci
         timeout-minutes: 15
+
+  # Auto-deploy to the Hetzner VM with Kamal once CI is green — the same
+  # bin/kamal deploy, config/deploy.yml, and .kamal/secrets used by hand, only
+  # with the values coming from repo Secrets/Variables. See
+  # docs/deploy-hetzner-cloudflare.md → §8.
+  deploy:
+    needs: ci
+    # Ship ONLY on a real push to main. github.ref and github.event_name are set
+    # by GitHub and can't be forged: a pull request (fork or not) has
+    # event_name == 'pull_request' and ref == 'refs/pull/N/merge', never
+    # 'refs/heads/main', so untrusted PR code never reaches this secret-bearing
+    # job. Because deploy is a gated job in the SAME workflow — not a separate
+    # workflow_run — there is no privileged-workflow-runs-fork-code path, so no
+    # extra pwn-request guard is needed.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Serialise releases; let an in-flight rollout finish rather than cancelling
+    # it half-applied.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    env:
+      # Deploy target — non-secret, from repo Variables. config/deploy.yml reads
+      # these via ERB (image/registry user, servers + db host, proxy host).
+      KAMAL_REGISTRY_USER: ${{ vars.KAMAL_REGISTRY_USER }}
+      STABLEMATE_SERVER_IP: ${{ vars.STABLEMATE_SERVER_IP }}
+      STABLEMATE_HOST: ${{ vars.STABLEMATE_HOST }}
+      # Secrets — consumed by .kamal/secrets (env-first, file fallback).
+      KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
+      RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
+      STABLEMATE_DATABASE_PASSWORD: ${{ secrets.STABLEMATE_DATABASE_PASSWORD }}
+      STABLEMATE_SSL_CERT: ${{ secrets.STABLEMATE_SSL_CERT }}
+      STABLEMATE_SSL_KEY: ${{ secrets.STABLEMATE_SSL_KEY }}
+      KNOWN_HOSTS: ${{ secrets.KNOWN_HOSTS }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby (gives us bin/kamal)
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - name: Load the deploy key into ssh-agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Trust the server host key
+        # From a KNOWN_HOSTS secret (ssh-keyscan <ip> on your laptop, paste the
+        # output) rather than scanning at deploy time — deterministic, and it
+        # can't be silently poisoned by a MITM during the run.
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: kamal deploy
+        # Kamal builds the amd64 image on the runner, logs in and pushes to the
+        # registry itself (KAMAL_REGISTRY_PASSWORD), then rolls it out over SSH;
+        # migrations run on boot.
+        run: bin/kamal deploy

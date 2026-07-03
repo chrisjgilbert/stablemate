@@ -296,49 +296,70 @@ bin/kamal dbc                # bin/rails dbconsole
 ## 8 · Auto-deploy from CI (GitHub Actions)
 
 Once the manual path works, you can let GitHub ship every green `main` for you.
-[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs
-`bin/kamal deploy` — the **same** command, config, and secrets file you use by
-hand — but only after the **CI** workflow finishes `success` on `main`. So the
-gate is exactly "`bin/ci` passed on `main`": a red suite never reaches the box.
-It ships the precise commit CI validated (`workflow_run.head_sha`), so the image
-matches what was tested.
+The **`deploy` job** in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+runs `bin/kamal deploy` — the **same** command, config, and secrets file you use
+by hand — after the test job (`ci`) passes. It's a single workflow: `deploy`
+`needs: ci` and is gated so it runs **only on a push to `main`**:
+
+```yaml
+deploy:
+  needs: ci
+  if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+```
+
+`github.ref` and `github.event_name` are set by GitHub and can't be forged, so a
+pull request — from a fork or otherwise — never satisfies the gate (a PR is
+`event_name == 'pull_request'`, `ref == 'refs/pull/N/merge'`). That's what keeps
+untrusted PR code away from the deploy secrets, **without** needing a separate
+privileged workflow. (The alternative, a `workflow_run` trigger, is more
+powerful but opens the classic "pwn request" hole — a second workflow that runs
+with secrets and can check out a fork's commit; the gated-job pattern sidesteps
+it entirely.) Only someone with write access can push to `main`, so only they
+can trigger a deploy.
 
 **How the config values reach the runner.** The runner has none of your local
 files or exports, so provide them once under **GitHub → Settings → Secrets and
 variables → Actions**:
 
-| Kind | Name | Value |
-|------|------|-------|
-| Variable | `KAMAL_REGISTRY_USER` | your Docker Hub user (from §4a) |
-| Variable | `STABLEMATE_SERVER_IP` | your VM's public IP |
-| Variable | `STABLEMATE_HOST` | your public hostname |
-| Secret | `KAMAL_REGISTRY_PASSWORD` | Docker Hub access token |
-| Secret | `RAILS_MASTER_KEY` | contents of `config/master.key` |
-| Secret | `STABLEMATE_DATABASE_PASSWORD` | the DB password you chose in §4c |
-| Secret | `STABLEMATE_SSL_CERT` | full PEM of `.kamal/cloudflare-origin.pem` |
-| Secret | `STABLEMATE_SSL_KEY` | full PEM of `.kamal/cloudflare-origin.key` |
-| Secret | `SSH_PRIVATE_KEY` | a private key whose public half is in the box's `~/.ssh/authorized_keys` |
+| Kind | Name | Value | Why stablemate needs it |
+|------|------|-------|-------------------------|
+| Variable | `KAMAL_REGISTRY_USER` | your Docker Hub user (from §4a) | names the image + registry login |
+| Variable | `STABLEMATE_SERVER_IP` | your VM's public IP | SSH + accessory host |
+| Variable | `STABLEMATE_HOST` | your public hostname | proxy host + app URLs |
+| Secret | `KAMAL_REGISTRY_PASSWORD` | Docker Hub access token | push/pull the image |
+| Secret | `RAILS_MASTER_KEY` | contents of `config/master.key` | decrypts credentials |
+| Secret | `SSH_PRIVATE_KEY` | deploy key (see below) | runner → VM over SSH |
+| Secret | `KNOWN_HOSTS` | `ssh-keyscan <your-vm-ip>` output | pins the VM's host key |
+| Secret | `STABLEMATE_DATABASE_PASSWORD` | the DB password from §4c | **bundled Postgres accessory** (an app on SQLite wouldn't need this) |
+| Secret | `STABLEMATE_SSL_CERT` | full PEM of `.kamal/cloudflare-origin.pem` | **Cloudflare Origin Cert** (an app on Let's Encrypt `ssl: true` wouldn't need this) |
+| Secret | `STABLEMATE_SSL_KEY` | full PEM of `.kamal/cloudflare-origin.key` | private key for that cert |
 
-Variables are non-secret and show in logs; secrets are masked. The three
-target vars map to the same `ENV.fetch` reads in `deploy.yml`, and the five
-secrets feed `.kamal/secrets` env-first — no code branches between manual and CI.
+Variables are non-secret and show in logs; secrets are masked. The three target
+vars map to the same `ENV.fetch` reads in `deploy.yml`; the secrets feed
+`.kamal/secrets` env-first — no code branches between manual and CI. The last
+three secrets are what a Postgres + Cloudflare-Origin-Cert deployment needs on
+top of the common four (`KAMAL_REGISTRY_PASSWORD`, `RAILS_MASTER_KEY`,
+`SSH_PRIVATE_KEY`, `KNOWN_HOSTS`); switch to SQLite or Let's Encrypt and they
+fall away.
 
 **SSH deploy key.** Kamal connects to the VM over SSH from the runner. Generate a
 dedicated key pair (don't reuse your laptop's), add the **public** half to the
-box, and paste the **private** half as the `SSH_PRIVATE_KEY` secret:
+box, and paste the **private** half as the `SSH_PRIVATE_KEY` secret. Capture the
+host key for `KNOWN_HOSTS` at the same time:
 
 ```sh
 ssh-keygen -t ed25519 -f kamal_deploy -N '' -C 'github-actions-deploy'
 ssh-copy-id -i kamal_deploy.pub root@<your-vm-ip>   # or append to authorized_keys
-# then paste the contents of ./kamal_deploy into the SSH_PRIVATE_KEY secret
+cat kamal_deploy            # paste into the SSH_PRIVATE_KEY secret
+ssh-keyscan <your-vm-ip>    # paste the output into the KNOWN_HOSTS secret
 ```
 
-**Activation & scope.** `workflow_run` triggers fire from the workflow file on
-the **default branch**, so auto-deploy goes live once this file is merged to
-`main`. From then on every push to `main` that passes CI deploys automatically;
-manual `bin/kamal deploy` still works unchanged for out-of-band releases and
-`bin/kamal rollback`. To pause auto-deploy, disable the **Deploy** workflow in the
-repo's Actions tab.
+**Activation & scope.** The gate lives in `ci.yml` on the **default branch**, so
+auto-deploy goes live once this is merged to `main`. From then on every push to
+`main` that passes CI deploys automatically; manual `bin/kamal deploy` still
+works unchanged for out-of-band releases and `bin/kamal rollback`. To pause
+auto-deploy, disable the **CI** workflow in the repo's Actions tab (or remove the
+`deploy` job).
 
 ---
 
