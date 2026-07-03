@@ -175,7 +175,9 @@ need an **app-specific password**, not your login password.
 Example with a Google (Workspace/Gmail) mailbox at `chris@chrisgilbert.dev`:
 
 1. Enable 2-Step Verification on the account, then create an **App Password**
-   (Google Account → Security → App passwords → "Mail").
+   (Google Account → Security → App passwords → "Mail"). On Workspace, if "App
+   passwords" doesn't appear, an admin must allow it: **Admin console → Security →
+   Authentication → 2-step verification → "Allow users to turn on app passwords."**
 2. Credentials (`bin/rails credentials:edit`):
    ```yaml
    smtp:
