@@ -46,9 +46,19 @@ class User
       update!(plan: target) if changed
 
       if target == Plan::FREE
-        Downgrade.new(self).enforce_free_cap!
+        # Dropping to Free while over the cap is an INVOLUNTARY downgrade (card
+        # failure / Portal cancel). Lock the account into a choose-N decision
+        # (WU-6) AND auto-suspend the over-cap monitors (oldest kept) so there is
+        # never silent free monitoring while the user decides. The flag is cleared
+        # only by resolve_downgrade_choice! or a re-upgrade — not by a repeat
+        # webhook (which, post-enforce, would see over_free_cap_by == 0).
+        if over_free_cap_by.positive?
+          update!(awaiting_downgrade_choice: true) unless awaiting_downgrade_choice?
+          Downgrade.new(self).enforce_free_cap!
+        end
       else
         restore_suspended_monitors!
+        clear_downgrade_choice!
       end
 
       changed
@@ -58,6 +68,32 @@ class User
     # monitors and cancels Stripe; the plan flip itself arrives by webhook.
     def downgrade_to_free!(keep_ids: [])
       Downgrade.new(self).to_free!(keep_ids: keep_ids)
+    end
+
+    # Resolve the involuntary choose-N lock (WU-6): the account already dropped to
+    # Free, so this only re-picks which N monitors stay active — no Stripe call.
+    def resolve_downgrade_choice!(keep_ids: [])
+      Downgrade.new(self).resolve_choice!(keep_ids: keep_ids)
+    end
+
+    # Clear the choose-N lock. Called on re-upgrade and after the user commits a
+    # choice; idempotent so a repeat webhook is a no-op.
+    def clear_downgrade_choice!
+      update!(awaiting_downgrade_choice: false) if awaiting_downgrade_choice?
+    end
+
+    # Lift the choose-N lock when the account is back within the Free cap — e.g. the
+    # user deleted monitors while locked. Every remaining monitor now fits, so
+    # reactivate the suspended ones and clear the flag. Without this a user who
+    # dropped to <= FREE_PLAN_MONITOR_LIMIT total while locked would be stranded:
+    # the picker requires choosing exactly N, which they can no longer satisfy.
+    # Idempotent; a no-op unless actually locked and within the cap.
+    def release_downgrade_lock_if_within_cap!
+      return unless free? && awaiting_downgrade_choice?
+      return if monitors.count > Stablemate::FREE_PLAN_MONITOR_LIMIT
+
+      restore_suspended_monitors!
+      clear_downgrade_choice!
     end
 
     # Cancel the user's active Pro subscription at Stripe (e.g. on downgrade). The
@@ -78,10 +114,12 @@ class User
       scope.find_each(&:reactivate!)
     end
 
-    # True when the account is over the Free cap while on (or dropping to) Free —
-    # i.e. it owes a choose-5 decision before normal use resumes.
+    # True when the account owes a choose-N decision after an involuntary drop to
+    # Free — driven by the explicit flag (WU-6), not derived from over_free_cap_by
+    # (which the auto-suspend already zeroed), so the lock actually persists until
+    # the user re-picks or re-upgrades.
     def must_choose_downgrade?
-      free? && over_free_cap_by.positive?
+      free? && awaiting_downgrade_choice?
     end
 
     private

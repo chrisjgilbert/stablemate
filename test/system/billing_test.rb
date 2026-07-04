@@ -77,7 +77,7 @@ class BillingTest < ApplicationSystemTestCase
       assert_selector "[data-testid='selection-counter']", text: "#{FREE} / #{FREE}"
       assert_no_selector "[data-testid='confirm-downgrade'][disabled]"
 
-      click_on "Suspend the rest & downgrade"
+      click_on "Keep these & suspend the rest"
 
       assert_current_path billing_subscription_path
       # The browser flow drove the real Stripe cancel end-to-end (against the stub).

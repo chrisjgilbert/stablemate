@@ -43,6 +43,26 @@ class User
       Result.new(true, nil)
     end
 
+    # Resolve the involuntary choose-N lock (WU-6). The account already dropped to
+    # Free and its over-cap monitors were auto-suspended (oldest kept); the user now
+    # re-picks exactly the Free cap's worth to keep active from among ALL their
+    # monitors (active AND the auto-suspended ones). The chosen are reactivated, the
+    # rest suspended, and the lock is cleared. No Stripe here — the subscription is
+    # already cancelled. Atomic so the account never sits half-repicked.
+    def resolve_choice!(keep_ids: [])
+      keep_ids = Array(keep_ids).map(&:to_i)
+      keep = @user.monitors.where(id: keep_ids)
+      return Result.new(false, :must_choose) unless keep.count == limit
+
+      keep = keep.ids
+      @user.transaction do
+        @user.monitors.where(id: keep).where(status: "suspended").find_each(&:reactivate!)
+        active_scope.where.not(id: keep).find_each(&:suspend!)
+        @user.clear_downgrade_choice!
+      end
+      Result.new(true, nil)
+    end
+
     # Involuntary path: ensure no more than the Free cap of monitors stay active.
     # Suspends the newest over-cap monitors (keeps the oldest, deterministic) so a
     # webhook-driven cancellation can't leave free users monitoring 100 things.
