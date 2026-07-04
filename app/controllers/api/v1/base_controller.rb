@@ -6,6 +6,19 @@ module Api
     # CSRF (token-auth JSON, not a browser form). Every action is tenant-scoped to
     # current_user.monitors. Invalid/missing/revoked -> opaque 401. (phase-3 §3.2)
     class BaseController < ActionController::API
+      include ActionController::RateLimiting
+
+      # Bound the bearer API so a compromised or buggy key can't hammer the sync
+      # bulk-write (WU-9). Generous enough never to throttle a healthy gem cadence;
+      # keyed on the presented token (fallback IP). Dedicated in-process store so it
+      # holds under the test env's null_store (mirrors PingsController). Over-limit
+      # returns the same opaque JSON shape, no enumeration signal.
+      RATE_LIMIT_STORE = ActiveSupport::Cache::MemoryStore.new
+      rate_limit to: 120, within: 1.minute,
+                 by: -> { request.authorization.presence || request.remote_ip },
+                 with: -> { render json: { error: "rate_limited" }, status: :too_many_requests },
+                 store: RATE_LIMIT_STORE
+
       before_action :authenticate_api_key!
 
       private

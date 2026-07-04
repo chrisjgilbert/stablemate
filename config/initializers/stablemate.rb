@@ -89,11 +89,13 @@ module Stablemate
       Rails.application.credentials.dig(:stripe, :webhook_secret)
   end
 
-  # Which Stripe mode this instance runs in, derived from the secret-key prefix
-  # (sk_live_… ⇒ live, otherwise test). Used to reject webhook events from the
-  # other mode even when their signature verifies.
+  # Which Stripe mode this instance runs in, derived from the secret-key prefix.
+  # BOTH secret (sk_) and restricted (rk_) keys carry the live/test marker, so we
+  # match either — a live restricted key (rk_live_…) is live mode. Missing the rk_
+  # case silently drops every real webhook (livemode mismatch), leaving paying
+  # customers on Free. Used to reject events from the other mode even when signed.
   def self.stripe_livemode?
-    stripe_secret_key.to_s.start_with?("sk_live_")
+    stripe_secret_key.to_s.start_with?("sk_live_", "rk_live_")
   end
 
   # The Stripe Price ID for an upgrade. Monthly today; annual is a future seam.

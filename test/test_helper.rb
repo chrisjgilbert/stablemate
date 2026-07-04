@@ -111,6 +111,16 @@ module ActiveSupport
     include BillingGateTestHelper
     include SlackGateTestHelper
 
+    # Rate-limit stores are dedicated in-process MemoryStores that persist across
+    # tests within a worker; clear them before each test so ordinary per-test
+    # requests never accumulate into a spurious throttle. Throttle tests drive the
+    # limit within a single test after this clean slate.
+    setup do
+      [ PingsController, RegistrationsController, Api::V1::BaseController ].each do |controller|
+        controller::RATE_LIMIT_STORE.clear
+      end
+    end
+
     # Add more helper methods to be used by all tests here...
   end
 end

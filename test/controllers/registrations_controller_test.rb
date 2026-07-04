@@ -3,6 +3,21 @@ require "test_helper"
 class RegistrationsControllerTest < ActionDispatch::IntegrationTest
   include ActiveJob::TestHelper
 
+  # WU-9 (M7) — sign-up is rate-limited: #create mails a verification to a
+  # caller-supplied address, so an unthrottled endpoint is an email-bomb vector.
+  test "sign-up is rate-limited after too many attempts" do
+    limit = 10
+    limit.times do |i|
+      post sign_up_path, params: { email_address: "u#{i}@example.com", password: "password1234", password_confirmation: "password1234" }
+      assert_response :redirect
+    end
+
+    post sign_up_path, params: { email_address: "over@example.com", password: "password1234", password_confirmation: "password1234" }
+    assert_redirected_to sign_up_path
+    assert_equal "Try again later.", flash[:alert]
+    refute User.exists?(email_address: "over@example.com")
+  end
+
   # Scenario 1 — sign up creates a free, unverified user, starts a session, mails.
   test "sign up creates a user, starts a session, and sends a verification email" do
     assert_difference -> { User.count }, 1 do
