@@ -20,11 +20,14 @@ module Monitoring
       end
 
       def call(now: Time.current)
-        return @monitor unless @monitor.up?
+        # Re-validate under a row lock: the detection sweep holds a record loaded by
+        # the `overdue` query, which a legitimate late ping may have moved on since.
+        # with_lock reloads via SELECT ... FOR UPDATE, so we re-check the monitor is
+        # STILL up AND still overdue against fresh state — otherwise a boundary ping
+        # would be overwritten with a false `down` (and a spurious alert).
+        @monitor.with_lock do
+          return @monitor unless @monitor.up? && @monitor.overdue_now?
 
-        incident = nil
-
-        @monitor.transaction do
           @monitor.update!(status: "down")
           incident = open_incident(now)
           @notification = build_notification(incident)
@@ -36,13 +39,18 @@ module Monitoring
       end
 
       private
-        # Open a fresh incident only when none is currently open. A race that
-        # slips two callers past this guard is caught by the partial unique index
-        # (raising RecordNotUnique), so we never double-alert.
+        # Open a fresh incident only when none is currently open. The row lock in
+        # #call already serialises every incident-creating path, so the guard above
+        # is decisive; the partial unique index is a last-resort backstop. The
+        # insert runs in its own savepoint (requires_new) so that a RecordNotUnique
+        # rolls back only the savepoint — rescuing it here does NOT poison the outer
+        # with_lock transaction, which still commits the status="down" flip.
         def open_incident(now)
           return nil if @monitor.incidents.open.exists?
 
-          @monitor.incidents.create!(started_at: now, cause: "missed_ping")
+          @monitor.transaction(requires_new: true) do
+            @monitor.incidents.create!(started_at: now, cause: "missed_ping")
+          end
         rescue ActiveRecord::RecordNotUnique
           nil
         end

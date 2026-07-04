@@ -60,6 +60,7 @@ class Monitoring::Monitor::CheckInTest < ActiveSupport::TestCase
   # Scenario 24 — down -> up: resolves the open incident, enqueues one recovered email.
   test "a down monitor recovering resolves its incident and enqueues one recovered email" do
     down = monitors(:up)
+    down.update!(next_due_at: 10.minutes.ago) # overdue, so detection flags it
     down.flag_missed!
     incident = down.incidents.open.sole
 
@@ -129,5 +130,37 @@ class Monitoring::Monitor::CheckInTest < ActiveSupport::TestCase
     end
 
     assert monitor.reload.up?
+  end
+
+  # WU-1 (M1) — the DB backstop: at most one recovered notification per incident.
+  test "a second recovered notification for one incident is rejected by the unique index" do
+    down = monitors(:up)
+    down.update!(next_due_at: 10.minutes.ago) # overdue, so detection flags it
+    down.flag_missed!
+    incident = down.incidents.open.sole
+
+    down.notifications.create!(incident:, channel: "email", event: "recovered")
+    assert_raises(ActiveRecord::RecordNotUnique) do
+      down.notifications.create!(incident:, channel: "email", event: "recovered")
+    end
+  end
+
+  # WU-1 (M1) — a recovery that races a concurrent recovery (its recovered
+  # notification already exists) resolves the incident once, sends one email, and
+  # never raises the unique-index violation up the public ping path.
+  test "recovering does not double the recovered notification" do
+    down = monitors(:up)
+    down.update!(next_due_at: 10.minutes.ago) # overdue, so detection flags it
+    down.flag_missed!
+    incident = down.incidents.open.sole
+    # Simulate a concurrent recovery that already inserted the recovered row.
+    down.notifications.create!(incident:, channel: "email", event: "recovered")
+
+    assert_nothing_raised do
+      down.check_in!(received_at: Time.current)
+    end
+
+    assert_equal 1, down.notifications.where(event: "recovered").count
+    assert down.reload.up?
   end
 end
