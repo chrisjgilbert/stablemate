@@ -25,7 +25,11 @@ class MonitorsController < ApplicationController
     @monitor = current_user.monitors.new(monitor_params)
     @monitor.source = "manual"
 
-    if @monitor.save
+    # Serialise the cap check-and-create on the user row: without the lock two
+    # concurrent creates can both read count < limit and both insert, blowing past
+    # the cap (WU-3). with_lock reloads the user under FOR UPDATE so within_monitor_cap
+    # re-counts against committed state. Redirect/render stay outside the lock.
+    if current_user.with_lock { @monitor.save }
       redirect_to @monitor, notice: "Monitor created."
     else
       render :new, status: :unprocessable_entity
