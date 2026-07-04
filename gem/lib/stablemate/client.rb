@@ -32,20 +32,39 @@ module Stablemate
       JSON.parse(response.body)
     end
 
-    # Fire-and-forget ping to a full ping URL. Best-effort: returns true/false,
-    # never raises (the hot path must not break the host app). No API key here —
-    # the per-monitor ping token in the URL is the only credential.
+    # Fire-and-forget ping to a full ping URL. Best-effort and never raises (the
+    # hot path must not break the host app), but it INSPECTS the response instead
+    # of assuming success — a 404/429/5xx used to be reported as a delivered ping,
+    # so a rotated token or a throttled loop silently produced false DOWN alerts.
+    # Returns a status the caller can act on:
+    #   :ok    — 2xx, the ping landed;
+    #   :stale — 404/410, the URL was rejected (token rotated / monitor gone), so
+    #            the cached URL is dead and the caller should re-sync;
+    #   :error — any other non-2xx, or a transport failure (transient — absorbed
+    #            by the monitor's grace period).
     def ping(ping_url)
       uri = URI(ping_url)
-      http_for(uri).post(uri.request_uri, "")
-      true
+      classify(http_for(uri).post(uri.request_uri, ""))
     rescue StandardError => e
       log_warn("ping failed: #{e.class}: #{e.message}")
-      false
+      :error
     end
 
     private
       attr_reader :config
+
+      def classify(response)
+        case response
+        when Net::HTTPSuccess
+          :ok
+        when Net::HTTPNotFound, Net::HTTPGone
+          log_warn("ping rejected #{response.code}: ping URL no longer valid (token rotated?) — re-syncing.")
+          :stale
+        else
+          log_warn("ping rejected #{response.code}: monitor not recorded.")
+          :error
+        end
+      end
 
       def api_url(path)
         URI.join(config.endpoint, path)

@@ -97,11 +97,12 @@ class SubscriberTest < StablemateTest
     assert_empty client.pinged
   end
 
-  # The real Client#ping swallows everything too (no exception escapes).
+  # The real Client#ping swallows everything too (no exception escapes) — a
+  # transport failure is reported as :error, never raised.
   def test_real_client_ping_swallows_errors
     client = Stablemate::Client.new
-    # An unparseable / unroutable URL must not raise.
-    assert_equal false, client.ping("http://127.0.0.1:1/ping/none")
+    # An unroutable URL must not raise; it's a transient :error, not :ok/:stale.
+    assert_equal :error, client.ping("http://127.0.0.1:1/ping/none")
   end
 
   # Scenario 20 — a perform with no matching task key fires no ping.
@@ -248,5 +249,39 @@ class SubscriberTest < StablemateTest
     )
     sub.handle_event(event("J"))
     assert_empty client.pinged
+  end
+
+  # WU-8 (M3) — a :stale ping (rotated token) triggers a bounded re-sync so the
+  # fresh URL is picked up rather than silently pinging a dead URL until reboot.
+  def resync_subscriber(client:, resync:, resync_interval: 60)
+    Stablemate::Execution::Subscriber.new(
+      class_to_keys: { "J" => [ "k" ] }, ping_urls: { "k" => "u" },
+      client:, config: Stablemate.config, dispatcher: SYNC_DISPATCHER,
+      resync:, resync_interval:
+    )
+  end
+
+  def test_stale_ping_triggers_a_resync
+    resyncs = 0
+    sub = resync_subscriber(client: Stablemate::FakeClient.new(ping_status: :stale), resync: -> { resyncs += 1 })
+    sub.handle_event(event("J"))
+    assert_equal 1, resyncs
+  end
+
+  def test_ok_ping_does_not_resync
+    resyncs = 0
+    sub = resync_subscriber(client: Stablemate::FakeClient.new(ping_status: :ok), resync: -> { resyncs += 1 })
+    sub.handle_event(event("J"))
+    assert_equal 0, resyncs
+  end
+
+  def test_bursty_stale_pings_collapse_to_one_resync_within_the_interval
+    resyncs = 0
+    sub = resync_subscriber(
+      client: Stablemate::FakeClient.new(ping_status: :stale),
+      resync: -> { resyncs += 1 }, resync_interval: 3600
+    )
+    3.times { sub.handle_event(event("J")) }
+    assert_equal 1, resyncs
   end
 end

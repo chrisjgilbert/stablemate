@@ -30,12 +30,20 @@ module Stablemate
       #   subscriber by hand may inject a pooled executor. The block never
       #   raises — errors are logged and swallowed inside it.
       def initialize(class_to_keys:, ping_urls: nil, client: nil, config: Stablemate.config,
-                     dispatcher: ->(blk) { Thread.new(&blk) })
+                     dispatcher: ->(blk) { Thread.new(&blk) }, resync: nil, resync_interval: 60)
         @class_to_keys = class_to_keys
         @ping_urls = ping_urls
         @client = client || Client.new(config)
         @config = config
         @dispatcher = dispatcher
+        # A callable (e.g. -> { Registration#sync! }) invoked when a ping comes back
+        # :stale, to refresh the cached ping URLs after a token rotation. Bounded to
+        # once per resync_interval seconds so a burst of stale pings can't storm the
+        # sync endpoint. Nil (tests / hand-wiring) disables it.
+        @resync = resync
+        @resync_interval = resync_interval
+        @resync_mutex = Mutex.new
+        @last_resync_at = nil
       end
 
       # Attach to ActiveSupport::Notifications. Returns the subscriber handle.
@@ -109,9 +117,29 @@ module Stablemate
         # would escape the background thread — spewing via report_on_exception
         # and, under a host's Thread.abort_on_exception, killing the worker.
         def deliver(url)
-          @client.ping(url)
+          # A :stale result means the cached URL was rejected (token rotated) — kick
+          # a bounded re-sync so the fresh URL is picked up, instead of silently
+          # pinging a dead URL until the next boot/manual sync.
+          trigger_resync if @client.ping(url) == :stale
         rescue StandardError => e
           log_warn("ping thread failed: #{e.class}: #{e.message}")
+        end
+
+        # Re-sync at most once per @resync_interval seconds (monotonic clock), so a
+        # burst of stale pings collapses to one refresh. A resync failure is logged
+        # and swallowed — it must never break the ping thread.
+        def trigger_resync
+          return unless @resync
+
+          @resync_mutex.synchronize do
+            now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            return if @last_resync_at && (now - @last_resync_at) < @resync_interval
+
+            @last_resync_at = now
+          end
+          @resync.call
+        rescue StandardError => e
+          log_warn("resync after stale ping failed: #{e.class}: #{e.message}")
         end
     end
   end

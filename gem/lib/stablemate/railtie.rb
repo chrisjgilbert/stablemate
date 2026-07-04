@@ -30,9 +30,15 @@ module Stablemate
       next unless Stablemate.config.enabled_in?
 
       registrar = Registrars::SolidQueueRecurring.new
-      Registration.new(registrar:).sync!
+      registration = Registration.new(registrar:)
+      registration.sync!
 
-      Execution::Subscriber.new(class_to_keys: registrar.class_to_keys).subscribe!
+      # Pass a bounded re-sync so a ping rejected after a token rotation refreshes
+      # the cached URLs (the subscriber throttles it to once per interval).
+      Execution::Subscriber.new(
+        class_to_keys: registrar.class_to_keys,
+        resync: -> { registration.sync! }
+      ).subscribe!
     rescue StandardError => e
       Stablemate.logger.warn("[stablemate] boot wiring skipped: #{e.class}: #{e.message}")
     end
