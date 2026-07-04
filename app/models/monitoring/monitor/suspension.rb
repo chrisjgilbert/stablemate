@@ -20,7 +20,10 @@ module Monitoring
       # Deactivate for a plan downgrade. Only an active monitor can be suspended;
       # already-suspended is idempotent. Idempotent.
       def suspend!
-        @monitor.update!(status: "suspended")
+        @monitor.transaction do
+          @monitor.resolve_open_incident!
+          @monitor.update!(status: "suspended")
+        end
       end
 
       # Re-activate on re-upgrade. No-op unless actually suspended, so a stray call

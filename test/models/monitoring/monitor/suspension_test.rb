@@ -45,6 +45,20 @@ class Monitoring::Monitor::SuspensionTest < ActiveSupport::TestCase
     end
   end
 
+  # WU-2 (H1) — suspending a down monitor resolves its incident, so the plan
+  # downgrade never leaves a stranded outage accruing phantom downtime.
+  test "suspend! resolves the open incident of a down monitor" do
+    monitor = monitors(:up)
+    monitor.update!(next_due_at: 10.minutes.ago)
+    monitor.flag_missed!
+    assert monitor.incidents.open.exists?
+
+    monitor.suspend!
+
+    assert monitor.suspended?
+    refute monitor.incidents.open.exists?
+  end
+
   test "a suspended monitor is excluded from the detectable/overdue scopes" do
     monitor = monitors(:up)
     monitor.update!(next_due_at: 2.hours.ago)
