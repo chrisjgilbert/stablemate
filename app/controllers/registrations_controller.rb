@@ -2,6 +2,15 @@ class RegistrationsController < ApplicationController
   # Sign-up is open to anonymous visitors.
   allow_unauthenticated_access only: %i[new create]
 
+  # Rate-limit sign-up like the other auth surfaces (sessions/passwords): #create
+  # enqueues a verification email to a caller-supplied address, so an unthrottled
+  # endpoint is an email-bombing / mass-account vector (WU-9). Dedicated in-process
+  # store so the bound holds under the test env's null_store, mirroring PingsController.
+  RATE_LIMIT_STORE = ActiveSupport::Cache::MemoryStore.new
+  rate_limit to: 10, within: 3.minutes, only: :create,
+             with: -> { redirect_to sign_up_path, alert: "Try again later." },
+             store: RATE_LIMIT_STORE
+
   def new
     @user = User.new
     @waitlist = Signup.at_capacity?

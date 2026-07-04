@@ -35,6 +35,20 @@ class Api::V1::MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
+  # WU-9 (M7) — the bearer API is rate-limited so a compromised/buggy key can't
+  # hammer it; over-limit returns an opaque 429, and a healthy cadence is untouched.
+  test "the API rate-limits a token over the ceiling with an opaque 429" do
+    limit = 120
+    limit.times do
+      get api_v1_monitors_url, headers: auth
+      assert_response :success
+    end
+
+    get api_v1_monitors_url, headers: auth
+    assert_response :too_many_requests
+    assert_equal "rate_limited", response.parsed_body["error"]
+  end
+
   # Scenario 5 — index returns only the authenticated user's monitors.
   test "index is tenant-scoped" do
     get api_v1_monitors_url, headers: auth
