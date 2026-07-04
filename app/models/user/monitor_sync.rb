@@ -44,28 +44,37 @@ class User
       def call(entries:)
         registered = []
         skipped = []
-        # Count the user's slots once, then decrement locally per successful create
-        # (updates never consume a slot), instead of a fresh COUNT per new entry.
-        @slots = @user.remaining_monitor_slots
 
-        Array(entries).each do |raw|
-          entry = Entry.from(raw)
-          next if entry.registration_key.blank?
+        # Hold the user row lock across the whole run so the slot accounting is
+        # atomic: without it two concurrent syncs each read the same remaining-slot
+        # budget and both create, exceeding the cap (WU-3). Seed @slots AFTER the
+        # lock so it reflects committed state; decrement locally per create. Every
+        # expected per-entry failure (invalid shape, over cap, duplicate key) is
+        # handled without raising, so the run also commits atomically — an
+        # unexpected mid-loop error rolls the whole batch back rather than leaving
+        # it half-applied.
+        @user.with_lock do
+          @slots = @user.remaining_monitor_slots
 
-          monitor = @user.monitors.find_by(registration_key: entry.registration_key)
+          Array(entries).each do |raw|
+            entry = Entry.from(raw)
+            next if entry.registration_key.blank?
 
-          if monitor
-            # Updating an existing monitor is always allowed (even at the cap).
-            persist_update(monitor, entry, registered, skipped)
-          elsif !valid_shape?(entry)
-            # A malformed new entry must never consume a cap slot — and must report
-            # "invalid", not "limit_reached", even when the user is over the cap
-            # (validate the shape BEFORE the cap check). (§3.3)
-            skipped << skip(entry, "invalid")
-          elsif room_for_more?
-            persist_create(entry, registered, skipped)
-          else
-            skipped << skip(entry, "limit_reached")
+            monitor = @user.monitors.find_by(registration_key: entry.registration_key)
+
+            if monitor
+              # Updating an existing monitor is always allowed (even at the cap).
+              persist_update(monitor, entry, registered, skipped)
+            elsif !valid_shape?(entry)
+              # A malformed new entry must never consume a cap slot — and must report
+              # "invalid", not "limit_reached", even when the user is over the cap
+              # (validate the shape BEFORE the cap check). (§3.3)
+              skipped << skip(entry, "invalid")
+            elsif room_for_more?
+              persist_create(entry, registered, skipped)
+            else
+              skipped << skip(entry, "limit_reached")
+            end
           end
         end
 
@@ -105,7 +114,7 @@ class User
         end
 
         def persist_create(entry, registered, skipped)
-          monitor = @user.monitors.create(
+          monitor = @user.monitors.new(
             registration_key: entry.registration_key,
             name: entry.name.presence || entry.registration_key,
             expected_interval_seconds: entry.expected_interval_seconds,
@@ -113,7 +122,8 @@ class User
             source: "gem",
             status: "pending"
           )
-          if monitor.persisted?
+
+          if save_isolated(monitor)
             @slots -= 1
             registered << monitor
           else
@@ -125,15 +135,26 @@ class User
           # partial unique index on (user, registration_key) lets the first create
           # win; the losers raise RecordNotUnique. Treat that as the idempotent
           # upsert it is — re-find the now-existing row and update it, so it lands
-          # in `registered` and the request never 500s. Each create is its own
-          # implicit transaction (no enclosing batch transaction), so this rescue
-          # cannot poison sibling inserts.
+          # in `registered` and the request never 500s. (Now that `call` holds the
+          # user row lock, same-user syncs serialise and this is nearly unreachable,
+          # but it stays as a backstop.)
           existing = @user.monitors.find_by(registration_key: entry.registration_key)
           if existing
             persist_update(existing, entry, registered, skipped)
           else
             skipped << skip(entry, "invalid")
           end
+        end
+
+        # Persist the new monitor in its OWN savepoint (requires_new) so a
+        # RecordNotUnique rolls back only this insert — never the enclosing
+        # with_lock transaction (which would otherwise be poisoned on Postgres and
+        # take every sibling create down with it). Returns save's boolean; a
+        # RecordNotUnique propagates to the rescue above. With no enclosing
+        # transaction (persist_create called directly) requires_new is just a plain
+        # transaction, so the rescue path is unchanged.
+        def save_isolated(monitor)
+          @user.transaction(requires_new: true) { monitor.save }
         end
 
         def skip(entry, reason)
