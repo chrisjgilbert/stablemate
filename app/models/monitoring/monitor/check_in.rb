@@ -24,7 +24,10 @@ module Monitoring
       def call(received_at: Time.current, source_ip: nil, duration_ms: nil)
         recovered_notification = nil
 
-        @monitor.transaction do
+        # with_lock reloads under SELECT ... FOR UPDATE so the transition reads
+        # fresh status: two recovery pings on the same down monitor serialise, and
+        # only the first resolves the incident + emits the recovered alert.
+        @monitor.with_lock do
           @monitor.ping_events.create!(
             received_at:,
             kind: "success",
@@ -75,6 +78,13 @@ module Monitoring
           return nil unless resolved
 
           resolved.resolve!(at: received_at)
+          # Concurrent recoveries are already serialised by with_lock (the second
+          # caller finds no open incident and returns above). This guard is the
+          # backstop for an anomalous state — an open incident that somehow already
+          # carries a recovered notification — so the public ping path returns 200
+          # rather than a 500 from the partial unique index on (incident_id, event).
+          return nil if @monitor.notifications.exists?(incident: resolved, event: "recovered")
+
           @monitor.notifications.create!(
             incident: resolved,
             channel: "email",

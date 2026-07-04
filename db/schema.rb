@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_29_182422) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_04_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -73,6 +73,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_29_182422) do
     t.bigint "incident_id"
     t.bigint "monitor_id", null: false
     t.datetime "updated_at", null: false
+    t.index ["incident_id", "event"], name: "index_notifications_on_incident_and_event", unique: true, where: "(incident_id IS NOT NULL)"
     t.index ["incident_id"], name: "index_notifications_on_incident_id"
     t.index ["monitor_id"], name: "index_notifications_on_monitor_id"
   end

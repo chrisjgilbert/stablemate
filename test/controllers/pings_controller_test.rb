@@ -8,6 +8,7 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
   # Scenario 24 (request) — a ping recovers a down monitor and sends recovery mail.
   test "a ping recovers a down monitor, resolves its incident, sends one recovery email" do
     down = monitors(:up)
+    down.update!(next_due_at: 10.minutes.ago) # overdue, so detection flags it
     down.flag_missed!
     assert down.down?
 
