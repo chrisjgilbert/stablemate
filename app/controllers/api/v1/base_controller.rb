@@ -13,6 +13,11 @@ module Api
       # keyed on the presented token (fallback IP). Dedicated in-process store so it
       # holds under the test env's null_store (mirrors PingsController). Over-limit
       # returns the same opaque JSON shape, no enumeration signal.
+      #
+      # NOTE: the store is per-process, so the effective ceiling scales with the
+      # worker count (limit x processes). That's a coarse abuse bound, not a global
+      # counter — acceptable here (and consistent with the ping limiter); a truly
+      # global bound would key off the shared Solid Cache instead.
       RATE_LIMIT_STORE = ActiveSupport::Cache::MemoryStore.new
       rate_limit to: 120, within: 1.minute,
                  by: -> { request.authorization.presence || request.remote_ip },
