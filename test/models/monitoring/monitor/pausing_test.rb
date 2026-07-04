@@ -42,4 +42,35 @@ class Monitoring::Monitor::PausingTest < ActiveSupport::TestCase
       assert monitor.down?
     end
   end
+
+  # WU-2 (H1) — leaving the monitored state must resolve the open incident, so a
+  # paused monitor never carries a stranded outage that the rollup counts forever.
+  test "pause! resolves the open incident of a down monitor" do
+    monitor = monitors(:up)
+    monitor.update!(next_due_at: 10.minutes.ago)
+    monitor.flag_missed!
+    assert monitor.incidents.open.exists?
+
+    monitor.pause!
+
+    assert monitor.paused?
+    refute monitor.incidents.open.exists?, "pausing a down monitor must resolve its incident"
+  end
+
+  # WU-2 (H1) — the previously-stranded sequence: down -> pause -> ping while paused
+  # (the user's cron keeps firing) -> resume must land on up with NO lingering
+  # open incident that would otherwise render an "up" badge over a "down" banner.
+  test "down, pause, ping, resume leaves the monitor up with no stranded incident" do
+    monitor = monitors(:up)
+    monitor.update!(next_due_at: 10.minutes.ago)
+    monitor.flag_missed!
+    assert monitor.down?
+
+    monitor.pause!
+    monitor.check_in!(received_at: Time.current)
+    monitor.resume!
+
+    assert monitor.up?
+    refute monitor.incidents.open.exists?, "resume must not leave a stranded open incident"
+  end
 end

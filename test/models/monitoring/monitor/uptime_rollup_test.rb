@@ -145,6 +145,20 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
     assert_equal :up, stat.status
   end
 
+  # WU-2 (H1) — a not-measured monitor (paused) carrying a lingering OPEN incident
+  # must not accrue full-day downtime; the day is no-data, not fully down. (Post-WU-2
+  # pause resolves incidents, so this guards legacy/anomalous stranded incidents.)
+  test "a paused monitor with a lingering open incident does not accrue downtime" do
+    @monitor.incidents.create!(started_at: @day.to_time(:utc) + 1.hour, cause: "missed_ping")
+    @monitor.update!(status: "paused")
+
+    stat = @monitor.roll_up_uptime(@day)
+
+    assert_equal 0, stat.down_seconds
+    assert_equal 0, stat.up_seconds
+    assert_equal :no_data, stat.status
+  end
+
   # The monitor's creation day is only measured from creation onward (partial day).
   test "the creation day measures only the seconds after the monitor existed" do
     created_at = @day.to_time(:utc) + 6.hours

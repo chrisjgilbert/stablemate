@@ -47,6 +47,11 @@ module Monitoring
       def paused?    = status == "paused"
       def suspended? = status == "suspended"
 
+      # Actively watched: eligible for detection and uptime measurement. The
+      # not-monitored states are user-`paused`, plan-`suspended`, and never-pinged
+      # `pending`. A `down` monitor is still monitored (it's mid-outage).
+      def monitored? = up? || down?
+
       # Has this monitor ever recorded a ping? Drives resume() and pending state.
       def ever_pinged?
         last_ping_at.present?
@@ -82,7 +87,13 @@ module Monitoring
         end
 
         update!(status: "up")
-        flag_missed! if overdue_now?
+        if overdue_now?
+          flag_missed!
+        else
+          # Belt-and-braces: never leave a stranded open incident on a live `up`
+          # monitor. Clearing it here is not a ping recovery, so it emits no alert.
+          resolve_open_incident!
+        end
       end
     end
   end

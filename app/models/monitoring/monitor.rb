@@ -63,6 +63,15 @@ module Monitoring
       incidents.open.first
     end
 
+    # Resolve the currently-open incident, if any, WITHOUT emitting a recovery
+    # alert — used when a monitor leaves the live (monitored) state via
+    # pause/suspend, so it never carries a stranded open incident into a
+    # not-measured window (which the rollup would otherwise count as downtime
+    # forever). Idempotent. Recovery-by-ping stays in CheckIn (it also alerts).
+    def resolve_open_incident!(at: Time.current)
+      open_incident&.resolve!(at:)
+    end
+
     # Record a ping: persist a PingEvent, advance the timestamps, transition, and
     # (on recovery) resolve the incident + enqueue a `recovered` alert.
     def check_in!(received_at: Time.current, source_ip: nil, duration_ms: nil)
