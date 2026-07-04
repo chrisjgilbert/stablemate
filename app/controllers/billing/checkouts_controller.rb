@@ -5,6 +5,12 @@ module Billing
   # The plan only actually changes later, via the verified webhook.
   class CheckoutsController < BaseController
     def create
+      # Guard against a second subscription: the Upgrade button is hidden for Pro
+      # users, but this action is directly reachable. Without this, an already-Pro
+      # user could open a second Checkout and be billed twice (WU-4). subscribed_to_pro?
+      # reads Pay's webhook-kept mirror, so a stale client can't spoof it.
+      return redirect_back_or_to(billing_subscription_path, alert: "You're already on Pro.") if current_user.subscribed_to_pro?
+
       price_id = Stablemate.pro_price_id
       return redirect_back_or_to(billing_subscription_path, alert: "Pro plan isn't configured.") if price_id.blank?
 

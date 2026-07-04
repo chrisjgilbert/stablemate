@@ -9,6 +9,34 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
 
   setup { @user = users(:bob) }
 
+  # Give the user an active Pro subscription in Pay's mirror so subscribed_to_pro?
+  # is true (mirrors the downgrades test helper).
+  def give_active_pro_subscription!
+    customer = @user.set_payment_processor(:stripe)
+    customer.update!(processor_id: "cus_test_123")
+    customer.subscriptions.create!(
+      name: "pro", processor_id: "sub_test_123",
+      processor_plan: "price_pro", status: "active", quantity: 1
+    )
+  end
+
+  # WU-4 (H4) — an already-Pro user must not be able to open a second Checkout
+  # (which Stripe would happily turn into a second subscription + double charge).
+  test "an already-Pro user is bounced from checkout with no Stripe call" do
+    with_billing_enabled do
+      stub_const(Stablemate, :STRIPE_PRICE_ID_PRO, "price_pro_123") do
+        give_active_pro_subscription!
+        sign_in @user
+
+        post billing_checkout_path
+
+        assert_redirected_to billing_subscription_path
+        assert_equal "You're already on Pro.", flash[:alert]
+        assert_not_requested :post, "https://api.stripe.com/v1/checkout/sessions"
+      end
+    end
+  end
+
   test "creating a checkout redirects to the Stripe hosted session" do
     with_billing_enabled do
       stub_const(Stablemate, :STRIPE_PRICE_ID_PRO, "price_pro_123") do
