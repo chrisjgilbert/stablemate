@@ -11,9 +11,10 @@ module Stablemate
 
     # sync_response: the parsed hash sync_monitors should return.
     # ping_error: raise this from #ping to exercise the swallow-everything path.
-    def initialize(sync_response: { "monitors" => [], "skipped" => [] }, ping_error: nil)
+    def initialize(sync_response: { "monitors" => [], "skipped" => [] }, ping_error: nil, ping_status: :ok)
       @sync_response = sync_response
       @ping_error = ping_error
+      @ping_status = ping_status
       @synced = []
       @pinged = []
       # pings arrive from the subscriber's background threads, so the sink must be
@@ -26,11 +27,13 @@ module Stablemate
       @sync_response
     end
 
+    # Returns the configured ping status (:ok / :stale / :error), matching the real
+    # Client's contract so the subscriber's re-sync path can be exercised.
     def ping(ping_url)
       raise @ping_error if @ping_error
 
       @lock.synchronize { @pinged << ping_url }
-      true
+      @ping_status
     end
   end
 end
