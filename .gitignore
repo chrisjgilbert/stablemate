@@ -38,6 +38,9 @@
 /.kamal/cloudflare-origin.pem
 /.kamal/cloudflare-origin.key
 
+# Local Kamal deploy secrets (real registry/DB/master credentials) — never commit.
+/.kamal/secrets.local
+
 # Ignore generated Tailwind CSS build output.
 /app/assets/builds/*
 !/app/assets/builds/.keep
