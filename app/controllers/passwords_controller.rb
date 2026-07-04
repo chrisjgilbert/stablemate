@@ -18,7 +18,13 @@ class PasswordsController < ApplicationController
   end
 
   def update
-    if @user.update(params.permit(:password, :password_confirmation))
+    # A blank password is a no-op in has_secure_password (it neither clears nor
+    # sets the digest), so `update` would return true, log the user out everywhere,
+    # and claim "Password has been reset" while the old password still works.
+    # Reject it explicitly. (WU-11)
+    if params[:password].blank?
+      redirect_to edit_password_path(params[:token]), alert: "Password can't be blank."
+    elsif @user.update(params.permit(:password, :password_confirmation))
       @user.sessions.destroy_all
       redirect_to new_session_path, notice: "Password has been reset."
     else

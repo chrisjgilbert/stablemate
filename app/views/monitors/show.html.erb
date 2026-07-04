@@ -1,5 +1,5 @@
 <% content_for :title, @monitor.name %>
-<% open_incident = @monitor.incidents.open.first %>
+<% open_incident = @monitor.open_incident %>
 
 <%# Live status: subscribe to the monitor's stream so broadcast_status_update's
     :badge replace lands on the header badge without a reload (mirrors _row.html.erb). %>
