@@ -57,11 +57,22 @@ module Monitoring
         # the past suspended windows, so an evidence-free suspended day is no-data,
         # not a phantom 100%-up day.
         def measured_seconds(day_start, day_end, pings, down)
-          window_start = [ @monitor.created_at, day_start ].max
-          return 0 if window_start >= day_end
+          window_start = measurement_window_start(day_start)
+          return 0 if window_start.nil? || window_start >= day_end
           return 0 if !@monitor.monitored? && pings.zero? && down.zero?
 
           (day_end - window_start).to_i
+        end
+
+        # The earliest instant this day was actually being measured: not before the
+        # monitor existed AND not before its first ping (WU-10 floor — a day entirely
+        # before the first ping is no-data, never phantom-up). nil when the monitor
+        # has never pinged (first_ping_at IS NULL) → no measured time at all, so a
+        # late backfill can't record a never-pinged day as 100% up.
+        def measurement_window_start(day_start)
+          return nil if @monitor.first_ping_at.nil?
+
+          [ @monitor.created_at, @monitor.first_ping_at, day_start ].max
         end
 
         # Down seconds = the in-window seconds overlapped by incident intervals.
@@ -71,8 +82,8 @@ module Monitoring
         # Clamped to the monitor's existence window so pre-creation time never
         # counts as down.
         def raw_down_seconds(day_start, day_end)
-          window_start = [ @monitor.created_at, day_start ].max
-          return 0 if window_start >= day_end
+          window_start = measurement_window_start(day_start)
+          return 0 if window_start.nil? || window_start >= day_end
 
           @monitor.incidents.where("started_at < ?", day_end).find_each.sum do |incident|
             # An OPEN incident on a not-measured monitor (paused/suspended/pending)

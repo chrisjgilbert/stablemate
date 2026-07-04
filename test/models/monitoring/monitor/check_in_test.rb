@@ -29,6 +29,21 @@ class Monitoring::Monitor::CheckInTest < ActiveSupport::TestCase
     end
   end
 
+  # WU-10 (M8) — first_ping_at is set on the first ping and never moved after, so
+  # it's a stable floor for uptime measurement.
+  test "sets first_ping_at on the first ping only" do
+    assert_nil @monitor.first_ping_at
+    freeze_time do
+      first = Time.current
+      @monitor.check_in!(received_at: first)
+      assert_equal first, @monitor.reload.first_ping_at
+
+      travel 1.hour
+      @monitor.check_in!(received_at: Time.current)
+      assert_equal first, @monitor.reload.first_ping_at
+    end
+  end
+
   test "transitions a pending monitor to up" do
     assert_equal "pending", @monitor.status
     @monitor.check_in!(received_at: Time.current)

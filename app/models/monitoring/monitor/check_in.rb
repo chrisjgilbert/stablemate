@@ -37,6 +37,9 @@ module Monitoring
 
           @monitor.last_ping_at = received_at
           @monitor.next_due_at  = next_due_from(received_at)
+          # Record the first ping once, as the floor for uptime measurement (WU-10):
+          # days before it are no-data, never phantom-up. Never moved afterward.
+          @monitor.first_ping_at ||= received_at
 
           recovered_notification = apply_transition(received_at)
           @monitor.save!

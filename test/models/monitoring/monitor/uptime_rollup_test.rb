@@ -17,6 +17,10 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
     # monitor's lifetime so it counts as measured (not no-data).
     @day = 3.days.ago.to_date
     @monitor.update_column(:created_at, (@day - 1.day).to_time(:utc))
+    # This monitor has pinged (last_ping_at set), so its first ping predates the
+    # day under test — the WU-10 measurement floor (a never-pinged monitor is
+    # no-data) must not clip it.
+    @monitor.update_column(:first_ping_at, (@day - 1.day).to_time(:utc))
   end
 
   def seconds_in_day = 86_400
@@ -156,6 +160,40 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
 
     assert_equal 0, stat.down_seconds
     assert_equal 0, stat.up_seconds
+    assert_equal :no_data, stat.status
+  end
+
+  # WU-10 (M8) — days entirely before the first ping are no-data, not phantom 100%
+  # up, even when a late backfill rolls them while the monitor is already `up`.
+  test "days before the first ping are no-data, even on a late backfill" do
+    m = users(:alice).monitors.create!(
+      name: "Late first ping", expected_interval_seconds: 3600, grace_period_seconds: 300, status: "up"
+    )
+    m.update_column(:created_at, (@day - 2.days).to_time(:utc)) # existed 2 days before @day
+    m.update_column(:first_ping_at, @day.to_time(:utc) + 6.hours) # but first pinged ON @day at 06:00
+
+    # A full day before the first ping → no-data, not 100% up.
+    before = @day - 1.day
+    stat = m.roll_up_uptime(before)
+    assert_equal 0, stat.up_seconds
+    assert_equal 0, stat.down_seconds
+    assert_equal :no_data, stat.status
+
+    # The first-ping day is measured only from the first ping onward.
+    day_stat = m.roll_up_uptime(@day)
+    assert_equal seconds_in_day - 6.hours.to_i, day_stat.up_seconds
+  end
+
+  # WU-10 — a never-pinged monitor has no measured time at all (nil first_ping_at).
+  test "a never-pinged monitor's day is no-data regardless of current status" do
+    m = users(:alice).monitors.create!(
+      name: "Silent", expected_interval_seconds: 3600, grace_period_seconds: 300, status: "up"
+    )
+    m.update_column(:created_at, (@day - 1.day).to_time(:utc)) # first_ping_at stays nil
+
+    stat = m.roll_up_uptime(@day)
+    assert_equal 0, stat.up_seconds
+    assert_equal 0, stat.down_seconds
     assert_equal :no_data, stat.status
   end
 
