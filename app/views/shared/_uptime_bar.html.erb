@@ -5,10 +5,10 @@
   Locals: days (array of status strings: "up"/"down"/"partial"/"no-data").
 %>
 <% fills = {
-     "up"      => "bg-[#22c55e]",
-     "partial" => "bg-[#f59e0b]",
-     "down"    => "bg-[#ef4444]",
-     "no-data" => "bg-[#e4e4e7]"
+     "up"      => "bg-chart-up",
+     "partial" => "bg-chart-partial",
+     "down"    => "bg-chart-down",
+     "no-data" => "bg-chart-nodata"
    } %>
 <div class="flex items-end gap-[2px] h-[34px]" role="img" aria-label="Uptime, last <%= days.size %> days">
   <% days.each_with_index do |status, i| %>

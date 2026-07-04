@@ -6,23 +6,30 @@
 
   <body class="bg-app text-ink font-sans antialiased min-h-screen">
     <% if authenticated? %>
+      <%# Active-section underline: match on controller so the current nav item
+          gets a red underline (per the mockup). %>
+      <% section = controller_path %>
+      <% nav_link = ->(label, path, active) {
+           link_to label, path,
+             class: "h-14 inline-flex items-center font-mono text-[13px] border-b-2 " +
+                    (active ? "text-ink border-brand" : "text-secondary border-transparent hover:text-ink") } %>
       <header class="border-b border-border bg-surface">
         <div class="max-w-5xl mx-auto px-5 h-14 flex items-center justify-between">
-          <%= link_to root_path, class: "flex items-center gap-2" do %>
-            <%= render "shared/logo" %>
-            <span class="font-semibold tracking-tight">Stablemate</span>
+          <%= link_to root_path, class: "font-display text-lg font-bold tracking-tight text-ink" do %>
+            Stablemate<span class="text-brand">.</span>
           <% end %>
-          <div class="flex items-center gap-1">
+          <nav class="flex items-center gap-5">
+            <%= nav_link.call("Monitors", monitors_path, section == "monitors") %>
+            <%= nav_link.call("API keys", settings_api_keys_path, section == "settings/api_keys") %>
             <% if billing_enabled? %>
               <%= link_to "Billing", billing_subscription_path,
-                    class: "h-8 px-3 inline-flex items-center rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline",
+                    class: "h-14 inline-flex items-center font-mono text-[13px] border-b-2 " +
+                           (section.start_with?("billing/") ? "text-ink border-brand" : "text-secondary border-transparent hover:text-ink"),
                     data: { testid: "nav-billing" } %>
             <% end %>
-            <%= link_to "API keys", settings_api_keys_path,
-                  class: "h-8 px-3 inline-flex items-center rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline" %>
             <%= button_to "Sign out", session_path, method: :delete,
-                  class: "h-8 px-3 rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline" %>
-          </div>
+                  class: "h-14 inline-flex items-center font-mono text-[13px] text-secondary hover:text-ink" %>
+          </nav>
         </div>
       </header>
     <% end %>

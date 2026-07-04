@@ -9,9 +9,9 @@
   <div class="flex items-end gap-[2px] h-4" role="img" aria-label="Recent checks">
     <% recent.each do |c| %>
       <% fill = case c
-                when "up"   then "bg-[#3ec06a]"
-                when "down" then "bg-[#e5484d]"
-                else "bg-[#e4e4e9]"
+                when "up"   then "bg-chart-up"
+                when "down" then "bg-chart-down"
+                else "bg-chart-nodata"
                 end %>
       <span class="w-[5px] h-4 rounded-[1.5px] <%= fill %>"></span>
     <% end %>

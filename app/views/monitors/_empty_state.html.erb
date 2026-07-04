@@ -1,7 +1,7 @@
 <div class="rounded-xl border border-border bg-surface p-10 shadow-sm text-center max-w-xl mx-auto"
      data-testid="empty-state">
   <div class="flex justify-center mb-4"><%= render "shared/logo", size: 44 %></div>
-  <h2 class="text-lg font-semibold tracking-tight">Monitor your first cron job</h2>
+  <h2 class="font-display text-lg font-bold tracking-tight">Monitor your first cron job</h2>
   <p class="mt-1 text-[13px] text-muted">
     Add a monitor and we'll alert you the moment a scheduled job stops checking in.
   </p>
@@ -15,7 +15,7 @@
 
   <div class="mt-8 text-left">
     <p class="text-[11px] font-semibold uppercase tracking-wide text-gem mb-2">Install the gem</p>
-    <pre class="rounded-lg bg-[#1c1c22] text-[#d4d4dc] p-4 font-mono text-[12px] overflow-x-auto"><code># config/recurring.yml
+    <pre class="rounded-lg bg-warmdark text-surface-subtle p-4 font-mono text-[12px] overflow-x-auto"><code># config/recurring.yml
 daily_digest:
   class: DailyDigestJob
   schedule: every day at 9am</code></pre>

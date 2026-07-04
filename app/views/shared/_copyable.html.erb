@@ -6,14 +6,14 @@
 <% dark = local_assigns.fetch(:dark, false) %>
 <% label = local_assigns.fetch(:label, "value") %>
 <div data-controller="clipboard"
-     class="flex items-stretch gap-2 rounded-lg overflow-hidden border <%= dark ? "border-[#26262e]" : "border-border" %>">
+     class="flex items-stretch gap-2 rounded-lg overflow-hidden border <%= dark ? "border-warmdark" : "border-border" %>">
   <input data-clipboard-target="source" type="text" readonly value="<%= value %>"
          aria-label="<%= label %>"
          class="flex-1 px-3 py-2 font-mono text-[12px] min-w-0
-                <%= dark ? "bg-[#1c1c22] text-[#d4d4dc]" : "bg-[#f7f7f9] text-ink" %>">
+                <%= dark ? "bg-warmdark text-surface-subtle" : "bg-surface-subtle text-ink" %>">
   <button type="button" data-action="clipboard#copy" data-clipboard-target="button"
           class="px-3 text-[13px] font-semibold shrink-0
-                 <%= dark ? "bg-[#26262e] text-[#d4d4dc]" : "bg-surface text-brand hover:bg-hairline" %>">
+                 <%= dark ? "bg-warmdark text-surface-subtle border-l border-white/10" : "bg-surface text-brand hover:bg-hairline" %>">
     Copy
   </button>
 </div>
