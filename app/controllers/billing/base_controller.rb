@@ -11,10 +11,19 @@ module Billing
   # unauthenticated) but enforces the same billing gate itself.
   class BaseController < ApplicationController
     before_action :require_billing_enabled
+    before_action :release_downgrade_lock
 
     private
       def require_billing_enabled
         render_not_found unless Stablemate.billing_enabled?
+      end
+
+      # Self-heal a stale choose-N lock on any billing page load: if the user is
+      # back within the Free cap (e.g. deleted monitors while locked), lift the
+      # lock and reactivate the survivors rather than trapping them in a picker
+      # they can no longer satisfy. No-op unless actually locked and within cap.
+      def release_downgrade_lock
+        current_user&.release_downgrade_lock_if_within_cap!
       end
   end
 end

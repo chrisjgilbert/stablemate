@@ -1,39 +1,58 @@
-<% content_for :title, "Choose monitors to keep" %>
+<% content_for :title, @mode == :confirm ? "Downgrade to Free" : "Choose monitors to keep" %>
 
 <div class="mb-6">
   <h1 class="font-display text-xl font-bold tracking-tight">Downgrade to Free</h1>
-  <p class="mt-1 text-[13px] text-muted">
-    Free keeps <%= @keep_limit %> active monitors. Select exactly <%= @keep_limit %> to keep —
-    the rest will be <strong>suspended</strong> (kept, but not monitored) and can be reactivated if you upgrade again.
-  </p>
+  <% if @mode == :confirm %>
+    <p class="mt-1 text-[13px] text-muted">
+      You're within the Free plan's <%= @keep_limit %>-monitor limit, so nothing will be suspended.
+      Your Pro subscription will be cancelled.
+    </p>
+  <% else %>
+    <p class="mt-1 text-[13px] text-muted">
+      Free keeps <%= @keep_limit %> active monitors. Select exactly <%= @keep_limit %> to keep —
+      the rest will be <strong>suspended</strong> (kept, but not monitored) and can be reactivated if you upgrade again.
+    </p>
+  <% end %>
 </div>
 
-<%= form_with url: billing_downgrade_path, method: :post,
-      data: { controller: "choose-five", choose_five_limit_value: @keep_limit } do %>
-  <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm">
-    <div class="divide-y divide-hairline">
-      <% @monitors.each do |monitor| %>
-        <label class="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-hairline/40">
-          <%= check_box_tag "keep_ids[]", monitor.id, false,
-                data: { choose_five_target: "checkbox", action: "choose-five#toggle" },
-                class: "h-4 w-4" %>
-          <span class="text-[14px] font-medium"><%= monitor.name %></span>
-          <span class="ml-auto font-mono text-[12px] text-muted"><%= monitor.status %></span>
-        </label>
-      <% end %>
+<% if @mode == :confirm %>
+  <%= form_with url: billing_downgrade_path, method: :post do %>
+    <div class="flex items-center gap-3">
+      <button type="submit" data-testid="confirm-downgrade"
+              class="h-9 px-4 inline-flex items-center rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover">
+        Downgrade to Free
+      </button>
+      <%= link_to "Cancel", billing_subscription_path, class: "text-[13px] text-secondary hover:underline" %>
     </div>
-  </div>
+  <% end %>
+<% else %>
+  <%= form_with url: billing_downgrade_path, method: :post,
+        data: { controller: "choose-five", choose_five_limit_value: @keep_limit } do %>
+    <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm">
+      <div class="divide-y divide-hairline">
+        <% @monitors.each do |monitor| %>
+          <label class="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-hairline/40">
+            <%= check_box_tag "keep_ids[]", monitor.id, false,
+                  data: { choose_five_target: "checkbox", action: "choose-five#toggle" },
+                  class: "h-4 w-4" %>
+            <span class="text-[14px] font-medium"><%= monitor.name %></span>
+            <span class="ml-auto font-mono text-[12px] text-muted"><%= monitor.status %></span>
+          </label>
+        <% end %>
+      </div>
+    </div>
 
-  <div class="mt-4 flex items-center gap-3">
-    <button type="submit"
-            data-choose-five-target="submit"
-            data-testid="confirm-downgrade"
-            class="h-9 px-4 inline-flex items-center rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover disabled:opacity-40 disabled:cursor-not-allowed">
-      Suspend the rest & downgrade
-    </button>
-    <span class="text-[13px] text-muted" data-choose-five-target="counter" data-testid="selection-counter">
-      0 / <%= @keep_limit %> selected
-    </span>
-    <%= link_to "Cancel", billing_subscription_path, class: "text-[13px] text-secondary hover:underline" %>
-  </div>
+    <div class="mt-4 flex items-center gap-3">
+      <button type="submit"
+              data-choose-five-target="submit"
+              data-testid="confirm-downgrade"
+              class="h-9 px-4 inline-flex items-center rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover disabled:opacity-40 disabled:cursor-not-allowed">
+        Keep these & suspend the rest
+      </button>
+      <span class="text-[13px] text-muted" data-choose-five-target="counter" data-testid="selection-counter">
+        0 / <%= @keep_limit %> selected
+      </span>
+      <%= link_to "Cancel", billing_subscription_path, class: "text-[13px] text-secondary hover:underline" %>
+    </div>
+  <% end %>
 <% end %>

@@ -97,6 +97,69 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # WU-5 (M4) — a Pro user at/under the Free cap gets a plain confirm, not the
+  # un-submittable "pick exactly N" picker.
+  test "new for a Pro user under the cap renders a confirm, not a picker" do
+    with_billing_enabled do
+      build_monitors(FREE - 2)
+      sign_in @user
+      get new_billing_downgrade_path
+
+      assert_response :ok
+      assert_select "input[type=checkbox][name='keep_ids[]']", count: 0
+      assert_select "[data-testid='confirm-downgrade']"
+    end
+  end
+
+  test "a Pro user under the cap downgrades via confirm, cancelling Stripe" do
+    with_billing_enabled do
+      build_monitors(FREE - 2)
+      sub_id = give_active_pro_subscription!
+      stub_stripe_subscription_cancel(sub_id)
+      sign_in @user
+
+      post billing_downgrade_path
+
+      assert_redirected_to billing_subscription_path
+      assert_requested :delete, %r{https://api\.stripe\.com/v1/subscriptions/#{sub_id}}
+      assert_equal 0, @user.monitors.where(status: "suspended").count
+    end
+  end
+
+  # WU-6 (M5) — the involuntary choose-N lock lets the user re-pick from ALL their
+  # monitors (incl. the auto-suspended ones) and resolves without touching Stripe.
+  test "new in the involuntary lock lists all monitors including suspended" do
+    with_billing_enabled do
+      build_monitors(FREE + 2)
+      @user.sync_plan_from_subscription! # ⇒ free, awaiting, oldest N kept
+      assert @user.reload.must_choose_downgrade?
+      sign_in @user
+
+      get new_billing_downgrade_path
+
+      assert_response :ok
+      assert_select "input[type=checkbox][name='keep_ids[]']", count: FREE + 2
+    end
+  end
+
+  test "resolving the involuntary lock re-picks without any Stripe call" do
+    with_billing_enabled do
+      monitors = build_monitors(FREE + 2)
+      @user.sync_plan_from_subscription!
+      assert @user.reload.must_choose_downgrade?
+      sign_in @user
+
+      keep = monitors.last(FREE).map(&:id) # includes the auto-suspended ones
+      post billing_downgrade_path, params: { keep_ids: keep }
+
+      assert_redirected_to billing_subscription_path
+      refute @user.reload.awaiting_downgrade_choice?
+      assert_equal FREE, @user.monitors.counting_toward_cap.count
+      assert_equal keep.sort, @user.monitors.counting_toward_cap.ids.sort
+      assert_not_requested :delete, %r{https://api\.stripe\.com/v1/subscriptions}
+    end
+  end
+
   test "downgrade is an opaque 404 when billing is disabled" do
     with_billing_disabled do
       sign_in @user
