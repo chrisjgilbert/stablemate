@@ -60,6 +60,23 @@ class PasswordsControllerTest < ActionDispatch::IntegrationTest
     assert_notice "Passwords did not match"
   end
 
+  # WU-11 — a blank password must NOT report success: it's a no-op in
+  # has_secure_password, so without this guard the user is logged out everywhere
+  # and told "reset" while the old password still works.
+  test "update with a blank password is rejected and changes nothing" do
+    user = users(:alice)
+    session = user.sessions.create!
+    token = user.password_reset_token
+
+    assert_no_changes -> { user.reload.password_digest } do
+      put password_path(token), params: { password: "", password_confirmation: "" }
+    end
+    assert_redirected_to edit_password_path(token)
+    assert user.sessions.exists?(session.id), "sessions must not be revoked on a rejected reset"
+    assert User.authenticate_by(email_address: user.email_address, password: "password1234"),
+      "the old password must still work"
+  end
+
   # Full happy path: request reset -> email enqueued -> follow the token to edit
   # -> update -> existing sessions revoked, the new password authenticates and the
   # old one no longer does. (Fixtures share the password "password1234".)

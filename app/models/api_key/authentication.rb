@@ -3,10 +3,11 @@ class ApiKey
   # ApiKey record by digest, in constant time, and record usage.
   #
   # We store a SHA-256 hex digest with a UNIQUE index, so the lookup is a single
-  # indexed equality on the digest — the comparison itself happens inside Postgres
-  # on the hashed value, never on the secret. We additionally re-verify the digest
-  # in constant time (secure_compare) as belt-and-braces against any timing
-  # signal, and never branch on whether a partial match existed.
+  # indexed equality on the digest — the comparison happens inside Postgres on the
+  # hashed value, never on the secret, and the digest is a preimage-resistant hash
+  # of the token, so that is where the real protection lives. The extra
+  # secure_compare is belt-and-braces only (both sides are the same already-found
+  # digest); it never branches on whether a partial match existed.
   module Authentication
     extend ActiveSupport::Concern
 
