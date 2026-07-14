@@ -1,8 +1,9 @@
 # Contributing to Stablemate
 
 Stablemate is a deliberately boring, idiomatic, vanilla Rails app. The full
-engineering conventions live in [`CLAUDE.md`](CLAUDE.md) and the build contract in
-[`docs/specs/`](docs/specs/). This file is the short version for committers.
+engineering conventions live in [`CLAUDE.md`](CLAUDE.md) and the locked decisions
+in [`docs/specs/README.md`](docs/specs/README.md). This file is the short version
+for committers.
 
 ## Branch & history
 
@@ -33,9 +34,8 @@ We keep `main` a **clean, linear history**. No merge bubbles, no "wip" noise.
 same `bin/ci` runs in GitHub Actions. So: run `bin/ci` early and often.
 
 - **System tests are non-negotiable.** Every key user-facing flow ships a
-  browser-driven Capybara system test — see the "Required system tests" list in
-  each phase spec. A PR adding a user-facing flow without its system test gets
-  sent back.
+  browser-driven Capybara system test (see the rule in [`CLAUDE.md`](CLAUDE.md)).
+  A PR adding a user-facing flow without its system test gets sent back.
 - Run `/code-review` on your diff, and `/security-review` when touching auth,
   tokens, the ping endpoint, the API, or rate-limiting.
 

@@ -3,9 +3,8 @@
 Read this before writing code. Stablemate follows a **strict, 37signals-inspired,
 vanilla-Rails architecture**: keep `app/` small, put logic on records, and never
 default to a generic service bucket. The full rationale and worked examples are
-below; the **per-phase object inventory** lives in
-[`docs/specs/architecture.md`](docs/specs/architecture.md) and the build contract
-in [`docs/specs/`](docs/specs/).
+below; the locked product/architecture decisions are in
+[`docs/specs/README.md`](docs/specs/README.md).
 
 ## The decision table — start here
 
@@ -101,10 +100,10 @@ user flow ships with a browser-driven Capybara system test** — the kind that
 actually clicks through the rendered UI in a real (headless) browser. Agents
 routinely skip this layer; here we don't.
 
-- **The phase spec names them.** Each phase spec has a **"Required system tests
-  (must ship)"** list. Those tests are part of that phase's Definition of Done. A
-  phase is **not** done if any are missing — even with every unit/request test
-  green. A PR that adds a user-facing flow without its system test gets sent back.
+- **Every user-facing flow gets one.** A browser-driven system test for the flow
+  is part of its Definition of Done — a change is **not** done if it's missing,
+  even with every unit/request test green. A PR that adds a user-facing flow
+  without its system test gets sent back.
 - **Browser-driven, not rack-test.** System tests drive a real headless Chromium
   via Capybara, exercising Turbo/Stimulus behaviour (live status updates, the
   copy button, the generate-key modal, the waitlist mode) — things rack-test
@@ -126,8 +125,8 @@ routinely skip this layer; here we don't.
 TDD is the loop; these skills are the checkpoints around it. Sub-agents should
 invoke them at the right moments rather than improvising equivalents.
 
-1. **TDD first.** For each scenario in the phase spec's Test Plan: write the
-   failing test → smallest change to green → refactor. Keep `bin/rails test`
+1. **TDD first.** For each scenario you're implementing: write the failing test
+   → smallest change to green → refactor. Keep `bin/rails test`
    (+ system tests) and the linter green continuously.
 2. **`/code-review` before pushing.** Run it on your working diff and address the
    findings before opening/updating a PR. It reviews for correctness bugs and
@@ -140,7 +139,7 @@ invoke them at the right moments rather than improvising equivalents.
    whole story for a monitoring product — use `/verify`/`/run` to launch the app
    and observe the actual flow: a ping flips `pending→up`, a stalled monitor
    emails on `down`, recovery emails on the next ping, the dashboard renders.
-   Especially at each phase's Acceptance Criteria.
+   Especially before shipping a change to any of these core flows.
 5. **`/init` to keep this file current.** As the codebase grows, use `/init` (or
    just edit) so `CLAUDE.md` keeps reflecting reality — stale conventions rot.
 6. **SessionStart hook.** Web sessions auto-prepare the app (deps, DB, a quick
@@ -222,14 +221,13 @@ grep, because there is no junk drawer.
 - **Auth:** Rails 8 built-in authentication generator (sessions +
   `has_secure_password`). No Devise, no OAuth.
 - **Tests:** Minitest + fixtures + Capybara system tests (Rails 8 default). TDD —
-  write the failing test from the phase spec's Test Plan first. Control time with
-  `travel_to`/`freeze_time`.
+  write the failing test first. Control time with `travel_to`/`freeze_time`.
 - **System tests are non-negotiable.** Every key user-facing flow MUST have a
   passing **browser-driven** (Capybara) system test — see the rule below. This is
   the most-skipped layer and the one that proves the product actually works.
-- **Specs are the build contract:** follow [`docs/specs/`](docs/specs/), not a
-  re-reading of the PRD. The locked decisions are in
-  [`docs/specs/README.md`](docs/specs/README.md).
+- **Locked decisions are binding:** the product/architecture decisions that
+  govern this app are recorded in [`docs/specs/README.md`](docs/specs/README.md);
+  follow them rather than re-deriving from scratch.
 - **Secrets:** `ping_token` and API keys are secrets — random, hashed where the
   spec says, constant-time compare, shown raw once, opaque `404`/`401` on failure.
 - **Third-party integration secrets (Stripe, Slack, etc.) live in Rails encrypted

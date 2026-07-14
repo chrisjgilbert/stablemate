@@ -1,12 +1,13 @@
 # Roadmap — deferred / post-launch
 
 The canonical list of everything deliberately **out of V1**, with the rationale
-and the source of truth for *why*. V1 (Phases 0–4, see [`specs/`](specs/)) is
-shipped. This doc is the durable backlog; **GitHub issues are created per item
-only when work on it actually starts**, and linked back here.
+and the source of truth for *why*. V1 is shipped. This doc is the durable
+backlog; **GitHub issues are created per item only when work on it actually
+starts**, and linked back here.
 
-Sources: [`PRD.md`](PRD.md) §2.2 (Non-Goals), §"Deferred to V2", §10
-(positioning), and each phase spec's "Out of scope / guardrails".
+(The original PRD and per-phase build specs that these items were carved out of
+have been archived out of the repo; the section citations below — "PRD §2.2",
+"Phase 3 §7", etc. — are retained as historical provenance, not live links.)
 
 > The architecture was built with seams so these land as *additive* code, not
 > refactors: the channel-agnostic alerting layer (`Notifications::Channel`), the
