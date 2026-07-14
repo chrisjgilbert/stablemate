@@ -79,3 +79,5 @@ group :test do
   # api.stripe.com responses, never the live API.
   gem "webmock", require: false
 end
+
+gem "honeybadger", "~> 6.9"
