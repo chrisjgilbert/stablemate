@@ -70,6 +70,21 @@ module Monitoring
         due.present? && Time.current > due
       end
 
+      # The monitor is actively expecting a ping whose due time hasn't passed
+      # yet — surfaced to the UI as "next check". Distinct from bare `up?`: an
+      # up monitor can already be past next_due_at but still inside its grace
+      # window (not yet swept to down by DetectMissedPingsJob, or resumed via
+      # reactivate_heartbeat! without recomputing next_due_at) — next_due_at is
+      # stale then, so this is false rather than show an already-past time as
+      # if it were still upcoming.
+      def next_check_upcoming?
+        up? && next_due_at.present? && next_due_at.future?
+      end
+
+      def grace_period_configured?
+        grace_period_seconds.to_i.positive?
+      end
+
       # Bring a non-monitored monitor (paused or suspended) back to live, choosing
       # the correct status by re-evaluating the grace window — the single home for
       # this rule, shared by user-resume (Pausing) and plan-reactivate (Suspension):

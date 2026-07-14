@@ -82,6 +82,9 @@
       <dt class="text-muted">Grace period</dt><dd class="font-mono"><%= humanize_seconds(@monitor.grace_period_seconds) %></dd>
       <dt class="text-muted">Last ping</dt>
       <dd class="font-mono"><%= mono_timestamp(@monitor.last_ping_at) %></dd>
+      <%# The down case is already covered by "Expected by" in the incident
+          banner above. %>
+      <%= render "monitors/next_check", monitor: @monitor, variant: :dl %>
     </dl>
   </div>
 
