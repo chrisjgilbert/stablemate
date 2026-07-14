@@ -22,15 +22,14 @@ require_relative "stablemate"
 # Guarded by billing_enabled? so a keyless (self-host) instance never touches the
 # Stripe SDK and Pay stays dormant.
 if Stablemate.billing_enabled?
-  ENV["STRIPE_PUBLIC_KEY"]     ||= Stablemate.stripe_publishable_key
-  ENV["STRIPE_PRIVATE_KEY"]    ||= Stablemate.stripe_secret_key
+  ENV["STRIPE_PUBLIC_KEY"] ||= Stablemate.stripe_publishable_key
+  ENV["STRIPE_PRIVATE_KEY"] ||= Stablemate.stripe_secret_key
   ENV["STRIPE_SIGNING_SECRET"] ||= Stablemate.stripe_webhook_secret
 end
 
 Pay.setup do |config|
   config.application_name = "Stablemate"
-  # TODO: switch back to support@stablemate.dev once that mailbox exists.
-  config.support_email    = "chris@chrisgilbert.dev"
+  config.support_email = ENV.fetch("STABLEMATE_MAIL_REPLY_TO")
 
   # We have exactly one paid product — Pro. Naming every subscription "pro" lets
   # User::Subscription#subscribed_to_pro? ask Pay a single, plan-agnostic question.
