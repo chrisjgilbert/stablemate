@@ -129,17 +129,15 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to monitors_path
   end
 
-  # "Next check" surfaces next_due_at for an actively-up monitor, on both the
-  # dashboard row and the detail page, with an additional grace note only when
-  # a grace period is actually configured — a zero grace period would just
-  # repeat the same timestamp twice.
-  test "index and show display the next-check time with a grace note when grace_period_seconds > 0" do
+  # "Next check" surfaces next_due_at for an actively-up monitor: a compact
+  # countdown on the crowded dashboard row, the exact timestamp (plus a grace
+  # note when a grace period is actually configured) on the detail page.
+  test "index shows a compact next-check countdown, show shows the exact time with a grace note" do
     sign_in @alice
 
     get monitors_path
     assert_response :success
-    assert_match mono_timestamp(@alices.next_due_at), response.body
-    assert_match mono_timestamp(@alices.due_with_grace_at), response.body
+    assert_match "next in #{humanize_duration_until(@alices.next_due_at)}", response.body
 
     get monitor_path(@alices)
     assert_response :success

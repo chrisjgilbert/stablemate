@@ -62,4 +62,21 @@ module MonitorsHelper
     format = seconds ? "%Y-%m-%d %H:%M:%S UTC" : "%Y-%m-%d %H:%M UTC"
     time.utc.strftime(format)
   end
+
+  # Compact countdown to a future time ("22h", "45m", "3d") — rounded to the
+  # nearest unit, for the dashboard row's tight horizontal space. Unlike
+  # humanize_seconds (which only formats exact config values), this rounds an
+  # arbitrary live duration rather than falling back to raw seconds.
+  def humanize_duration_until(time)
+    secs = (time - Time.current).round
+    return "#{secs}s" if secs < 60
+
+    mins = (secs / 60.0).round
+    return "#{mins}m" if mins < 60
+
+    hours = (secs / 3_600.0).round
+    return "#{hours}h" if hours < 24
+
+    "#{(secs / 86_400.0).round}d"
+  end
 end
