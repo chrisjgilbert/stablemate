@@ -450,13 +450,14 @@ Recommendations in **bold**; these change the shape enough to confirm first.
 - **D. `pending` first probe.** **Recommend: include `pending` uptime monitors in
   `due_for_probe`** so the first probe lifts them out of pending (symmetric with
   heartbeat's first ping). Alt: seed `next_due_at` at create.
-- **E. Gem auto-registration default.** **Recommend: opt-in**
+- **E. Gem auto-registration default. — DECIDED: opt-in.**
   (`config.monitor_uptime = true` + a resolvable `app_url`); `/up` is the default
   *path*, not an automatic install-time behavior. Auto-probing needs a reachable
-  URL and explicit intent. Alt: on-by-default when `app_url` is derivable — more
-  magic, more surprise, and a hosted instance probing an unintended URL.
-- **F. Grace semantics.** **Recommend: time-based confirmation window via a
-  `failing_since` column** (mirrors heartbeat grace). Alt: N-consecutive-failures.
+  URL and explicit intent. (Rejected: on-by-default when `app_url` is derivable —
+  more magic, more surprise, and a hosted instance probing an unintended URL.)
+- **F. Grace semantics. — DECIDED: time-based confirmation window** via a
+  `failing_since` column, reusing `grace_period_seconds` (mirrors heartbeat
+  grace). (Rejected: N-consecutive-failures — couples the threshold to cadence.)
 - **G. Success criterion.** V1: **`2xx` = up**, everything else = down. Do we want
   a configurable expected-status / body-match in V1, or defer? **Recommend:
   defer** — keep the migration and UI minimal; add `expected_status` in a V2.
