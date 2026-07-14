@@ -432,12 +432,34 @@ projects. **No cap logic changes**; only the association path underneath it does
   (`downgrade.rb:79-80`) — now spanning projects. The **choose-5 picker UI groups
   candidates by project** (preload `.includes(:project)` to avoid N+1). Suspended
   monitors stay in their project. `resolve_choice!` needs no logic change.
-- **Involuntary downgrade** (card failure) — DECIDED §12-J, Option 1 (simplest):
-  `enforce_free_cap!` keeps the *oldest* over-cap monitors across projects as a
-  **temporary default** (no logic change), and the existing `awaiting_downgrade_choice`
-  flag forces the user into the project-grouped picker to make the real selection.
-  Accept the transient window (card-fail → next login, in which a newer project may be
-  fully suspended) as inherent to any auto-suspend, bounded by dunning emails.
+- **Involuntary downgrade** (card failure / cancel) — DECIDED §12-J: a **grace period,
+  nothing suspended.** On plan→Free while over the cap, set `awaiting_downgrade_choice:
+  true` **and** `downgrade_choice_deadline_at = now + DOWNGRADE_GRACE_PERIOD` and
+  suspend **nothing** — every monitor keeps running (the whole point: a payment blip
+  must never silently stop monitoring). A prominent banner (§6) asks the user to pick
+  their 5 (project-grouped picker) by the deadline. Three exits:
+  - **choose** → `resolve_choice!` suspends the rest, clears the deadline;
+  - **re-pay** → `restore_suspended_monitors!` (a no-op — nothing was suspended) +
+    `clear_downgrade_choice!`;
+  - **deadline passes unanswered** → the backstop job (below) enforces the fallback:
+    keep the oldest `FREE_PLAN_MONITOR_LIMIT` via the existing `enforce_free_cap!`.
+
+  During grace the user is over-cap, so `at_monitor_cap?` correctly blocks *new*
+  monitors while the existing ones keep being monitored. If they delete down to ≤ the
+  cap during grace, the backstop finds `over_free_cap_by == 0` and just clears the
+  flags — no suspension.
+
+Schema/plumbing for the grace period:
+- ⊕ `users.downgrade_choice_deadline_at` (datetime, null — null ⇒ not in grace).
+- `DOWNGRADE_GRACE_PERIOD` (default `7.days`) in `config/initializers/stablemate.rb`
+  (money/cost-control constants) — sits inside Stripe's dunning window; tunable.
+- **`EnforceOverdueDowngradesJob`** (daily recurring): `User.awaiting_downgrade_choice
+  .where("downgrade_choice_deadline_at < ?", Time.current).find_each(&:enforce_downgrade_fallback!)`
+  — the job iterates, the record does the work (`enforce_downgrade_fallback!` delegates
+  to `User::Downgrade#enforce_free_cap!`), per CLAUDE.md rule 5.
+- `sync_plan_from_subscription!` (`user/subscription.rb`) stops calling
+  `enforce_free_cap!` immediately; it sets the deadline instead. `restore_…`/`resolve_
+  choice!` clear it.
 - **Subscription** (`user/subscription.rb`): `restore_suspended_monitors!` reactivates
   `user.monitors.where(status: "suspended")` up to remaining slots — works unchanged
   across projects.
@@ -546,17 +568,21 @@ there is **no phased, independently-deployable rollout** and no "green at every 
 constraint — the whole change lands in **one PR**, `bin/ci` green at its end. Split
 into review-sized commits for readability, not for deployability:
 
-1. **Schema + models.** The destructive migration (§3.5); `Project` + associations;
-   `User has_many :through`; `Monitor belongs_to :project` + `delegate :user`;
-   `ApiKey belongs_to :project`; `Project::MonitorSync` (moved).
+1. **Schema + models.** The destructive migration (§3.5) + `users
+   .downgrade_choice_deadline_at`; `DOWNGRADE_GRACE_PERIOD` constant; `Project` +
+   associations; `User has_many :through`; `Monitor belongs_to :project` +
+   `delegate :user`; `ApiKey belongs_to :project`; `Project::MonitorSync` (moved).
 2. **Cutover.** API base controller resolves key→project; **every** build/create site
    (4 app + ~20 test + `db/seeds.rb`, §13-B2) moves to project scope; fixtures gain
    `projects.yml` and drop `user:`.
-3. **UI.** Projects nav, first-run/zero-project empty state, grouped dashboard, project
+3. **Downgrade grace period (§7).** `sync_plan_from_subscription!` sets the deadline
+   instead of suspending; add `EnforceOverdueDowngradesJob` (daily) + its
+   `recurring.yml` entry; `resolve_choice!`/restore clear the deadline.
+4. **UI.** Projects nav, first-run/zero-project empty state, grouped dashboard, project
    CRUD (+ strong delete confirm), monitor-create project selector, move-monitor
-   sub-resource (manual-only), per-project API keys, cap-skip banner. System test per
-   flow.
-4. **Docs.** Update `README.md` #6 + the data-model block (§3.3); gem README "one key
+   sub-resource (manual-only), per-project API keys, cap-skip banner, the downgrade
+   grace-period banner + project-grouped picker. System test per flow.
+5. **Docs.** Update `README.md` #6 + the data-model block (§3.3); gem README "one key
    per project."
 
 ---
@@ -595,10 +621,14 @@ Resolved with the owner, 2026-07-14 — the four material choices plus the defer
   API key syncs into; the UI blocks moving it and tells the user to re-point the app's
   key (§6). Only `source: "manual"` monitors move between projects. (A history-
   preserving "adopt + rebind key" flow can come later if demand appears.)
-- **J · Involuntary-downgrade project-awareness. DECIDED: Option 1 (simplest).** Keep
-  the age-based auto-suspend (oldest over-cap across projects) as a *temporary default*;
-  the existing `awaiting_downgrade_choice` project-grouped picker is the real selection
-  (§7). Accept the transient window; no per-project fairness logic.
+- **J · Involuntary-downgrade behaviour. DECIDED: grace period, nothing suspended.**
+  On an over-cap drop to Free, start a `DOWNGRADE_GRACE_PERIOD` (default 7 days) window,
+  **suspend nothing**, and ask the user to pick their 5 (project-grouped). A daily
+  backstop job (`EnforceOverdueDowngradesJob`) enforces the fallback (oldest
+  `FREE_PLAN_MONITOR_LIMIT`) only if the window expires unanswered. A payment blip never
+  silently stops monitoring. Cost: a `users.downgrade_choice_deadline_at` column, one
+  constant, one recurring job (§7). Chosen over the immediate age-rule auto-suspend
+  because silent monitoring loss is the worst failure for a monitoring product.
 
 ---
 
@@ -617,7 +647,8 @@ off with "document it." Ranked.
 > - **Folded into the spec:** B2 (§4.5 count corrected + §10/§11 conversion work item),
 >   B3 (`last_synced_app` advisory flag, §3.2), B4-runtime (gem monitors non-movable,
 >   §6/§12-I), S3 (slug dropped, §3.1), S4 (strong delete confirm, §6), S5 (cap-skip UI
->   banner, §6/§7), S6 (first-run empty state + gem copy, §6), S8/§12-J (Option 1), S9
+>   banner, §6/§7), S6 (first-run empty state + gem copy, §6), S8/§12-J (grace period —
+>   nothing suspended during the window + a backstop job), S9
 >   (settings/api_keys create removed, §3.4/§6), S10 (cascade note, §4.1), S11 (uptime
 >   composition, §4.3), and the minors (`allow_nil`, most-recent-by-`created_at`).
 > - **Remaining as build-time work (not spec gaps):** the ~26 build-site conversions
