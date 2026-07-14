@@ -26,5 +26,6 @@
     <span class="font-mono">
       <%= monitor.last_ping_at ? "#{time_ago_in_words(monitor.last_ping_at)} ago" : "never pinged" %>
     </span>
+    <%= render "monitors/next_check", monitor: monitor, variant: :row %>
   </div>
 </div>

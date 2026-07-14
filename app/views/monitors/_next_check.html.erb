@@ -1,0 +1,26 @@
+<%#
+  "Next check": next_due_at, with a grace-until note when a grace period is
+  actually configured. Shown only while genuinely upcoming (HeartbeatStates
+  #next_check_upcoming?) — an up monitor can already be past next_due_at but
+  still inside its grace window, where the timestamp is stale. variant: :row
+  (dashboard row, inline span) or :dl (detail page, dt/dd pair).
+  Locals: monitor, variant (default :row).
+%>
+<% variant ||= :row %>
+<% if monitor.next_check_upcoming? %>
+  <% grace_note = if monitor.grace_period_configured?
+    tag.span "(grace until #{mono_timestamp(monitor.due_with_grace_at)})", class: "text-muted", data: { testid: "next-check-grace" }
+  end %>
+  <% if variant == :dl %>
+    <dt class="text-muted">Next check</dt>
+    <dd class="font-mono" data-testid="next-check">
+      <%= mono_timestamp(monitor.next_due_at) %>
+      <%= grace_note %>
+    </dd>
+  <% else %>
+    <span class="font-mono" data-testid="next-check">
+      next check <%= mono_timestamp(monitor.next_due_at) %>
+      <%= grace_note %>
+    </span>
+  <% end %>
+<% end %>

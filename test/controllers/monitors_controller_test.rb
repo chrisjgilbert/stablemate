@@ -1,6 +1,8 @@
 require "test_helper"
 
 class MonitorsControllerTest < ActionDispatch::IntegrationTest
+  include MonitorsHelper
+
   setup do
     @alice = users(:alice)
     @bob = users(:bob)
@@ -126,4 +128,70 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     end
     assert_redirected_to monitors_path
   end
+
+  # "Next check" surfaces next_due_at for an actively-up monitor, on both the
+  # dashboard row and the detail page, with an additional grace note only when
+  # a grace period is actually configured — a zero grace period would just
+  # repeat the same timestamp twice.
+  test "index and show display the next-check time with a grace note when grace_period_seconds > 0" do
+    sign_in @alice
+
+    get monitors_path
+    assert_response :success
+    assert_match mono_timestamp(@alices.next_due_at), response.body
+    assert_match mono_timestamp(@alices.due_with_grace_at), response.body
+
+    get monitor_path(@alices)
+    assert_response :success
+    assert_select "[data-testid='next-check']"
+    assert_select "[data-testid='next-check-grace']"
+  end
+
+  test "show hides the grace note when grace_period_seconds is 0" do
+    monitor = create_monitor(status: "up", next_due_at: 50.minutes.from_now, grace_period_seconds: 0)
+    sign_in @alice
+    get monitor_path(monitor)
+
+    assert_response :success
+    assert_select "[data-testid='next-check']"
+    assert_select "[data-testid='next-check-grace']", false
+  end
+
+  test "index and show omit next-check for a monitor that has never been pinged" do
+    sign_in @alice
+    assert_no_next_check(monitors(:pending))
+  end
+
+  test "index and show omit next-check for down, paused, and suspended monitors" do
+    sign_in @alice
+    @alice.monitors.delete_all # stay within the per-user cap
+
+    %w[down paused suspended].each do |status|
+      assert_no_next_check create_monitor(status:, next_due_at: 50.minutes.from_now)
+    end
+  end
+
+  # A monitor stays "up" (not yet swept to down) for the whole grace window
+  # after next_due_at passes — next_due_at is stale during that window, so it
+  # must not render as though it's still upcoming.
+  test "index and show omit next-check once next_due_at has passed, even while still up and within grace" do
+    sign_in @alice
+    assert_no_next_check create_monitor(status: "up", next_due_at: 2.minutes.ago, last_ping_at: 2.hours.ago)
+  end
+
+  private
+    def create_monitor(status:, next_due_at:, grace_period_seconds: 300, last_ping_at: 10.minutes.ago)
+      @alice.monitors.create!(name: "#{status.capitalize} monitor", expected_interval_seconds: 3600,
+                               grace_period_seconds:, status:, last_ping_at:, next_due_at:)
+    end
+
+    def assert_no_next_check(monitor)
+      get monitors_path
+      assert_select "##{ActionView::RecordIdentifier.dom_id(monitor, :row)}" do
+        assert_select "[data-testid='next-check']", false
+      end
+
+      get monitor_path(monitor)
+      assert_select "[data-testid='next-check']", false
+    end
 end
