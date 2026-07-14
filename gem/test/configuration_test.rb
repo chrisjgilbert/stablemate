@@ -21,6 +21,12 @@ class ConfigurationTest < StablemateTest
     refute config.enabled_in?("development")
   end
 
+  # Boot registration is ON by default — the gem's headline behaviour is
+  # zero-config auto-registration from recurring.yml.
+  def test_register_on_boot_defaults_true
+    assert Stablemate::Configuration.new.register_on_boot
+  end
+
   # nil restores key-presence-only gating for hosts that want it everywhere.
   def test_nil_environments_enables_everywhere
     config = Stablemate::Configuration.new

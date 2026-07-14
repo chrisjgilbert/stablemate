@@ -31,6 +31,19 @@ module Stablemate
       nil
     end
 
+    # Read-only: load the caller's existing monitors' ping URLs (GET /monitors)
+    # into the cache WITHOUT registering anything from recurring.yml. This is the
+    # register_on_boot = false path — Layer 1 can still map job -> URL for monitors
+    # the user manages themselves. Returns the cache on success, or nil on failure
+    # (logged, swallowed — boot continues).
+    def refresh_ping_urls!
+      cache_ping_urls(@client.list_monitors)
+      Stablemate.ping_urls
+    rescue StandardError => e
+      log_warn("ping-url refresh failed: #{e.class}: #{e.message}")
+      nil
+    end
+
     private
       attr_reader :config
 

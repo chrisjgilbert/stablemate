@@ -31,13 +31,23 @@ module Stablemate
 
       registrar = Registrars::SolidQueueRecurring.new
       registration = Registration.new(registrar:)
-      registration.sync!
 
-      # Pass a bounded re-sync so a ping rejected after a token rotation refreshes
+      # Layer 2 on boot. With register_on_boot on (default) we upsert monitors
+      # from recurring.yml; with it off we only load existing monitors' ping URLs
+      # read-only, so the gem never creates or edits monitors from recurring.yml
+      # but Layer 1 still has URLs to ping. The same callable backs the
+      # stale-ping resync below, so a rotated token refreshes URLs via whichever
+      # path the host opted into (never upserting when registration is off).
+      load_ping_urls = -> {
+        Stablemate.config.register_on_boot ? registration.sync! : registration.refresh_ping_urls!
+      }
+      load_ping_urls.call
+
+      # Pass the bounded refresh so a ping rejected after a token rotation reloads
       # the cached URLs (the subscriber throttles it to once per interval).
       Execution::Subscriber.new(
         class_to_keys: registrar.class_to_keys,
-        resync: -> { registration.sync! }
+        resync: load_ping_urls
       ).subscribe!
     rescue StandardError => e
       Stablemate.logger.warn("[stablemate] boot wiring skipped: #{e.class}: #{e.message}")

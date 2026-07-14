@@ -7,11 +7,11 @@ Status legend: 🟢 code already exists · 🟡 code exists but needs ops/config
 🔴 not built yet · ⚪ decision needed · ✅ done.
 
 > **Progress (2026-07-14):** git-source install path built, verified, and
-> documented (**B/Path 2 ✅**). Postmark SMTP wired and confirmed reaching
-> Postmark from prod — sends are currently **held pending Postmark account
-> approval** (seen in the Activity feed), so DNS + inbox smoke-test are the
-> remaining email work. **C** (gem toggle), **Path 1** publish, **D/E/F** still
-> open.
+> documented (**B/Path 2 ✅**). Gem `register_on_boot` toggle built + tested +
+> documented (**C ✅**). Postmark SMTP wired and confirmed reaching Postmark from
+> prod — sends are currently **held pending Postmark account approval** (seen in
+> the Activity feed), so DNS + inbox smoke-test are the remaining email work.
+> **Path 1** publish and **D/E/F** still open.
 
 ---
 
@@ -21,7 +21,7 @@ Status legend: 🟢 code already exists · 🟡 code exists but needs ops/config
 |---|---|
 | Email needs confirming (SMTP Postmark setup) | 🟡 **In progress.** The email-*verification* feature was already built and non-blocking (`UserMailer#verification`, signed token, `EmailVerificationsController`). Postmark SMTP is now **wired and reaching Postmark** from prod (confirmed via the Activity feed), and `From`/`Reply-To` are set to `alerts@`/`support@stablemate.dev` via env. Remaining: **Postmark account approval** (currently blocking real sends), DNS (SPF/DKIM/DMARC), and a delivered-to-inbox smoke test. |
 | The gem needs publishing | 🟡 **Unblocked via git source.** `stablemate` is still at `0.1.0` and not on RubyGems, but the interim **git-source install is set up, verified, and documented** (`docs/integrating.md`, `gem/README.md`) — a second app can install it today. Publishing to RubyGems (Path 1) is still optional/open. |
-| Add an option to turn off "auto-sync from Solid Queue config" | 🔴 **True — doesn't exist.** Boot sync (Layer 2) always runs when `api_key` is set and the env is allowed. The only way to stop it today is to withhold the API key (which also kills Layer 1 pings) or exclude the environment. There's no dedicated `register_on_boot`/`auto_sync` toggle. |
+| Add an option to turn off "auto-sync from Solid Queue config" | ✅ **Built.** New `register_on_boot` config flag (default `true`, so no behaviour change). Set `false` and boot skips the `recurring.yml` upsert entirely — instead it loads existing monitors' ping URLs read-only via `GET /monitors`, so Layer 1 pings still fire against monitors you manage yourself. Tested + documented in `gem/README.md` / `docs/integrating.md`. |
 
 ---
 
@@ -37,10 +37,12 @@ DNS, and a real delivered send.
       both `SMTP_USERNAME`/`SMTP_PASSWORD`.) ✅
 - [x] **Set `From`/`Reply-To`.** Now `Stablemate <alerts@stablemate.dev>` /
       `support@stablemate.dev` via `STABLEMATE_MAIL_FROM`/`_REPLY_TO`. ✅
-      - [ ] *Cleanup:* the mailer's hardcoded default still reads
-            `chris@chrisgilbert.dev` with a `TODO` (`app/mailers/application_mailer.rb:8-9`,
-            and the matching one in `config/initializers/pay.rb:32`). The env vars
-            override it, so this is cosmetic — tidy the default + drop the TODO.
+      - [x] *Cleanup done (on `main`):* the `chris@chrisgilbert.dev` placeholder +
+            TODO are gone — `application_mailer.rb` now uses
+            `ENV.fetch("STABLEMATE_MAIL_FROM")` (no default) and `pay.rb` sets
+            `support@stablemate.dev`. ⚠️ Note the no-default `ENV.fetch` **raises on
+            boot** if `STABLEMATE_MAIL_FROM`/`_REPLY_TO` are unset — they're set in
+            `deploy.yml`, so prod is fine, but a local/self-host boot must set them.
 - [ ] **Get the Postmark account approved.** ← *current blocker.* Sends are held
       pending approval (confirmed in the Activity feed): a pending account can only
       send to addresses on its **own** verified domain, so alerts to
@@ -90,32 +92,27 @@ DNS, and a real delivered send.
 
 ---
 
-## C. Gem: add an "auto-sync off" toggle 🔴
+## C. Gem: "auto-sync off" toggle ✅
 
-Today the railtie (`gem/lib/stablemate/railtie.rb:28-44`) always runs boot
-registration + attaches the subscriber whenever `api_key` is set and the env is
-allowed. Add a dedicated switch so an app can keep Layer 1 pinging (or nothing)
-without registering from `recurring.yml` on every boot.
+Shipped as `register_on_boot` (default `true`, so existing installs are
+unchanged). Design chosen: **one boolean** — when `false`, boot does **not**
+upsert from `recurring.yml`, but it still loads existing monitors' ping URLs
+read-only via `GET /monitors` and attaches the Layer 1 subscriber, so
+successful runs still check in against monitors you manage yourself. (This
+avoids the footgun of a naive gate: the ping-URL cache is per-process and
+boot-populated, so simply skipping `sync!` would have silently killed Layer 1
+too.) The stale-ping resync uses the same read-only path when registration is
+off, so it never upserts unexpectedly.
 
-- [ ] Add `attr_accessor :register_on_boot` to
-      `gem/lib/stablemate/configuration.rb`, default `true`. (Name it for what it
-      gates — boot registration — not the vaguer "auto_sync".)
-- [ ] In the railtie, gate only the **Layer 2** call on it, e.g.
-      `registration.sync! if Stablemate.config.register_on_boot`, and still build
-      `class_to_keys` / attach the Layer 1 subscriber. Decide whether the
-      subscriber should also respect the flag or only `ping_on_success`.
-- [ ] Keep `rails stablemate:sync` as the manual registration path (it already
-      ignores the env gate).
-- [ ] Tests: `configuration_test.rb` for the default; a railtie/registration test
-      that `register_on_boot = false` skips the boot `sync!` but leaves the
-      subscriber wired.
-- [ ] Document the flag in `gem/README.md`'s config table and `docs/integrating.md`.
-
-> Design note to confirm ⚪: do you want the toggle to mean "don't register on
-> boot, but I'll run `stablemate:sync` in my deploy" (most common), or a full
-> "don't touch anything, Layer 1 only against manually-created monitors"? The
-> first is one boolean; the second is two (`register_on_boot` + relying on
-> `ping_on_success`).
+- [x] `attr_accessor :register_on_boot`, default `true` (`configuration.rb`). ✅
+- [x] `Client#list_monitors` (`GET /api/v1/monitors`) +
+      `Registration#refresh_ping_urls!` (read-only URL load). ✅
+- [x] Railtie picks `sync!` vs `refresh_ping_urls!` by the flag; subscriber +
+      `class_to_keys` always wired; `resync` uses the same chosen path. ✅
+- [x] `rails stablemate:sync` unchanged as the explicit manual registration path. ✅
+- [x] Tests: config default + `refresh_ping_urls!` caches from the list without
+      posting + refresh failure swallowed (56 gem tests green). ✅
+- [x] Documented in `gem/README.md`'s config table and `docs/integrating.md`. ✅
 
 ---
 
@@ -177,14 +174,15 @@ jobs," and your actual goal is a second app checking in.
 
 ## Suggested order
 
-Done: **B/Path 2** (git-source install) and the SMTP wiring in **A/D**.
+Done: **B/Path 2** (git-source install), **C** (gem toggle), and the SMTP wiring
++ From/Reply-To cleanup in **A/D**.
 
 1. **A** — get the Postmark account **approved** (the current email blocker), then
    publish DNS (DKIM / Return-Path / DMARC) and run the real inbox smoke-test.
-2. **C** (gem toggle) — small, self-contained code change; land it before wiring
-   the second app so you can choose boot-sync vs. manual `stablemate:sync`.
-3. **E** — wire the second app via the git-source gem and verify end-to-end
+2. **E** — wire the second app via the git-source gem and verify end-to-end
    (monitors appear → `pending→up` on a real run → stop a job → `down` email).
-4. **D** — finish any outstanding deploy secrets/checks.
-5. **F** (flip the caps / decide billing) when you're happy it all works.
-6. **B/Path 1** (RubyGems publish) — optional, before inviting other installers.
+   Decide per app whether to leave `register_on_boot` on (auto-register from
+   `recurring.yml`) or off (manage monitors yourself).
+3. **D** — finish any outstanding deploy secrets/checks.
+4. **F** (flip the caps / decide billing) when you're happy it all works.
+5. **B/Path 1** (RubyGems publish) — optional, before inviting other installers.

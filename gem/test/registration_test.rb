@@ -60,4 +60,32 @@ class RegistrationTest < StablemateTest
     Stablemate::Registration.new(registrar: empty, client:, app: "x").sync!
     assert_empty client.synced
   end
+
+  # refresh_ping_urls! (the register_on_boot = false path) caches ping URLs from a
+  # read-only GET /monitors WITHOUT upserting anything from recurring.yml — so
+  # Layer 1 still pings monitors the user manages themselves.
+  def test_refresh_caches_urls_from_list_without_posting
+    list = {
+      "monitors" => [
+        { "registration_key" => "daily_digest", "ping_url" => "https://sm.test/ping/abc" },
+        { "registration_key" => "CleanupJob",   "ping_url" => "https://sm.test/ping/xyz" }
+      ]
+    }
+    client = Stablemate::FakeClient.new(list_response: list)
+
+    cache = Stablemate::Registration.new(registrar:, client:).refresh_ping_urls!
+
+    assert_empty client.synced, "refresh must not POST /monitors/sync"
+    assert_equal 1, client.listed, "refresh should GET the monitor list once"
+    assert_equal "https://sm.test/ping/abc", cache["daily_digest"]
+    assert_equal "https://sm.test/ping/xyz", Stablemate.ping_urls["CleanupJob"]
+  end
+
+  # A failed list refresh is swallowed (returns nil) — boot never crashes.
+  def test_refresh_failure_is_swallowed
+    failing = Object.new
+    def failing.list_monitors = raise(Stablemate::Client::Error, "boom")
+
+    assert_nil Stablemate::Registration.new(registrar:, client: failing).refresh_ping_urls!
+  end
 end

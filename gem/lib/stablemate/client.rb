@@ -32,6 +32,19 @@ module Stablemate
       JSON.parse(response.body)
     end
 
+    # GET /api/v1/monitors with bearer auth. Returns the parsed response hash
+    # ({"monitors" => [...]}). Used by the register_on_boot = false path to load
+    # existing monitors' ping URLs read-only, without upserting from recurring.yml.
+    # Raises on a non-2xx / transport error so Registration can log and continue.
+    def list_monitors
+      response = get(api_url("/api/v1/monitors"), headers: bearer_headers)
+      unless response.is_a?(Net::HTTPSuccess)
+        raise Error, "list failed: #{response.code}"
+      end
+
+      JSON.parse(response.body)
+    end
+
     # Fire-and-forget ping to a full ping URL. Best-effort and never raises (the
     # hot path must not break the host app), but it INSPECTS the response instead
     # of assuming success — a 404/429/5xx used to be reported as a delivered ping,
@@ -78,6 +91,12 @@ module Stablemate
         request = Net::HTTP::Post.new(uri)
         headers.each { |k, v| request[k] = v }
         request.body = JSON.generate(body)
+        http_for(uri).request(request)
+      end
+
+      def get(uri, headers:)
+        request = Net::HTTP::Get.new(uri)
+        headers.each { |k, v| request[k] = v }
         http_for(uri).request(request)
       end
 

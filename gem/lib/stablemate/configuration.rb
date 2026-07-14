@@ -25,6 +25,15 @@ module Stablemate
     attr_writer :environment
     # Whether a successful job perform fires a ping.
     attr_accessor :ping_on_success
+    # Whether the railtie auto-registers monitors from config/recurring.yml on
+    # boot (Layer 2). Default true — zero-config auto-registration is the gem's
+    # headline behaviour. Set false when you'd rather manage monitors yourself
+    # (the Stablemate UI, or an explicit `rails stablemate:sync` in your deploy)
+    # and NOT have every boot upsert your recurring.yml. With it off, boot still
+    # attaches the Layer 1 execution subscriber and fetches your existing
+    # monitors' ping URLs read-only (GET /monitors), so successful runs still
+    # check in — the gem just never creates or edits monitors from recurring.yml.
+    attr_accessor :register_on_boot
     # Path to the Solid Queue recurring config (override for tests).
     attr_accessor :recurring_path
     # Network timeout (seconds) for all HTTP calls — kept short; the hot path
@@ -41,6 +50,7 @@ module Stablemate
       @environments = [ "production" ]
       @environment = nil
       @ping_on_success = true
+      @register_on_boot = true
       @recurring_path = "config/recurring.yml"
       @timeout = 2
       @logger = nil

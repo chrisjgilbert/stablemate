@@ -77,6 +77,7 @@ created** monitor whose `registration_key` equals the job class name (e.g.
 | `environments` | `["production"]` | Environments where the railtie auto-wires (boot sync + subscriber). Array, bare string/symbol, or `nil` (= wherever an `api_key` is set). `rails stablemate:sync` runs regardless — but it still reads the *current* environment's `recurring.yml` section, so run it in the environment you mean to register |
 | `environment` | `Rails.env` (else `RAILS_ENV`/`RACK_ENV`, else `development`) | The environment name used by the gate above and for `recurring.yml` section scoping |
 | `ping_on_success` | `true` | Ping when a monitored job completes cleanly |
+| `register_on_boot` | `true` | Auto-register monitors from `recurring.yml` on boot (Layer 2). Set `false` to manage monitors yourself (UI, or an explicit `rails stablemate:sync`) and stop every boot from upserting your `recurring.yml`. With it off, boot still attaches Layer 1 and loads your existing monitors' ping URLs read-only (`GET /monitors`), so successful runs still check in — the gem just never creates or edits monitors from `recurring.yml` |
 | `recurring_path` | `config/recurring.yml` | Solid Queue recurring config |
 | `timeout` | `2` | HTTP timeout (seconds) |
 | `logger` | stderr logger | Where gem warnings go (sync failures, skipped tasks) — set `Rails.logger` to fold into app logs |

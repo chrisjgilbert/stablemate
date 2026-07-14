@@ -79,7 +79,12 @@ Stablemate.configure do |c|
   c.api_key         = Rails.application.credentials.dig(:stablemate, :api_key)
   c.endpoint        = "https://stablemate.dev"   # ← your own domain if self-hosting
   c.ping_on_success = true          # ping when a monitored job finishes cleanly
-  # c.environments  = ["production"]  # default; add "staging" to monitor staging
+  # c.environments   = ["production"] # default; add "staging" to monitor staging
+  # c.register_on_boot = true         # default; false = don't auto-register from
+  #                                   # recurring.yml on boot (manage monitors
+  #                                   # yourself / run `rails stablemate:sync`).
+  #                                   # Layer 1 pings still fire against your
+  #                                   # existing monitors.
   # c.recurring_path = "config/recurring.yml"  # default
   # c.timeout        = 2                        # HTTP timeout, seconds
 end
