@@ -23,8 +23,8 @@
     <% ticks = monitor.mini_ticks(kinds: local_assigns[:mini_ticks]) %>
     <span data-testid="mini-ticks"><%= render "shared/mini_ticks", checks: ticks %></span>
     <span class="font-mono">every <%= humanize_seconds(monitor.expected_interval_seconds) %></span>
-    <span class="font-mono">
-      <%= monitor.last_ping_at ? "#{time_ago_in_words(monitor.last_ping_at)} ago" : "never pinged" %>
+    <span class="font-mono" data-testid="last-seen">
+      <%= monitor.last_ping_at ? "last seen #{humanize_duration_since(monitor.last_ping_at)} ago" : "never seen" %>
     </span>
     <%= render "monitors/next_check", monitor: monitor, variant: :row %>
   </div>

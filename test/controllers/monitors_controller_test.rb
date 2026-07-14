@@ -177,6 +177,17 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_no_next_check create_monitor(status: "up", next_due_at: 2.minutes.ago, last_ping_at: 2.hours.ago)
   end
 
+  # "last seen" pairs with "next in" on the crowded dashboard row (both
+  # compact, both labeled) instead of the old bare, verbose "X minutes ago".
+  test "index shows last seen for a pinged monitor and never seen for one that hasn't been" do
+    sign_in @alice
+    get monitors_path
+
+    assert_response :success
+    assert_match "last seen #{humanize_duration_since(@alices.last_ping_at)} ago", response.body
+    assert_match "never seen", response.body
+  end
+
   private
     def create_monitor(status:, next_due_at:, grace_period_seconds: 300, last_ping_at: 10.minutes.ago)
       @alice.monitors.create!(name: "#{status.capitalize} monitor", expected_interval_seconds: 3600,

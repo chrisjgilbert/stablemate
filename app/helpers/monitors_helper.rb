@@ -63,12 +63,18 @@ module MonitorsHelper
     time.utc.strftime(format)
   end
 
-  # Compact countdown to a future time ("22h", "45m", "3d") — rounded to the
-  # nearest unit, for the dashboard row's tight horizontal space. Unlike
-  # humanize_seconds (which only formats exact config values), this rounds an
-  # arbitrary live duration rather than falling back to raw seconds.
-  def humanize_duration_until(time)
-    secs = (time - Time.current).round
+  # Compact, rounded-to-nearest-unit duration ("22h", "45m", "3d") for the
+  # dashboard row's tight horizontal space — live countdowns/elapsed-time,
+  # unlike humanize_seconds (which only formats exact config values like the
+  # configured interval, falling back to raw seconds for anything else). A
+  # deliberate hand-roll rather than Rails' distance_of_time_in_words: its
+  # fuzzy buckets ("about 1 hour") are too coarse for the row's tight space,
+  # which wants an exact "22h"/"45m". Clamped to a floor of 0 (never a
+  # negative duration) the same way distance_of_time_in_words swaps its
+  # operands — last_ping_at can land fractionally in the future relative to
+  # this process's clock under multi-host clock skew.
+  def humanize_duration(seconds)
+    secs = [ seconds.round, 0 ].max
     return "#{secs}s" if secs < 60
 
     mins = (secs / 60.0).round
@@ -78,5 +84,15 @@ module MonitorsHelper
     return "#{hours}h" if hours < 24
 
     "#{(secs / 86_400.0).round}d"
+  end
+
+  # Countdown to a future time ("next in 22h").
+  def humanize_duration_until(time)
+    humanize_duration(time - Time.current)
+  end
+
+  # Elapsed time since a past time ("last seen 22h ago").
+  def humanize_duration_since(time)
+    humanize_duration(Time.current - time)
   end
 end
