@@ -1,14 +1,15 @@
 # Projects — first-class grouping for monitors
 
-Status: **draft for review**. Author: Claude (session), 2026-07-14. Owner: @chrisjgilbert.
-Supersedes nothing; extends the V1 data model in [`README.md`](README.md) and
-**amends locked decision #6** (see §3.3). Follow the architecture rulebook in
-[`../../CLAUDE.md`](../../CLAUDE.md).
+Status: **reviewed — decisions resolved (§12); ready to plan the build**. Author:
+Claude (session), 2026-07-14. Owner: @chrisjgilbert. Supersedes nothing; extends the
+V1 data model in [`README.md`](README.md) and **amends locked decision #6** (see §3.3).
+Follow the architecture rulebook in [`../../CLAUDE.md`](../../CLAUDE.md).
 
 > This is a **design spec, not a build spec.** It proposes the shape, names the
-> reuse boundaries, walks every surface the change touches, enumerates the edge
-> cases and assumptions, and lists the decisions that need your sign-off (§12)
-> before anyone writes a migration.
+> reuse boundaries, walks every surface the change touches, and enumerates the edge
+> cases and assumptions. The §12 decisions are now **resolved** — the spec reflects
+> those choices (project-scoped API keys, drop `monitors.user_id`, no default
+> project, per-project key management).
 
 ---
 
@@ -66,8 +67,12 @@ namespaces — and delivers #2 and #3.
   companion gem (per-app), not by a cross-account dashboard client. This is what
   makes **project-scoped API keys** (§5, Design B) the natural fit — a key is "the
   credential for one app."
-- **A3 — a user always has ≥1 project.** Signup provisions a default project; the
-  last project cannot be deleted (§4.2, §6).
+- **A3 — projects are all equal; there is no special/default project.** New users
+  land on an empty state that prompts creating their first project; monitors and API
+  keys always live under a project the user explicitly created. A user may have zero
+  projects (clean empty state). The only auto-created project is the one-time
+  *backfill* project that gives existing users a home for their current monitors
+  (§8) — an ordinary, renameable, deletable project, not a flagged one.
 - **A4 — existing monitors' original app attribution is unknowable.** The `app`
   string was never persisted, so the backfill cannot reconstruct which app each
   legacy monitor came from — they all land in one **Default** project (§8). This is
@@ -118,15 +123,14 @@ identity* layer; the operational machinery is untouched:
 
 ```
 ### `Project`
-`id`, `user_id`, `name`, `slug`, ⊕ `default` (bool, default false), timestamps.
+`id`, `user_id`, `name`, `slug`, timestamps.
 
 - `slug` ≡ `name.parameterize`, set at creation and STABLE thereafter (it is the
-  gem/status-page identity; renaming changes `name` only). Backfilled "Default".
-- `default` marks the signup/auto-provisioned project — the home for manual
-  monitors before a user makes a second project, and the scope legacy API keys
-  migrate to (§8). Exactly one per user.
-- Indexes: `(user_id, slug)` unique; `(user_id) WHERE default` unique (one default
-  per user); `user_id`.
+  gem/status-page identity; renaming changes `name` only).
+- **No "default" flag — projects are all equal** (§12-C). The backfill gives existing
+  users one ordinary project named "Default"; new users create their first project
+  explicitly.
+- Indexes: `(user_id, slug)` unique; `user_id`.
 ```
 
 `slug` follows the app's established partial-unique-index idiom (`README.md:159`).
@@ -169,12 +173,9 @@ create_table :projects do |t|
   t.references :user, null: false, foreign_key: true
   t.string :name, null: false
   t.string :slug, null: false
-  t.boolean :default, null: false, default: false
   t.timestamps
 end
 add_index :projects, [ :user_id, :slug ], unique: true
-add_index :projects, :user_id, unique: true, where: "\"default\"",
-          name: "index_projects_one_default_per_user"
 
 # 2. Add nullable project_id to monitors + api_keys.
 add_reference :monitors, :project, foreign_key: true            # nullable for now
@@ -182,7 +183,7 @@ add_reference :api_keys, :project, foreign_key: true
 
 # 3. Backfill (data migration): one Default project per user, then repoint.
 User.find_each do |u|
-  p = Project.create!(user: u, name: "Default", slug: "default", default: true)
+  p = Project.create!(user: u, name: "Default", slug: "default")   # ordinary project
   u.monitors.update_all(project_id: p.id)   # all legacy monitors → Default
   u.api_keys.update_all(project_id: p.id)   # all legacy keys → Default
 end
@@ -198,10 +199,6 @@ remove_column :monitors, :user_id
 remove_column :api_keys, :user_id
 ```
 
-> `default` is a reserved-ish word; the partial-index predicate quotes it
-> (`WHERE "default"`). Consider naming the column `is_default` to avoid the
-> friction (§12-C).
-
 ---
 
 ## 4 · Domain design (architecture-compliant)
@@ -214,7 +211,6 @@ app/models/
   project.rb                     # the entity: name, slug, associations
   project/
     monitor_sync.rb              # operation: bulk upsert (MOVED from user/)
-    default_provisioning.rb      # operation: create a user's first project
   user.rb                        # has_many :projects; :monitors through projects
   user/
     plan.rb                      # cap: counts monitors across projects (§7)
@@ -281,12 +277,14 @@ The upsert operation moves onto the noun that now owns the monitors and the
   compose — this spec changes the *receiver* (User→Project) and lookup scope; that
   one grows the *whitelist*. Land whichever first; the other rebases trivially.
 
-### 4.4 `Project::DefaultProvisioning` + signup
+### 4.4 Onboarding (no auto-provisioned project)
 
-Every user must always have a project (A3). Provision the default in the same
-transaction as user creation. Options (§12-D): a `User after_create` callback
-(smallest, "sparingly" per conventions) vs. threading it through the registration
-path. Either way the backfill (§3.5 step 3) provisions it for existing users.
+There is no special/default project (§12-C). A brand-new user lands on an
+empty-state dashboard prompting "Create your first project"; monitor creation and
+API-key generation both require a project, so the empty state routes into project
+creation. Existing users get a one-time ordinary "Default" project from the backfill
+(§8, §3.5) so their current monitors have a home — nothing auto-creates a project for
+*new* signups, and there is no default to maintain.
 
 ### 4.5 `User` (changes)
 
@@ -383,11 +381,12 @@ See §12-A for the decision.
   `ProjectsController#index/show/new/create/edit/update/destroy`. `show` is the
   per-project monitor list + its API keys.
   - **Rename** updates `name` only; `slug` stays (status-page/gem identity).
-  - **Delete** cascades the project's monitors (confirmation required — it destroys
-    monitoring history). **Blocked** if it is the user's only project (A3) or the
-    `default` project unless another is promoted (§12-C).
+  - **Delete** cascades the project's monitors and keys (confirmation required — it
+    destroys monitoring history). No last-project special-casing: a user may delete
+    down to zero projects and land back on the empty state.
 - **Create a monitor** (`monitors_controller.rb:24-37`): the form gains a
-  **project selector** (pre-selected to the `default`/last-used project). Create via
+  **project selector** (pre-selected to the most-recently-used project; if the user
+  has none, the flow routes to create one first). Create via
   `@project.monitors.new(...)` — the `params.permit` list adds `:project_id` (scoped
   to `current_user.projects` to prevent cross-tenant assignment). A per-project
   "New monitor" button pre-fills the project.
@@ -441,7 +440,7 @@ Per-project caps (e.g. as a paid lever) are explicitly **out of scope** (§12-F)
 
 The risky part; phased to keep `bin/ci` green at every step (§11).
 
-1. **Provision Default projects** (one per user, `default: true`, slug `"default"`).
+1. **Provision one project per user** (ordinary, name "Default", slug `"default"`).
 2. **Assign all legacy monitors** to their user's Default (`update_all`). Lossless:
    the old `(user_id, registration_key)` uniqueness guaranteed no dup keys within a
    user, so `(project_id=Default, registration_key)` is still unique — the new index
@@ -468,9 +467,9 @@ The risky part; phased to keep `bin/ci` green at every step (§11).
   hijack, and the fix is obvious (one key per app). Call it out in docs.
 - **Empty-name / `"app"`-fallback apps.** Irrelevant under B (identity is the key,
   not the string). Under A they'd all collapse to one project — another mark against A.
-- **Signup during rollout.** New users created between Phase 1 and Phase 2 must get a
-  Default project too — wire `Project::DefaultProvisioning` in the same deploy as the
-  backfill (§4.4).
+- **Signup during rollout.** New users need no special handling — with no
+  auto-provisioned project, a new signup simply starts at the empty state and creates
+  a project when they add their first monitor or key.
 
 ---
 
@@ -507,8 +506,7 @@ set `project_id`, and after the swap there is no `user_id` to set). API keys sta
 minted in-test, now via `ApiKey.issue(project:, name:)`.
 
 - **[model] Project** — slug generation/immutability, `(user_id, slug)` uniqueness,
-  one-default-per-user, `dependent: :destroy` cascade to monitors→children, cannot
-  delete last project.
+  `dependent: :destroy` cascade to monitors→children, deletable down to zero.
 - **[model] Project::MonitorSync** — port every scenario from
   `monitor_sync_test.rb:11-163` to project scope; **add**: same `registration_key`
   in two projects of one user coexists (the collision-fix proof); the user-row lock
@@ -529,7 +527,7 @@ minted in-test, now via `ApiKey.issue(project:, name:)`.
   - create a monitor into a chosen project;
   - move a monitor between projects (Turbo);
   - generate a project-scoped API key (shown-once modal);
-  - delete a project (confirmation; blocked on the last one);
+  - delete a project (confirmation; may delete down to zero → empty state);
   - regression: the existing S3/S4/S5/S7/S8/S17/S18 monitor flows
     (`system/monitors_test.rb`, `monitor_edit_delete_test.rb`) still pass with a
     Default project present.
@@ -542,9 +540,9 @@ Each phase is independently deployable and keeps `bin/ci` (incl. `test:system`)
 green.
 
 1. **Schema + backfill (additive).** Create `projects`; add nullable
-   `monitors.project_id` + `api_keys.project_id`; backfill Default projects and
-   repoint; wire `Project::DefaultProvisioning` for new signups. `user_id` still
-   present and authoritative. No behaviour change yet.
+   `monitors.project_id` + `api_keys.project_id`; backfill one "Default" project per
+   user and repoint monitors + keys. `user_id` still present and authoritative. No
+   behaviour change yet.
 2. **Domain + API cutover.** `Project` model + associations; `User has_many :through`;
    `Project::MonitorSync` (moved); `Monitor belongs_to :project` with
    `delegate :user`; API base controller resolves key→project; creation sites move to
@@ -560,36 +558,31 @@ green.
 
 ---
 
-## 12 · Open decisions — need your call
+## 12 · Decisions (resolved)
 
-- **A · Identity/auth model — Design B (project-scoped keys) vs A (user-scoped keys +
-  synced project name).** **Recommendation: B.** It scopes both the write and the
-  *read* path with zero gem change, is fully backward-compatible, and avoids the
-  migration re-home/duplicate problem; A needs gem protocol changes on both paths and
-  a stable `config.project`. The only thing B gives up is an *account-wide* API key
-  (a key sees one project) — acceptable given A2, and addable later as a distinct key
-  type. **DECIDED: —** (awaiting your sign-off.)
-- **B · Drop `monitors.user_id`, or keep it denormalised?** Recommendation: **drop
-  it** (single source of truth: `monitor → project → user`; `has_many :through`
-  covers every read; `delegate :user` covers `monitor.user`). Keeping a denormalised
-  `user_id` avoids a JOIN on the hot cap-count and de-risks the migration, at the cost
-  of a consistency invariant (`monitor.user_id == project.user_id`) you must enforce.
-  Pick drop for correctness, keep for a smaller/safer diff.
-- **C · The `default` project + its column.** Include a `default` (or `is_default`,
-  to dodge the reserved word) boolean with one-per-user, used for signup, legacy-key
-  scoping, and manual-create pre-selection? Recommendation: **yes, `is_default`** —
-  it simplifies three things and gives the delete-guard a clean predicate. Deleting
-  the default must promote another (or be blocked).
-- **D · Where to provision the signup default** — `User after_create` callback
-  (smallest) vs. the registration path/coordinator. Recommendation: **callback**,
-  noted as a justified use of the "sparingly" allowance.
-- **E · API-key management location** — per-project (under `projects/:id`) vs. a
-  global keys page grouped by project. Recommendation: **per-project** (matches "a key
-  is for one app"); keep a redirect from the old `settings/api_keys`.
-- **F · Per-project caps.** Out of scope for V1 (cap stays per-user). Confirm you
-  don't want a per-project limit now.
-- **G · Per-project alert routing.** Out of scope for V1 (alerts go to the owner).
-  Confirm.
-- **H · `Project` namespacing.** Top-level `Project` (no stdlib collision; it's an
-  account-level entity that also owns API keys) vs. `Monitoring::Project` (groups with
-  `Monitoring::Monitor`). Recommendation: **top-level `Project`**.
+Resolved with the owner, 2026-07-14 — the four material choices plus the deferred/minor ones.
+
+- **A · Identity/auth model. DECIDED: B — project-scoped API keys.** Each key belongs
+  to one project; the key *is* the app identity. Scopes both the write and *read* path
+  with zero gem change, fully backward-compatible, no migration re-home/duplicate
+  problem. Gives up an *account-wide* API key (a key sees one project) — acceptable
+  (A2), addable later as a distinct key type.
+- **B · `monitors.user_id`. DECIDED: drop it.** Single source of truth
+  (`monitor → project → user`); `has_many :through` covers every read; `delegate :user`
+  covers `monitor.user`. The larger, more careful migration is worth the correctness.
+- **C · A special/default project? DECIDED: no.** Projects are all equal — no
+  `default`/`is_default` flag, no one-per-user index, no delete-guard. New users create
+  their first project via empty-state onboarding; manual-create pre-selects the
+  most-recently-used project; a user may delete down to zero projects. The backfill
+  gives existing users one ordinary "Default" project (a one-time home for current
+  monitors, not a flagged concept).
+- **D · Signup provisioning. DECIDED: none** (consequent to C). Nothing auto-creates a
+  project on signup; the empty state routes the user into creating their first project
+  when they add a monitor or key.
+- **E · API-key management location. DECIDED: per-project** (under `projects/:id`) —
+  matches "a key is for one app"; keep a redirect from the old `settings/api_keys`.
+- **F · Per-project caps. DECIDED: out of scope for V1** (the cap stays per-user).
+- **G · Per-project alert routing. DECIDED: out of scope for V1** (alerts go to the
+  project owner).
+- **H · `Project` namespacing. DECIDED: top-level `Project`** (no stdlib collision; an
+  account-level entity that also owns API keys).
