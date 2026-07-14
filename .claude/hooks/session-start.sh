@@ -15,6 +15,70 @@ cd "${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 log() { echo "[session-start] $*"; }
 
+# --- PostgreSQL helpers ----------------------------------------------------
+# The web container ships a Postgres cluster but may leave it stopped, and the
+# default config/database.yml connects over the socket as the OS user (no
+# username set), so a matching login role must exist. These bring both up so
+# db:prepare — and the pre-push bin/ci hook — work without manual steps. All
+# steps are best-effort: a failure warns and the session continues.
+
+# Run psql as the postgres superuser. Bootstrap path: the OS user has no role
+# yet, so we can't connect as ourselves until ensure_db_role has run.
+pg_admin() {
+  if command -v sudo >/dev/null 2>&1; then
+    sudo -u postgres psql "$@"
+  else
+    su -s /bin/sh -c "psql $*" postgres
+  fi
+}
+
+pg_ready() { pg_isready -q >/dev/null 2>&1; }
+
+ensure_postgres_running() {
+  command -v pg_isready >/dev/null 2>&1 || return 0
+
+  if pg_ready; then
+    log "PostgreSQL already running."
+    return 0
+  fi
+
+  log "PostgreSQL not running — starting it…"
+  if command -v pg_lsclusters >/dev/null 2>&1 && command -v pg_ctlcluster >/dev/null 2>&1; then
+    # Debian/Ubuntu packaging: start every stopped cluster (pg_ctlcluster VER NAME).
+    pg_lsclusters 2>/dev/null | awk 'NR>1 && $4 ~ /down/ { print $1, $2 }' | \
+      while read -r ver name; do
+        pg_ctlcluster "$ver" "$name" start >/dev/null 2>&1 || true
+      done
+  elif command -v service >/dev/null 2>&1; then
+    service postgresql start >/dev/null 2>&1 || true
+  fi
+
+  # Bounded wait for the socket to accept connections.
+  for _ in $(seq 1 15); do
+    pg_ready && break
+    sleep 1
+  done
+
+  if pg_ready; then
+    log "PostgreSQL is up."
+  else
+    log "WARNING: could not start PostgreSQL; db:prepare may fail."
+  fi
+}
+
+ensure_db_role() {
+  pg_ready || return 0
+  # Peer/socket auth maps the OS user to a same-named role; create it (superuser,
+  # so db:create/migrate work) if absent. Idempotent.
+  local role="${PGUSER:-$(id -un)}"
+  if pg_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname = '${role}'" 2>/dev/null | grep -q 1; then
+    return 0
+  fi
+  log "Creating PostgreSQL login role '${role}'…"
+  pg_admin -c "CREATE ROLE \"${role}\" WITH LOGIN SUPERUSER;" >/dev/null 2>&1 \
+    || log "WARNING: could not create role '${role}'; db:prepare may fail."
+}
+
 # --- Ruby gems -------------------------------------------------------------
 if [ -f Gemfile ]; then
   if command -v bundle >/dev/null 2>&1; then
@@ -40,6 +104,12 @@ fi
 # Prepare the dev + test DBs so the suite can run. Non-fatal: if Postgres isn't
 # reachable in this environment, we warn rather than break the session.
 if [ -f bin/rails ] && [ -f config/database.yml ]; then
+  # Make sure the server is up and a login role exists before db:prepare.
+  if command -v psql >/dev/null 2>&1; then
+    ensure_postgres_running
+    ensure_db_role
+  fi
+
   log "Preparing databases (bin/rails db:prepare)…"
   if ! bin/rails db:prepare; then
     log "WARNING: db:prepare failed (is PostgreSQL running?). Continuing."
