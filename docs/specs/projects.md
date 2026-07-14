@@ -1,7 +1,7 @@
 # Projects — first-class grouping for monitors
 
-Status: **pressure-tested — blocking revisions required before build (see §13)**.
-Author: Claude (session), 2026-07-14. Owner: @chrisjgilbert. Supersedes nothing; extends the
+Status: **pressure-tested; findings resolved — ready to build (see §13 resolution
+note)**. Author: Claude (session), 2026-07-14. Owner: @chrisjgilbert. Supersedes nothing; extends the
 V1 data model in [`README.md`](README.md) and **amends locked decision #6** (see §3.3).
 Follow the architecture rulebook in [`../../CLAUDE.md`](../../CLAUDE.md).
 
@@ -70,14 +70,11 @@ namespaces — and delivers #2 and #3.
 - **A3 — projects are all equal; there is no special/default project.** New users
   land on an empty state that prompts creating their first project; monitors and API
   keys always live under a project the user explicitly created. A user may have zero
-  projects (clean empty state). The only auto-created project is the one-time
-  *backfill* project that gives existing users a home for their current monitors
-  (§8) — an ordinary, renameable, deletable project, not a flagged one.
-- **A4 — existing monitors' original app attribution is unknowable.** The `app`
-  string was never persisted, so the backfill cannot reconstruct which app each
-  legacy monitor came from — they all land in one **Default** project (§8). This is
-  lossless (the old per-user uniqueness guaranteed no dupes within that set) and,
-  under Design B, seamless for the gem.
+  projects (clean empty state). No project is auto-created.
+- **A4 — no production data (pre-launch).** The app is unlaunched (DECIDED §12-I), so
+  the migration is **destructive with no backfill** (§8) and there are no existing gem
+  installs to keep working — the phased-rollout and re-home concerns the earlier draft
+  carried are moot.
 - **A5 — alerts stay user-level in V1.** `down`/`recovered` emails go to the
   project's owner. Per-project notification routing is future (§12-G).
 - **A6 — the public ping hot path and detection are untouched.** They key on
@@ -123,29 +120,30 @@ identity* layer; the operational machinery is untouched:
 
 ```
 ### `Project`
-`id`, `user_id`, `name`, `slug`, timestamps.
+`id`, `user_id`, `name`, timestamps.
 
-- `slug` ≡ `name.parameterize`, set at creation and STABLE thereafter (it is the
-  gem/status-page identity; renaming changes `name` only).
-- **No "default" flag — projects are all equal** (§12-C). The backfill gives existing
-  users one ordinary project named "Default"; new users create their first project
-  explicitly.
-- Indexes: `(user_id, slug)` unique; `user_id`.
+- **No `slug` in V1** (§13-S3): under Design B the gem identity is the API key, not a
+  slug, and status pages are V2 — a slug identifies nothing today, and deriving it from
+  `name` breaks creation on colliding/emoji names. Add it in the V2 status-page spec
+  if/when public URLs need it.
+- **No "default" flag — projects are all equal** (§12-C). New users create their first
+  project explicitly.
+- Indexes: `(user_id, name)` unique; `user_id`.
 ```
-
-`slug` follows the app's established partial-unique-index idiom (`README.md:159`).
-`(user_id, slug)` is a *full* unique index (slug is never null).
 
 ### 3.2 `Monitor` (changes)
 
-- **Add** `project_id` (bigint, FK to `projects`, `null: false` after backfill).
-- **Drop** `user_id` (ownership now flows `monitor → project → user`; see §12-B for
-  the denormalised-keep alternative).
-- **Swap** the unique index: drop `index_monitors_on_user_and_registration_key`,
-  add `(project_id, registration_key) WHERE registration_key IS NOT NULL` (same
-  partial-index shape, new anchor). This is the collision fix.
-- Keep everything else (`ping_token` unique, `next_due_at`, `(status,
-  next_due_at)`).
+- **Add** `project_id` (bigint, FK to `projects`, `NOT NULL` from the start — no prod
+  data to backfill, §8).
+- **Drop** `user_id` and its FK (ownership flows `monitor → project → user`; DECIDED
+  §12-B).
+- **Swap** the unique index to `(project_id, registration_key) WHERE registration_key
+  IS NOT NULL` (same partial-index shape, project anchor). This is the collision fix.
+- ⊕ **Add** `last_synced_app` (string, null) — advisory metadata: the free-text `app`
+  the gem sends on sync. On a sync UPDATE where the stored value differs from the
+  incoming one, flag the monitor ("synced by two apps under one project key"). This is
+  the shared-key detection the collision fix otherwise lacks (§13-B3).
+- Keep everything else (`ping_token` unique, `next_due_at`, `(status, next_due_at)`).
 
 ### 3.3 Amend locked decision #6
 
@@ -159,45 +157,46 @@ project-scoped index.
 
 ### 3.4 `ApiKey` (changes — Design B)
 
-- **Add** `project_id` (FK, `null: false` after backfill); **drop** `user_id`.
+- **Add** `project_id` (FK, `NOT NULL` from the start — no prod data, §8); **drop**
+  `user_id` and its FK.
 - `belongs_to :project`; `user` delegates through the project.
 - `token_digest` stays globally unique (`README.md:145`); auth still resolves a raw
-  `sm_live_…` token to one key row (`api_key/authentication.rb:24-34`) — that key
-  now yields a **project**, not a user. See §5.
+  `sm_live_…` token to one key row (`api_key/authentication.rb:24-34`) — that key now
+  yields a **project**, not a user. See §5. `ApiKey.issue(project:, name:)` replaces
+  `issue(user:)`, and the standalone `settings/api_keys` **create** action is removed —
+  issuance is reachable only from a `projects/:id` context (§13-S9).
 
-### 3.5 Migration sketch (phased — see §11 for ordering)
+### 3.5 Migration sketch (one destructive migration — no prod data, §8)
+
+The app is unlaunched, so there is **no production data to preserve** (DECIDED §12-I).
+This is ONE destructive migration that installs the target schema directly — no
+nullable-then-enforce, no backfill, no dual-write, no `CONCURRENTLY`. It runs against
+empty tables (dev DBs are reset; CI loads the schema), so `null: false` references are
+safe. `db/seeds.rb` is rewritten to seed a project.
 
 ```ruby
-# 1. Create projects.
 create_table :projects do |t|
   t.references :user, null: false, foreign_key: true
   t.string :name, null: false
-  t.string :slug, null: false
   t.timestamps
 end
-add_index :projects, [ :user_id, :slug ], unique: true
+add_index :projects, [ :user_id, :name ], unique: true    # no slug in V1 (§3.1)
 
-# 2. Add nullable project_id to monitors + api_keys.
-add_reference :monitors, :project, foreign_key: true            # nullable for now
-add_reference :api_keys, :project, foreign_key: true
+# Monitors + keys belong to a project from the start; user_id is gone.
+add_reference :monitors, :project, null: false, foreign_key: true
+add_reference :api_keys,  :project, null: false, foreign_key: true
+remove_reference :monitors, :user, foreign_key: true
+remove_reference :api_keys,  :user, foreign_key: true
+add_column :monitors, :last_synced_app, :string           # advisory (§3.2, §13-B3)
 
-# 3. Backfill (data migration): one Default project per user, then repoint.
-User.find_each do |u|
-  p = Project.create!(user: u, name: "Default", slug: "default")   # ordinary project
-  u.monitors.update_all(project_id: p.id)   # all legacy monitors → Default
-  u.api_keys.update_all(project_id: p.id)   # all legacy keys → Default
-end
-
-# 4. Enforce + swap (separate migration, after code deploys — §11 Phase 4).
-change_column_null :monitors, :project_id, false
-change_column_null :api_keys, :project_id, false
+# Collision fix: uniqueness is project-scoped.
 remove_index :monitors, name: "index_monitors_on_user_and_registration_key"
 add_index :monitors, [ :project_id, :registration_key ], unique: true,
           where: "registration_key IS NOT NULL",
           name: "index_monitors_on_project_and_registration_key"
-remove_column :monitors, :user_id
-remove_column :api_keys, :user_id
 ```
+
+Intentionally **not reversible** — fine pre-launch.
 
 ---
 
@@ -208,7 +207,7 @@ operations are entity-scoped operation objects; no `app/services/`):
 
 ```
 app/models/
-  project.rb                     # the entity: name, slug, associations
+  project.rb                     # the entity: name, associations
   project/
     monitor_sync.rb              # operation: bulk upsert (MOVED from user/)
   user.rb                        # has_many :projects; :monitors through projects
@@ -230,28 +229,27 @@ class Project < ApplicationRecord
   has_many :monitors, class_name: "Monitoring::Monitor", dependent: :destroy
   has_many :api_keys, dependent: :destroy
 
-  before_validation :set_slug, on: :create
-  validates :name, presence: true
-  validates :slug, presence: true, uniqueness: { scope: :user_id }
+  validates :name, presence: true, uniqueness: { scope: :user_id }
 
   def sync_monitors(entries:) = MonitorSync.new(self).call(entries:)
-  # …rename/default helpers…
+  # …rename helper…
 end
 ```
 
+- No `slug` (§3.1). `name` is the only identifier and is unique per user.
 - `dependent: :destroy` on `:monitors` reuses the monitor's existing cascade
   (`monitor.rb:32-35` already destroys ping_events/incidents/notifications/
-  uptime_day_stats). So `project.destroy` → monitors → their children. And
+  uptime_day_stats). So `project.destroy` → monitors → their children, and
   `user.destroy` → projects → monitors → children — which also cleanly serves the
-  **account-deletion** blocker (see the launch work).
-- `slug` set once (`set_slug`), immutable after create — it is the gem/status-page
-  identity.
+  **account-deletion** launch blocker. (For high-volume children, prefer a DB-level
+  `ON DELETE CASCADE` or batched purge over Rails `dependent: :destroy` — §13-S10.)
 
 ### 4.2 `Monitoring::Monitor` (changes)
 
 - `belongs_to :project` replaces `belongs_to :user`. Add `delegate :user, to:
-  :project` so `monitor.user` (used by `within_monitor_cap`, mailers, broadcasts)
-  keeps working unchanged.
+  :project, allow_nil: true` so `monitor.user` (used by `within_monitor_cap`, mailers,
+  broadcasts) keeps working — `allow_nil` avoids a `NoMethodError` on a monitor built
+  before its project is set (§13 minor).
 - `within_monitor_cap` (`monitor.rb:102-107`) references `user` → now
   `project.user`; the cap check itself is unchanged (§7).
 - Creation moves to project scope: `@project.monitors.new(...)` (see §6, §5).
@@ -279,12 +277,11 @@ The upsert operation moves onto the noun that now owns the monitors and the
 
 ### 4.4 Onboarding (no auto-provisioned project)
 
-There is no special/default project (§12-C). A brand-new user lands on an
-empty-state dashboard prompting "Create your first project"; monitor creation and
-API-key generation both require a project, so the empty state routes into project
-creation. Existing users get a one-time ordinary "Default" project from the backfill
-(§8, §3.5) so their current monitors have a home — nothing auto-creates a project for
-*new* signups, and there is no default to maintain.
+There is no special/default project (§12-C) and no backfill (§8 — no prod data). A
+brand-new user lands on an empty-state dashboard prompting "Create your first project"
+(§6, §13-S6); monitor creation and API-key generation both require a project, so the
+empty state routes into project creation. Nothing auto-creates a project on signup, and
+there is no default to maintain.
 
 ### 4.5 `User` (changes)
 
@@ -373,42 +370,44 @@ See §12-A for the decision.
 
 ## 6 · UI / UX (Hotwire-first, server-driven)
 
-- **Nav** (`layouts/application.html.erb:21-32`): add a **Projects** entry (or make
-  the existing "Monitors" a project-aware view). Section-active logic already keys
-  on `controller_path`.
-- **Dashboard** (`monitors/index.html.erb`): group the monitor rows **by project**
-  (headed sections), reusing `monitors/_row.html.erb` unchanged. Keep the existing
-  active/suspended split within each project group. The cap display (`count /
-  current_user.monitor_limit`, `index.html.erb:8-9`) stays **user-level** (§7) — the
-  count sums across projects.
-- **Project CRUD** — standard REST (`resources :projects`):
-  `ProjectsController#index/show/new/create/edit/update/destroy`. `show` is the
-  per-project monitor list + its API keys.
-  - **Rename** updates `name` only; `slug` stays (status-page/gem identity).
-  - **Delete** cascades the project's monitors and keys (confirmation required — it
-    destroys monitoring history). No last-project special-casing: a user may delete
-    down to zero projects and land back on the empty state.
-- **Create a monitor** (`monitors_controller.rb:24-37`): the form gains a
-  **project selector** (pre-selected to the most-recently-used project; if the user
-  has none, the flow routes to create one first). Create via
-  `@project.monitors.new(...)` — the `params.permit` list adds `:project_id` (scoped
-  to `current_user.projects` to prevent cross-tenant assignment). A per-project
-  "New monitor" button pre-fills the project.
-- **Move a monitor between projects** — a sub-resource, not a custom verb (CLAUDE.md
-  rule 4): `resource :project, only: :update, module: :monitors` →
-  `Monitors::ProjectsController#update` → `Monitoring::Monitor::Transfer`. Edge: if
-  the target project already has a monitor with the same `registration_key`, the new
-  index rejects it — surface a clear error rather than a 500 (§ edge cases). Moving a
-  **gem-synced** monitor out of the project its key syncs into means the next sync
-  re-creates it in the key's project — so moving is meaningful mainly for **manual**
-  monitors; document it.
-- **API keys** move under the project (Design B): a project's `show` page lists its
-  masked keys + "Generate key" (reusing the shown-once modal). The old
-  `settings/api_keys` page (`api_keys_controller.rb`) either becomes a
-  grouped-by-project view or is replaced by per-project management (§12-E).
+- **Nav** (`layouts/application.html.erb:21-32`): add a **Projects** entry; the "API
+  keys" nav link now points at `projects#index` (keys are per-project — §13-S9).
+- **First run / zero projects** (§13-S6): a new user has no projects, so the dashboard
+  shows a **create-first-project** empty state (not today's monitor-centric one). Both
+  "add a monitor" and "connect the gem" route through project creation first, and the
+  gem copy changes from "your jobs register themselves, no setup" to "create a project,
+  copy its API key into your app" — under Design B a key is required before the gem does
+  anything.
+- **Dashboard** (`monitors/index.html.erb`): with ≥1 project, group monitor rows **by
+  project** (headed sections), reusing `_row.html.erb`. Keep the active/suspended split
+  within each group. Cap display (`count / current_user.monitor_limit`,
+  `index.html.erb:8-9`) stays **user-level** (§7). If a project has monitors skipped at
+  the cap, show a per-project "N skipped — account at cap" banner (§13-S5) — the
+  `limit_reached` signal must live in the UI, not only the gem log.
+- **Project CRUD** — standard REST (`resources :projects`). `show` = the project's
+  monitor list + its API keys.
+  - **Rename** updates `name` (the only identifier; no slug in V1).
+  - **Delete** cascades the project's monitors + all ping/uptime history + keys.
+    Irreversible, so require a **strong confirmation** (type the project name), not a
+    bare dialog (§13-S4). A user may delete down to zero projects → empty state.
+- **Create a monitor** (`monitors_controller.rb:24-37`): the form gains a **project
+  selector** (pre-selected to the user's most-recent project by `created_at`; if none,
+  route to create one first). Create via `@project.monitors.new(...)`; `params.permit`
+  adds `:project_id` scoped to `current_user.projects` (no cross-tenant assignment). A
+  per-project "New monitor" button pre-fills the project.
+- **Move a monitor** — a sub-resource, not a custom verb (CLAUDE.md rule 4):
+  `resource :project, only: :update, module: :monitors` → `Monitors::ProjectsController
+  #update` → `Monitoring::Monitor::Transfer`. **Only `source: "manual"` monitors are
+  movable** (DECIDED §12-I): a gem monitor belongs to whichever project its key syncs
+  into, so the UI blocks moving it (a moved gem monitor would just be re-created in the
+  key's project on the next sync). To reorganize gem monitors, re-point the app's key at
+  the target project's key. A transfer that would collide on `(project_id,
+  registration_key)` in the target is rejected with a clear error, not a 500.
+- **API keys** live under the project (Design B): the project `show` page lists masked
+  keys + "Generate key" (shown-once modal), issued via `ApiKey.issue(project:)`. The
+  standalone `settings/api_keys` **create** action is removed (§13-S9).
 
-Every user-facing flow above ships a **browser-driven system test** (CLAUDE.md;
-§10).
+Every user-facing flow above ships a **browser-driven system test** (CLAUDE.md; §10).
 
 ---
 
@@ -422,16 +421,23 @@ projects. **No cap logic changes**; only the association path underneath it does
 
 - `within_monitor_cap` (`monitor.rb:102-107`) now reads `project.user.at_monitor_cap?`.
 - **Sync budgeting**: `Project::MonitorSync` reads `project.user.remaining_monitor_slots`
-  and locks the **user** row (§4.3) so two apps of one user syncing concurrently
-  can't both consume the last slot. Edge: if app A's monitors already fill the
-  user's cap, app B's new monitors come back `skipped: limit_reached` — correct
-  per-user behaviour; document it so it isn't mistaken for a bug.
-- **Downgrade "choose your 5"** (`user/downgrade.rb`): the keep-count is still
+  and locks the **user** row (§4.3) so two apps of one user syncing concurrently can't
+  both consume the last slot. (The lock serializes sync-vs-sync; the pre-existing
+  web-create-vs-sync check-then-act TOCTOU is unchanged, not worsened — §13 minor.)
+  Edge: if app A's monitors fill the user's cap, app B's new monitors come back
+  `skipped: limit_reached` — correct per-user behaviour; **surface it as a per-project
+  banner in the UI** (§6, §13-S5), not only in the gem log.
+- **Voluntary downgrade "choose your 5"** (`user/downgrade.rb`): keep-count is still
   `FREE_PLAN_MONITOR_LIMIT` and `active_scope` is `@user.monitors.counting_toward_cap`
-  (`downgrade.rb:79-80`) — now spanning projects. The **choose-5 picker UI must group
-  candidates by project** so the user can reason about what they're keeping.
-  Suspended monitors stay in their own project. `resolve_choice!`/`enforce_free_cap!`
-  operate on monitor instances and need no logic change.
+  (`downgrade.rb:79-80`) — now spanning projects. The **choose-5 picker UI groups
+  candidates by project** (preload `.includes(:project)` to avoid N+1). Suspended
+  monitors stay in their project. `resolve_choice!` needs no logic change.
+- **Involuntary downgrade** (card failure) — DECIDED §12-J, Option 1 (simplest):
+  `enforce_free_cap!` keeps the *oldest* over-cap monitors across projects as a
+  **temporary default** (no logic change), and the existing `awaiting_downgrade_choice`
+  flag forces the user into the project-grouped picker to make the real selection.
+  Accept the transient window (card-fail → next login, in which a newer project may be
+  fully suspended) as inherent to any auto-suspend, bounded by dunning emails.
 - **Subscription** (`user/subscription.rb`): `restore_suspended_monitors!` reactivates
   `user.monitors.where(status: "suspended")` up to remaining slots — works unchanged
   across projects.
@@ -440,40 +446,30 @@ Per-project caps (e.g. as a paid lever) are explicitly **out of scope** (§12-F)
 
 ---
 
-## 8 · Migration & backfill
+## 8 · Migration (destructive — pre-launch, no production data)
 
-The risky part; phased to keep `bin/ci` green at every step (§11).
+**DECIDED (§12-I): the app is unlaunched, so there is no production data to preserve —
+the migration is a single destructive schema change, not a phased backward-compatible
+rollout.** This collapses the phased-rollout hazards the pressure test raised (§13-B1,
+S1, S2, S7): they existed only to protect a live, populated table.
 
-1. **Provision one project per user** (ordinary, name "Default", slug `"default"`).
-2. **Assign all legacy monitors** to their user's Default (`update_all`). Lossless:
-   the old `(user_id, registration_key)` uniqueness guaranteed no dup keys within a
-   user, so `(project_id=Default, registration_key)` is still unique — the new index
-   builds cleanly.
-3. **Assign all legacy API keys** to the Default project (Design B). Existing
-   single-app installs are seamless: the key is scoped to Default, and all their
-   monitors are in Default, so sync keeps matching and GET keeps returning the same
-   set — **no re-home, no duplicates**.
-4. **Enforce** `NOT NULL` + swap the unique index + drop `monitors.user_id` /
-   `api_keys.user_id` — only *after* the code that reads `project_id` is deployed
-   (§11 Phase 4).
+- **One migration** (§3.5): create `projects`, add `project_id NOT NULL` to `monitors`
+  and `api_keys`, drop `user_id`, install the project-scoped unique index, add
+  `last_synced_app`. No nullable-then-enforce, no backfill, no `CONCURRENTLY`, no
+  dual-write, no straggler re-backfill — the tables are empty at migration time.
+- **Dev/staging DBs are reset** (`bin/rails db:reset`), not migrated. `db/seeds.rb` is
+  rewritten to create a `Project` and seed `project.monitors.create!` (§13-H1).
+- **No "Default"/backfill ceremony** — there are no existing rows to re-home and no
+  existing gem installs, so the earlier transition edge cases (already-collided users,
+  legacy shared keys, re-home duplicates) are all moot.
+- The real work is **not** the migration; it's the **call-site + test conversion**
+  (§13-B2): the 4 app build sites, ~20 test sites, and `db/seeds.rb` all move to
+  `project.monitors` / `project.api_keys` in the same PR. `bin/ci` is green at the
+  **end** of that PR — there is no intermediate phase to keep green (§11).
 
-### Transition edge cases
-
-- **The already-collided multi-app user.** Someone syncing two apps into one account
-  today has *already* lost data to the collision (one merged monitor per key). The
-  backfill preserves that current state (all in Default). To separate them going
-  forward they create a second project + key and point app B at it; app B's next
-  sync creates fresh, correctly-namespaced monitors. We cannot retroactively
-  un-merge history (A4) — document this in the release notes.
-- **Legacy key + two apps still sharing it.** Under B a shared key ⇒ shared project
-  ⇒ the collision persists *within that project*. This is now a visible
-  misconfiguration ("two apps, one project key") rather than a silent cross-app
-  hijack, and the fix is obvious (one key per app). Call it out in docs.
-- **Empty-name / `"app"`-fallback apps.** Irrelevant under B (identity is the key,
-  not the string). Under A they'd all collapse to one project — another mark against A.
-- **Signup during rollout.** New users need no special handling — with no
-  auto-provisioned project, a new signup simply starts at the empty state and creates
-  a project when they add their first monitor or key.
+> The **shared-key collision** (§13-B3) is a *runtime*, not a migration, concern: a
+> future user who copies one API key into two apps still collides within that project.
+> `last_synced_app` (§3.2) detects and flags it. That fix ships with the feature.
 
 ---
 
@@ -489,7 +485,7 @@ The risky part; phased to keep `bin/ci` green at every step (§11).
   `current_project.sync_monitors(entries:)`. Request/response envelope unchanged
   (`api.md:99-136`) so old gems keep working.
 - **Read** (`GET /api/v1/monitors`, `:id`): unchanged shape, now project-scoped by
-  the key. Optionally add `"project": {slug, name}` to `monitor_json`
+  the key. Optionally add `"project": {id, name}` to `monitor_json`
   (`base_controller.rb:74-88`) for API consumers — the gem ignores it.
 - **Rotate** (`POST /api/v1/monitors/:id/rotate`): unchanged, now project-scoped.
 - **Key management**: `ApiKey.issue(project:, name:)` replaces `issue(user:, name:)`
@@ -503,14 +499,15 @@ The risky part; phased to keep `bin/ci` green at every step (§11).
 ## 10 · Testing plan (system tests non-negotiable — CLAUDE.md)
 
 New **fixtures** (establishing precedent — today only `users.yml` + `monitors.yml`
-exist): `test/fixtures/projects.yml` (a Default per fixture user, e.g.
-`alices_default`, `bobs_default`); update `monitors.yml` to reference
-`project: alices_default` instead of `user: alice` (fixtures insert via raw SQL —
-set `project_id`, and after the swap there is no `user_id` to set). API keys stay
-minted in-test, now via `ApiKey.issue(project:, name:)`.
+exist): `test/fixtures/projects.yml` (one project per fixture user, e.g.
+`alices_default`, `bobs_default`, loaded before `monitors.yml`); `monitors.yml`
+references `project: alices_default` and **drops** `user:` (fixtures insert via raw
+SQL; since the destructive migration removes `monitors.user_id` in the same PR, there
+is no `user_id` to set — no dual-phase fixture juggling, §13-S7 is moot under §8). API
+keys stay minted in-test, now via `ApiKey.issue(project:, name:)`.
 
-- **[model] Project** — slug generation/immutability, `(user_id, slug)` uniqueness,
-  `dependent: :destroy` cascade to monitors→children, deletable down to zero.
+- **[model] Project** — `(user_id, name)` uniqueness, `dependent: :destroy` cascade to
+  monitors→children, deletable down to zero.
 - **[model] Project::MonitorSync** — port every scenario from
   `monitor_sync_test.rb:11-163` to project scope; **add**: same `registration_key`
   in two projects of one user coexists (the collision-fix proof); the user-row lock
@@ -534,31 +531,33 @@ minted in-test, now via `ApiKey.issue(project:, name:)`.
   - delete a project (confirmation; may delete down to zero → empty state);
   - regression: the existing S3/S4/S5/S7/S8/S17/S18 monitor flows
     (`system/monitors_test.rb`, `monitor_edit_delete_test.rb`) still pass with a
-    Default project present.
+    project present.
+
+The **non-negotiable, unbudgeted test work** (§13-B2): the ~20 `user.monitors
+.create!/.build` sites across ~16 files, the 6 `ApiKey.issue(user:)` callers, and
+`db/seeds.rb` all convert to project scope in the same PR as the association flip.
 
 ---
 
-## 11 · Rollout / phasing
+## 11 · Rollout (one PR — no phasing, no prod data)
 
-Each phase is independently deployable and keeps `bin/ci` (incl. `test:system`)
-green.
+Because the migration is destructive and there is no live data to protect (§8),
+there is **no phased, independently-deployable rollout** and no "green at every phase"
+constraint — the whole change lands in **one PR**, `bin/ci` green at its end. Split
+into review-sized commits for readability, not for deployability:
 
-1. **Schema + backfill (additive).** Create `projects`; add nullable
-   `monitors.project_id` + `api_keys.project_id`; backfill one "Default" project per
-   user and repoint monitors + keys. `user_id` still present and authoritative. No
-   behaviour change yet.
-2. **Domain + API cutover.** `Project` model + associations; `User has_many :through`;
-   `Project::MonitorSync` (moved); `Monitor belongs_to :project` with
-   `delegate :user`; API base controller resolves key→project; creation sites move to
-   project scope. Reads still identical to users.
-3. **UI.** Projects nav, grouped dashboard, project CRUD, monitor-create project
-   selector, move-monitor sub-resource, per-project API-key management. System tests
-   per flow.
-4. **Enforce + drop.** `NOT NULL` on `project_id`; swap the unique index to
-   `(project_id, registration_key)`; drop `monitors.user_id` + `api_keys.user_id`.
-   Update `README.md` #6 and the data-model block (§3.3).
-5. **Gem (optional, back-compat).** Doc "one key per project"; optionally stop
-   sending the ignored `app`; version bump. No forced upgrade.
+1. **Schema + models.** The destructive migration (§3.5); `Project` + associations;
+   `User has_many :through`; `Monitor belongs_to :project` + `delegate :user`;
+   `ApiKey belongs_to :project`; `Project::MonitorSync` (moved).
+2. **Cutover.** API base controller resolves key→project; **every** build/create site
+   (4 app + ~20 test + `db/seeds.rb`, §13-B2) moves to project scope; fixtures gain
+   `projects.yml` and drop `user:`.
+3. **UI.** Projects nav, first-run/zero-project empty state, grouped dashboard, project
+   CRUD (+ strong delete confirm), monitor-create project selector, move-monitor
+   sub-resource (manual-only), per-project API keys, cap-skip banner. System test per
+   flow.
+4. **Docs.** Update `README.md` #6 + the data-model block (§3.3); gem README "one key
+   per project."
 
 ---
 
@@ -576,10 +575,9 @@ Resolved with the owner, 2026-07-14 — the four material choices plus the defer
   covers `monitor.user`. The larger, more careful migration is worth the correctness.
 - **C · A special/default project? DECIDED: no.** Projects are all equal — no
   `default`/`is_default` flag, no one-per-user index, no delete-guard. New users create
-  their first project via empty-state onboarding; manual-create pre-selects the
-  most-recently-used project; a user may delete down to zero projects. The backfill
-  gives existing users one ordinary "Default" project (a one-time home for current
-  monitors, not a flagged concept).
+  their first project via empty-state onboarding; manual-create pre-selects the user's
+  most-recent project (by `created_at`); a user may delete down to zero projects. No
+  backfill exists (§8 — no prod data).
 - **D · Signup provisioning. DECIDED: none** (consequent to C). Nothing auto-creates a
   project on signup; the empty state routes the user into creating their first project
   when they add a monitor or key.
@@ -590,19 +588,17 @@ Resolved with the owner, 2026-07-14 — the four material choices plus the defer
   project owner).
 - **H · `Project` namespacing. DECIDED: top-level `Project`** (no stdlib collision; an
   account-level entity that also owns API keys).
-- **I · Reorganizing existing gem-synced monitors into projects. OPEN (raised by the
-  pressure test — §13-B4).** Splitting the backfilled "Default" into per-app projects
-  has no history-preserving path today: re-keying an app creates fresh `pending`
-  monitors (lost uptime history); the UI move gets re-created in the key's project on
-  the next sync. Options: (a) block/hard-warn the move on `source: "gem"` monitors and
-  ship a server-side "adopt these monitors into project B + rebind a key" flow; or
-  (b) accept that gem monitors are un-reorganizable in V1 and say so loudly in the UI
-  (not a release note). **Needs your call.**
-- **J · Involuntary-downgrade project-awareness. OPEN (§13-S8).** `enforce_free_cap!`
-  keeps the *oldest* monitors across all projects, so a card failure can silently
-  suspend an entire newer app. Is cross-project suspension acceptable (keep the simple
-  age rule), or must the involuntary path be project-aware (e.g. keep at least one per
-  project, or prompt)? **Needs your call.**
+- **I · Reorganizing gem-synced monitors + the migration. DECIDED.** Two parts:
+  (1) *migration* — the app is unlaunched, so **be destructive**: no prod data to
+  preserve, no backfill, one destructive migration (§8, §3.5). (2) *runtime* — gem
+  monitors are **not movable** in V1: a gem monitor belongs to whichever project its
+  API key syncs into; the UI blocks moving it and tells the user to re-point the app's
+  key (§6). Only `source: "manual"` monitors move between projects. (A history-
+  preserving "adopt + rebind key" flow can come later if demand appears.)
+- **J · Involuntary-downgrade project-awareness. DECIDED: Option 1 (simplest).** Keep
+  the age-based auto-suspend (oldest over-cap across projects) as a *temporary default*;
+  the existing `awaiting_downgrade_choice` project-grouped picker is the real selection
+  (§7). Accept the transient window; no per-project fairness logic.
 
 ---
 
@@ -610,9 +606,22 @@ Resolved with the owner, 2026-07-14 — the four material choices plus the defer
 
 Five adversarial reviews — migration safety, auth/identity, `has_many :through` blast
 radius, UX/gem edges, completeness — 2026-07-14, each grounded in file:line evidence.
-The **core data-model shape survived** (see *Held*, end); the failures cluster in
+The **core data-model shape survived** (see *Held*, end); the failures clustered in
 migration mechanics, the `through`-association blast radius, and edges the draft waved
 off with "document it." Ranked.
+
+> **Resolution status (owner decisions folded in, 2026-07-14).** The findings below are
+> the *original* reports; here is what happened to each:
+> - **Resolved by "destroy & rebuild, no prod data" (§8/§11):** B1, B4-migration, S1,
+>   S2, S7 — the phased-rollout hazards are gone (one destructive migration).
+> - **Folded into the spec:** B2 (§4.5 count corrected + §10/§11 conversion work item),
+>   B3 (`last_synced_app` advisory flag, §3.2), B4-runtime (gem monitors non-movable,
+>   §6/§12-I), S3 (slug dropped, §3.1), S4 (strong delete confirm, §6), S5 (cap-skip UI
+>   banner, §6/§7), S6 (first-run empty state + gem copy, §6), S8/§12-J (Option 1), S9
+>   (settings/api_keys create removed, §3.4/§6), S10 (cascade note, §4.1), S11 (uptime
+>   composition, §4.3), and the minors (`allow_nil`, most-recent-by-`created_at`).
+> - **Remaining as build-time work (not spec gaps):** the ~26 build-site conversions
+>   (§13-B2) and the `uptime-monitor.md` reconciliation if that ships in the same window.
 
 ### Blocking (a real deploy or the headline use case breaks)
 
