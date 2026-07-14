@@ -64,8 +64,8 @@ env:
     # enables Host-header authorization. Must match the Cloudflare host above.
     STABLEMATE_HOST: <%= ENV.fetch("STABLEMATE_HOST") %>
     STABLEMATE_PROTOCOL: https
-    STABLEMATE_MAIL_FROM: "Stablemate <alerts@stablemate.dev>"
-    STABLEMATE_MAIL_REPLY_TO: support@stablemate.dev
+    STABLEMATE_MAIL_FROM: <%= ENV.fetch("STABLEMATE_MAIL_FROM") %>
+    STABLEMATE_MAIL_REPLY_TO: <%= ENV.fetch("STABLEMATE_MAIL_REPLY_TO") %>
 
     # This box sits behind Cloudflare, so trust CF's edge ranges to recover the
     # real client IP (ping rate limiter + session log). Drop this if you front the
