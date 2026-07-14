@@ -5,10 +5,20 @@ key; your recurring jobs auto-register as monitors and check in on their own.
 
 ## Install
 
+Not on RubyGems yet — install from git. The gem lives in the `gem/`
+subdirectory of the Stablemate repo, so point bundler at the gemspec with
+`glob:`:
+
 ```ruby
 # Gemfile
-gem "stablemate"
+gem "stablemate",
+    git:  "https://github.com/chrisjgilbert/stablemate",
+    glob: "gem/*.gemspec"
 ```
+
+Pin to a `ref:` (commit SHA) or a release `tag:` so a repo push can't change the
+gem under you — without one, bundler tracks the default branch tip. Once it's
+published this becomes the usual `gem "stablemate"`.
 
 ```ruby
 # config/initializers/stablemate.rb

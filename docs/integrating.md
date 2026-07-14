@@ -18,14 +18,37 @@ every successful run. You write no per-job code.
 
 ### 1.1 Add the gem
 
+The gem isn't on RubyGems yet, so install it straight from the git repository.
+Because the gem lives in the `gem/` subdirectory of the Stablemate repo, point
+bundler at the gemspec with `glob:`:
+
 ```ruby
 # Gemfile
-gem "stablemate"
+gem "stablemate",
+    git:  "https://github.com/chrisjgilbert/stablemate",
+    glob: "gem/*.gemspec"
 ```
 
 ```sh
 bundle install
 ```
+
+For reproducibility, pin to a specific commit or release tag so a later push to
+the repo can't silently change the gem under you:
+
+```ruby
+gem "stablemate",
+    git:  "https://github.com/chrisjgilbert/stablemate",
+    glob: "gem/*.gemspec",
+    ref:  "919c0f2"        # a commit SHA, or `tag: "gem-v0.1.0"` once tagged
+```
+
+Without a `ref:`/`tag:` bundler tracks the default branch tip and only moves on
+`bundle update stablemate`. Self-hosting from your own fork? Swap the `git:` URL
+for it.
+
+> Once the gem is published to RubyGems this collapses to `gem "stablemate"` —
+> the git block above is the interim install path.
 
 ### 1.2 Get an API key
 
