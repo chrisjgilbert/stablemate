@@ -7,8 +7,7 @@ Covers database backup/restore, redeploys, and email deliverability (SPF/DKIM).
 
 ## 0 · Pre-launch checklist
 
-Do these before opening sign-ups. (Feature backlog beyond V1 lives in
-[`roadmap.md`](roadmap.md), not here.)
+Do these before opening sign-ups.
 
 - [ ] **SMTP credentials set** — `bin/rails credentials:edit` (`smtp.address`,
       `port`, `user_name`, `password`). Production fails loud at first send if
