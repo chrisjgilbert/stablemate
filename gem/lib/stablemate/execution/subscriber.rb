@@ -48,10 +48,11 @@ module Stablemate
         # On hosts without after_discard this is a silent no-op: error
         # reporting degrades to plain missed-beat detection.
         def install_discard_hook
+          return if @discard_hook
           return unless defined?(::ActiveJob::Base) && ::ActiveJob::Base.respond_to?(:after_discard)
 
-          @discard_hook ||= proc { |job, exception| Stablemate.execution_subscriber&.handle_discard(job, exception) }
-            .tap { |hook| ::ActiveJob::Base.after_discard(&hook) }
+          @discard_hook = proc { |job, exception| Stablemate.execution_subscriber&.handle_discard(job, exception) }
+          ::ActiveJob::Base.after_discard(&@discard_hook)
         end
 
         # Remove the Base-level hook (test/host teardown). Subclasses that
