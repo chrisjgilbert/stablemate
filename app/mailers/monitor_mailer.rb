@@ -15,7 +15,7 @@ class MonitorMailer < ApplicationMailer
     # ONE discriminator, cause-derived, shared by subject and templates — the
     # templates branch on @reported_error too, never on @error presence, so
     # subject and body can't disagree about which alert this is.
-    @reported_error = incident&.cause == "reported_error"
+    @reported_error = incident&.reported_error?
 
     if @reported_error
       @error = incident.error

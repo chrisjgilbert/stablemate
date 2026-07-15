@@ -16,6 +16,13 @@ class Incident < ApplicationRecord
     resolved_at.nil?
   end
 
+  # The job ran and told us it failed, vs the silent missed_ping. ONE predicate
+  # next to CAUSES so the mailer, the banner, and the events feed can't drift
+  # (or typo) the cause string independently.
+  def reported_error?
+    cause == "reported_error"
+  end
+
   # Close the incident now (idempotent: a resolved incident stays put).
   def resolve!(at: Time.current)
     return if resolved_at.present?

@@ -131,6 +131,19 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_equal "Went down — job reported an error", event.label
   end
 
+  # A reported failure's ping and its incident share one timestamp (the incident
+  # opens AT received_at), and sort_by is unstable — the kind tiebreak keeps the
+  # incident narrative leading deterministically.
+  test "recent_events leads with the incident row when it ties its failure ping" do
+    at = 1.minute.ago
+    @monitor.ping_events.create!(received_at: at, kind: "failure", error: "boom")
+    @monitor.incidents.create!(started_at: at, cause: "reported_error", error: "boom")
+
+    kinds = @monitor.recent_events.map(&:kind)
+
+    assert_equal [ :down, :failure ], kinds.first(2)
+  end
+
   # MiniTicks helper: last 16 ping events mapped to up/down ticks.
   test "mini_ticks maps the last 16 ping events to up and down ticks" do
     18.times do |i|

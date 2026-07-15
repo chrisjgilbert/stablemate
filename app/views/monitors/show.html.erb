@@ -38,38 +38,35 @@
 
   <% if open_incident %>
     <%# Active-incident banner (spec §3.4 + job-failure-details.md §9): red,
-        pulsing down dot, cause-aware copy. NO Acknowledge button — incidents
-        are open/resolved only, resolved by a recovering ping.
-        - missed_ping: expected-by / grace elapsed / down for.
-        - reported_error: the error itself instead of expected-by/grace (nothing
-          was late — the job ran and said so), plus the same "Down for" row. %>
+        pulsing down dot, cause-aware copy in ONE shell — only the heading
+        tail, the error block, and the expected-by/grace rows vary by cause.
+        NO Acknowledge button — incidents are open/resolved only, resolved by
+        a recovering ping.
+        - missed_ping: expected-by / grace elapsed / down for. Expected-by is
+          the incident's START (the moment the grace window elapsed), not the
+          live due_with_grace_at — a failure ping on an already-down monitor
+          advances next_due_at, which would render a nonsensical FUTURE
+          "expected by" on an active outage.
+        - reported_error: the error itself instead of expected-by/grace
+          (nothing was late — the job ran and said so). %>
     <div class="rounded-xl border border-down-dot bg-down-bg p-5" data-testid="incident-banner">
-      <% if open_incident.cause == "reported_error" %>
-        <h3 class="flex items-center gap-2 font-display text-base font-bold text-down-text">
-          <span class="w-2 h-2 rounded-full bg-down-dot status-dot-pulse"></span>
-          Monitor is down — the job reported an error
-        </h3>
+      <h3 class="flex items-center gap-2 font-display text-base font-bold text-down-text">
+        <span class="w-2 h-2 rounded-full bg-down-dot status-dot-pulse"></span>
+        Monitor is down — <%= open_incident.reported_error? ? "the job reported an error" : "no ping received" %>
+      </h3>
+      <% if open_incident.reported_error? %>
         <p class="mt-2 max-w-md rounded-lg border border-down-dot/40 px-3 py-2 font-mono text-[13px] text-down-text break-words" data-testid="incident-error"><%= open_incident.error %></p>
-        <dl class="mt-2 grid grid-cols-2 gap-y-1 text-[13px] text-down-text font-mono max-w-md">
-          <dt>Down for</dt>
-          <dd data-testid="down-for"><%= distance_of_time_in_words(open_incident.started_at, Time.current) %></dd>
-        </dl>
-      <% else %>
-        <h3 class="flex items-center gap-2 font-display text-base font-bold text-down-text">
-          <span class="w-2 h-2 rounded-full bg-down-dot status-dot-pulse"></span>
-          Monitor is down — no ping received
-        </h3>
-        <dl class="mt-2 grid grid-cols-2 gap-y-1 text-[13px] text-down-text font-mono max-w-md">
-          <% if @monitor.due_with_grace_at %>
-            <dt>Expected by</dt>
-            <dd data-testid="expected-by"><%= mono_timestamp(@monitor.due_with_grace_at) %></dd>
-          <% end %>
+      <% end %>
+      <dl class="mt-2 grid grid-cols-2 gap-y-1 text-[13px] text-down-text font-mono max-w-md">
+        <% unless open_incident.reported_error? %>
+          <dt>Expected by</dt>
+          <dd data-testid="expected-by"><%= mono_timestamp(open_incident.started_at) %></dd>
           <dt>Grace</dt>
           <dd data-testid="grace-elapsed"><%= humanize_seconds(@monitor.grace_period_seconds) %> elapsed</dd>
-          <dt>Down for</dt>
-          <dd data-testid="down-for"><%= distance_of_time_in_words(open_incident.started_at, Time.current) %></dd>
-        </dl>
-      <% end %>
+        <% end %>
+        <dt>Down for</dt>
+        <dd data-testid="down-for"><%= distance_of_time_in_words(open_incident.started_at, Time.current) %></dd>
+      </dl>
     </div>
   <% end %>
 
