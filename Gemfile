@@ -46,7 +46,7 @@ gem "image_processing", "~> 1.2"
 # subscription state via the pay_* tables — we don't hand-roll it. Dormant unless
 # Stripe keys are configured. [https://github.com/pay-rails/pay]
 gem "pay", "~> 8.3"
-gem "stripe", "~> 13.0"
+gem "stripe", "~> 19.3"
 
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
