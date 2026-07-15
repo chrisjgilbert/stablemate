@@ -69,6 +69,17 @@ module Stablemate
     define_singleton_method(:slack_webhook_url, original)
   end
 
+  # Test-only: force stripe_price_id_pro (read by Stablemate.pro_price_id) for
+  # the duration of a block. Same method-swap pattern as stub_billing/stub_slack
+  # — stripe_price_id_pro is an ENV/credentials-backed method, not a constant.
+  def self.stub_price_id_pro(value)
+    original = method(:stripe_price_id_pro)
+    define_singleton_method(:stripe_price_id_pro) { value }
+    yield
+  ensure
+    define_singleton_method(:stripe_price_id_pro, original)
+  end
+
   # Test-only: force billing_enabled? (and the Stripe keys it reads) for the
   # duration of a block, restoring the originals afterward (exception-safe).
   def self.stub_billing(value)

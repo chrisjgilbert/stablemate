@@ -93,8 +93,10 @@ the rule in [`../../CLAUDE.md`](../../CLAUDE.md).
 ### CI / Definition of Done
 - `bin/rails test` **and** `bin/rails test:system` green; linter
   (`rubocop`/`standard`) clean. **`bin/ci` is the single command that runs all of
-  this**; a PreToolUse hook runs it before every `git push` and blocks on failure
-  (same script runs in GitHub Actions). Don't push red.
+  this**. A PreToolUse hook runs `bin/ci --fast` (skips `test:system`) before
+  every `git push` and blocks on failure; GitHub Actions runs the **full**
+  `bin/ci` on every push/PR — that's the check required to be green before
+  merging. Don't merge red.
 - No N+1 on index/detail pages. Migrations are reversible
   (`bin/rails db:migrate` / `db:rollback` both run). Non-obvious behaviour is
   documented in the relevant view/job/model.

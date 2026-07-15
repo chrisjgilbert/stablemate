@@ -29,9 +29,12 @@ We keep `main` a **clean, linear history**. No merge bubbles, no "wip" noise.
 
 ## Before you push
 
-`git push` is gated: a hook runs **`bin/ci`** (rubocop, brakeman/bundle-audit,
-`rails test`, and `rails test:system`) and **blocks the push if it's red**. The
-same `bin/ci` runs in GitHub Actions. So: run `bin/ci` early and often.
+`git push` is gated: a hook runs **`bin/ci --fast`** (rubocop,
+brakeman/bundle-audit, `rails test` — **not** `rails test:system`, which is
+slow) and **blocks the push if it's red**. GitHub Actions runs the **full**
+`bin/ci` (system tests included) on every push/PR — that's the check required
+to be green before merging. So: run `bin/ci` (no flag) yourself before opening
+a PR if you want the full picture locally.
 
 - **System tests are non-negotiable.** Every key user-facing flow ships a
   browser-driven Capybara system test (see the rule in [`CLAUDE.md`](CLAUDE.md)).

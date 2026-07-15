@@ -4,7 +4,11 @@
 # remote CI are identical. Defensive: the repo starts as docs only, so when the
 # app isn't scaffolded yet this exits 0 instead of failing.
 #
-# Usage: bin/ci
+# Usage: bin/ci [--fast]
+#   --fast  Skip rails test:system (the slow, browser-driven suite). Used by
+#           the local pre-push hook so `git push` stays quick; GitHub Actions
+#           always runs the full suite (system tests included), and that's the
+#           check required to be green before merging.
 set -uo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,6 +18,9 @@ step() { printf '\n\033[1m→ %s\033[0m\n' "$*"; }
 
 fail=0
 note_fail() { fail=1; printf '\033[31m✗ %s failed\033[0m\n' "$1"; }
+
+fast=0
+[ "${1:-}" = "--fast" ] && fast=1
 
 # --- Nothing to do until the app exists ------------------------------------
 if [ ! -f Gemfile ]; then
@@ -62,8 +69,12 @@ if [ -f bin/rails ]; then
   step "rails test (unit + request + job + mailer)"
   bin/rails test || note_fail "rails test"
 
-  step "rails test:system (browser-driven, mandatory)"
-  bin/rails test:system || note_fail "rails test:system"
+  if [ "$fast" -eq 1 ]; then
+    printf '\n→ rails test:system skipped (--fast) — runs in full in GitHub Actions before merge.\n'
+  else
+    step "rails test:system (browser-driven, mandatory in full CI)"
+    bin/rails test:system || note_fail "rails test:system"
+  fi
 fi
 
 # --- Companion gem suite ---------------------------------------------------

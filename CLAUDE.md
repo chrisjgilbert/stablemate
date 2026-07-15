@@ -156,13 +156,18 @@ invoke them at the right moments rather than improvising equivalents.
    test/lint sanity check) via `.claude/hooks/` — see
    [`docs/specs/README.md`](docs/specs/README.md) and the hook script. Don't
    duplicate that setup by hand each session.
-7. **CI gate on push.** `bin/ci` is the single source of truth for "is this
-   green?" — it runs rubocop, brakeman/bundle-audit, `bin/rails test` **and**
-   `bin/rails test:system`. A PreToolUse hook (`.claude/hooks/pre-push-ci.sh`)
-   runs `bin/ci` before every `git push` and **blocks the push if it fails**.
-   Commits are not gated (fast TDD loop); push is the publish boundary. The same
-   `bin/ci` runs in GitHub Actions (`.github/workflows/ci.yml`), so local green ==
-   CI green. Don't push with a red suite, and don't bypass the hook.
+7. **CI gate on push (fast local, full before merge).** `bin/ci` is the single
+   source of truth for "is this green?" — it runs rubocop, brakeman/bundle-audit,
+   `bin/rails test` **and** `bin/rails test:system`. A PreToolUse hook
+   (`.claude/hooks/pre-push-ci.sh`) runs `bin/ci --fast` before every `git push`
+   and **blocks the push if it fails**; `--fast` skips `test:system` (the slow,
+   browser-driven suite) so push stays quick. Commits are not gated (fast TDD
+   loop); push is the publish boundary for the fast subset. **GitHub Actions**
+   (`.github/workflows/ci.yml`) always runs the **full** `bin/ci`, system tests
+   included, on every push and PR — that check being green is the actual
+   requirement before merging into `main` (enforce with a branch-protection
+   required-status-check on `main`, since the local hook no longer covers system
+   tests). Don't merge on a red check, and don't bypass the pre-push hook.
 
 ## Git & commit hygiene
 

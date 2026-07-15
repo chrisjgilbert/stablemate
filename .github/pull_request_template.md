@@ -11,7 +11,7 @@
 
 ## Checks
 
-- [ ] `bin/ci` is green locally (rubocop, brakeman/bundle-audit, `rails test`, `rails test:system`)
+- [ ] `bin/ci` is green (rubocop, brakeman/bundle-audit, `rails test`, `rails test:system`) — pushing only guarantees `bin/ci --fast` (no `test:system`); check the GitHub Actions run for the full result
 - [ ] **Browser-driven system tests** added/updated for any new user-facing flow
       (see the phase spec's "Required system tests")
 - [ ] `/code-review` run on the diff; `/security-review` run if this touches auth,

@@ -5,9 +5,13 @@ on:
     branches: ["main"]
   pull_request:
 
-# Mirrors the local pre-push gate: the same bin/ci runs here so "green locally"
-# means "green in CI". While the repo is docs-only (no Gemfile), bin/ci exits 0
-# and this workflow stays green; once the app is scaffolded the full suite runs.
+# Runs the full bin/ci (system tests included) on every push and PR — this is
+# the authoritative "is main mergeable?" gate; require it as a branch-protection
+# status check on main. The local pre-push hook only runs `bin/ci --fast`
+# (skips test:system) so `git push` stays quick — this workflow is what catches
+# the rest before merge. While the repo is docs-only (no Gemfile), bin/ci exits
+# 0 and this workflow stays green; once the app is scaffolded the full suite
+# runs.
 jobs:
   ci:
     runs-on: ubuntu-latest
