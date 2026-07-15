@@ -11,8 +11,9 @@
      data-confirm-name-name-value="<%= project.name %>">
   <h2 class="text-[14px] font-bold text-down-text">Delete this project</h2>
   <p class="text-[13px] text-muted mt-1 mb-3">
-    This permanently deletes <span class="font-mono font-semibold"><%= project.name %></span>
-    and all its monitors and history. This cannot be undone.
+    This permanently deletes <span class="font-mono font-semibold"><%= project.name %></span>,
+    its <strong><%= pluralize(project.monitors.count, "monitor") %></strong> and all their history,
+    and <strong><%= pluralize(project.api_keys.count, "API key") %></strong>. This cannot be undone.
   </p>
 
   <%= form_with url: project_path(project), method: :delete, class: "space-y-3" do |form| %>

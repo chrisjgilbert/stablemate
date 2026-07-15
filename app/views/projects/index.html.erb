@@ -16,7 +16,9 @@
           <%= link_to project.name, project_path(project),
                 class: "font-mono text-[13px] text-ink truncate hover:text-brand before:absolute before:inset-0" %>
           <span class="font-mono text-[12px] text-muted shrink-0">
-            <%= pluralize(@monitor_counts[project.id] || 0, "monitor") %>
+            <%= pluralize(@monitor_counts[project.id] || 0, "monitor") %> ·
+            <%= pluralize(@key_counts[project.id] || 0, "key") %> ·
+            created <%= time_ago_in_words(project.created_at) %> ago
           </span>
         </div>
       <% end %>

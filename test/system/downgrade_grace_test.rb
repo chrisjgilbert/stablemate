@@ -29,6 +29,10 @@ class DowngradeGraceTest < ApplicationSystemTestCase
 
       # Banner is up on the dashboard; nothing suspended yet.
       assert_selector "[data-testid='downgrade-grace-banner']"
+      within "[data-testid='downgrade-grace-banner']" do
+        # (§11) the banner states the current monitor count.
+        assert_text "You have #{@user.monitors.count} monitor"
+      end
       assert_equal 0, @user.monitors.where(status: "suspended").count
       click_on "Choose monitors"
 

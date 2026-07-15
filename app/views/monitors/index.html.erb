@@ -45,31 +45,43 @@
     <% end %>
   <% end %>
 
-  <%# Group active monitors into one headed section per project that has active
-      rows, reusing monitors/_list. Keyed on the project_id column (no association
-      load), looked up against @projects (§6). %>
+  <%# One headed section per project — every project renders, even with zero active
+      rows, so a project never silently vanishes (§2). Keyed on the project_id
+      column (no association load), looked up against @projects (§6). %>
   <% active_by_project = @monitors.group_by(&:project_id) %>
   <% @projects.each do |project| %>
     <% rows = active_by_project[project.id] || [] %>
-    <% next if rows.empty? %>
     <section class="mb-8" data-testid="project-group">
       <div class="flex items-center justify-between mb-2">
-        <h2 class="text-[13px] font-semibold text-secondary">
-          <%= link_to project.name, project_path(project), class: "hover:text-brand" %>
-        </h2>
-        <span class="font-mono text-[12px] text-muted"><%= rows.size %></span>
+        <div class="flex items-baseline gap-2">
+          <h2 class="text-[13px] font-semibold text-secondary">
+            <%= link_to project.name, project_path(project), class: "hover:text-brand", data: { testid: "project-name" } %>
+          </h2>
+          <span class="font-mono text-[12px] text-muted"><%= rows.size %></span>
+        </div>
+        <% unless at_cap %>
+          <%# Per-project add — pre-fills the create form's project selector (§2). %>
+          <%= link_to "New monitor →", new_monitor_path(monitor: { project_id: project.id }),
+                class: "font-mono text-[12px] text-brand hover:text-brand-hover" %>
+        <% end %>
       </div>
       <% if at_cap %>
         <%# The account is at cap, so new gem jobs into this project are skipped (§13-S5). %>
         <%= render "monitors/cap_skip_banner", project: project %>
       <% end %>
-      <%= render "monitors/list", monitors: rows, mini_ticks: @mini_ticks %>
+      <% if rows.any? %>
+        <%= render "monitors/list", monitors: rows, mini_ticks: @mini_ticks %>
+      <% else %>
+        <%# Zero active monitors: show the group with a next-step hint instead of
+            hiding it — this replaces the account-wide add-your-first CTA (§2). %>
+        <div class="rounded-xl border border-dashed border-border bg-surface-subtle px-4 py-6 text-center text-[13px] text-muted"
+             data-testid="project-empty-hint">
+          No monitors yet —
+          <%= link_to "connect the gem or add one", new_monitor_path(monitor: { project_id: project.id }),
+                class: "text-brand font-medium hover:text-brand-hover" %>.
+        </div>
+      <% end %>
     </section>
-  <% end %>
-
-  <% if @monitors.empty? && @suspended_monitors.empty? %>
-    <%# Has a project but no monitors yet — the monitor-centric add-your-first CTA. %>
-    <%= render "monitors/empty_state" %>
   <% end %>
 
   <% if @suspended_monitors.present? %>
