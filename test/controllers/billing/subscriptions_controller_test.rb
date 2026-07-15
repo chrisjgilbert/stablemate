@@ -12,6 +12,9 @@ class Billing::SubscriptionsControllerTest < ActionDispatch::IntegrationTest
       assert_response :ok
       assert_select "[data-testid='upgrade-button']"
       assert_select "[data-testid='downgrade-link']", false
+      # The upgrade form must opt out of Turbo: it 303s to Stripe's cross-origin
+      # Checkout, which Turbo would follow via fetch() and fail on CORS.
+      assert_select %(form[action="#{billing_checkout_path}"][data-turbo="false"])
     end
   end
 
@@ -23,6 +26,8 @@ class Billing::SubscriptionsControllerTest < ActionDispatch::IntegrationTest
       assert_response :ok
       assert_select "[data-testid='downgrade-link']"
       assert_select "[data-testid='upgrade-button']", false
+      # Same for the portal button — it 303s to Stripe's cross-origin Customer Portal.
+      assert_select %(form[action="#{billing_portal_session_path}"][data-turbo="false"])
     end
   end
 
