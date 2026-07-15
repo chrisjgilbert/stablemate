@@ -8,5 +8,10 @@
 <div class="mb-2 flex items-start gap-2 rounded-lg border border-pending-dot bg-pending-bg px-3 py-2 text-[12px] text-pending-text"
      data-testid="cap-skip-banner">
   <span aria-hidden="true" class="mt-px">▲</span>
-  <span>Account at the monitor limit — new gem jobs in this project won't register until you free up slots.</span>
+  <span class="flex-1">Account at the monitor limit — new gem jobs in this project won't register until you free up slots.</span>
+  <% if current_user.can_upgrade_to_pro? %>
+    <%= link_to "Upgrade to Pro", billing_subscription_path,
+          class: "shrink-0 font-semibold underline hover:no-underline whitespace-nowrap",
+          data: { testid: "cap-skip-upgrade" } %>
+  <% end %>
 </div>

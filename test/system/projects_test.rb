@@ -49,4 +49,17 @@ class ProjectsTest < ApplicationSystemTestCase
     assert_text "Create your first project"
     assert_not Project.exists?(project.id)
   end
+
+  # (§7) the delete confirmation spells out the blast radius with counts.
+  test "the delete confirmation states the blast radius with counts" do
+    project = @alice.projects.sole
+    ApiKey.issue(project: project, name: "CI")
+    sign_in @alice
+    visit edit_project_path(project)
+
+    within "[data-testid='danger-zone']" do
+      assert_text "#{project.monitors.count} monitor"
+      assert_text "#{project.api_keys.count} API key"
+    end
+  end
 end

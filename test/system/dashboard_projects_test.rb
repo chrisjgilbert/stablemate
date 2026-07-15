@@ -68,4 +68,66 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     assert_current_path new_monitor_path
     assert_text "Fresh app"
   end
+
+  # (§3) the first-run card creates the first project INLINE — no extra page load.
+  test "the first-run card creates the first project inline" do
+    bob = users(:bob)
+    bob.projects.destroy_all
+
+    sign_in bob
+    within "[data-testid='create-first-project']" do
+      fill_in "Project name", with: "Inline app"
+      click_on "Create project"
+    end
+
+    # Created and now shown (landed on the project's show page).
+    assert_text "Inline app"
+    assert bob.projects.exists?(name: "Inline app")
+  end
+
+  # (§2) a project with zero active monitors still renders, with an inline hint —
+  # it must not vanish, and the account-wide empty state must not double up.
+  test "a project with no monitors shows an inline hint on the dashboard" do
+    project = @alice.projects.sole
+    project.monitors.delete_all
+
+    sign_in @alice
+    within find("section[data-testid='project-group']", text: project.name) do
+      assert_text "No monitors yet"
+    end
+    # No doubled account-wide empty state — the per-group hint covers it.
+    assert_no_selector "[data-testid='empty-state']"
+  end
+
+  # (§2) each group header links to new-monitor pre-selecting that project.
+  test "a project group header links to new monitor pre-selecting that project" do
+    first = @alice.projects.sole
+    first.monitors.delete_all
+    first.monitors.create!(name: "Alpha job", **ATTRS)
+    target = @alice.projects.create!(name: "Second service")
+    target.monitors.create!(name: "Beta job", **ATTRS)
+
+    sign_in @alice
+    within find("section[data-testid='project-group']", text: "Second service") do
+      click_on "New monitor"
+    end
+
+    # The new-monitor form pre-selects the project we launched from.
+    assert_selector "option[selected]", text: "Second service"
+  end
+
+  # (§8) at the monitor cap the cap-skip banner offers an Upgrade-to-Pro link.
+  test "the cap-skip banner links to upgrade when at the monitor cap" do
+    with_billing_enabled do
+      project = @alice.projects.sole
+      project.monitors.delete_all
+      Stablemate::FREE_PLAN_MONITOR_LIMIT.times { |i| project.monitors.create!(name: "M#{i}", **ATTRS) }
+      assert @alice.reload.at_monitor_cap?
+
+      sign_in @alice
+      within "[data-testid='cap-skip-banner']" do
+        assert_link "Upgrade to Pro", href: billing_subscription_path
+      end
+    end
+  end
 end

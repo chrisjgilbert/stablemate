@@ -15,10 +15,17 @@
     connect the gem with the project's API key.
   </p>
 
-  <div class="mt-5 flex items-center justify-center gap-3">
-    <%= link_to "Create your first project", new_project_path,
-          class: "inline-flex items-center h-9 px-4 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover" %>
-  </div>
+  <%# Inline create (§3): a brand-new user makes their first project without an
+      extra page load. Validation errors still fall back to projects#new. %>
+  <%= form_with model: current_user.projects.new, url: projects_path,
+        class: "mt-5 flex items-center justify-center gap-2",
+        data: { testid: "create-first-project" } do |form| %>
+    <%= form.label :name, "Project name", class: "sr-only" %>
+    <%= form.text_field :name, required: true, placeholder: "Project name",
+          class: "h-9 w-56 px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
+    <%= form.submit "Create project",
+          class: "h-9 px-4 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
+  <% end %>
 
   <div class="mt-8 text-left">
     <p class="text-[11px] font-semibold uppercase tracking-wide text-gem mb-2">Connect the gem</p>

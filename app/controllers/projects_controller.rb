@@ -8,8 +8,9 @@ class ProjectsController < ApplicationController
 
   def index
     @projects = current_user.projects.order(:created_at).to_a
-    # One grouped COUNT for the whole list — no per-row N+1.
+    # One grouped COUNT each for the whole list — no per-row N+1.
     @monitor_counts = current_user.monitors.group(:project_id).count
+    @key_counts = current_user.api_keys.group(:project_id).count
   end
 
   def show

@@ -25,6 +25,18 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     refute_match CGI.escapeHTML(@bobs_project.name), response.body
   end
 
+  test "index shows each project's monitor count, key count and created-ago" do
+    sign_in @alice
+    ApiKey.issue(project: @alices_project, name: "CI")
+    get projects_path
+
+    assert_response :success
+    # Monitor count (existing) + key count (new) + a created-ago stamp per row.
+    assert_match(/#{@alices_project.monitors.count} monitor/, response.body)
+    assert_match(/#{@alices_project.api_keys.count} key/, response.body)
+    assert_match(/ago/, response.body)
+  end
+
   test "show renders the user's project and its monitors" do
     sign_in @alice
     get project_path(@alices_project)

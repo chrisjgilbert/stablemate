@@ -15,8 +15,9 @@
         Your plan dropped to Free — choose which monitors to keep
       </p>
       <p class="mt-1 text-[13px] text-pending-text/90">
-        Nothing was suspended: all your monitors are still running.
-        Pick the <%= Stablemate::FREE_PLAN_MONITOR_LIMIT %> to keep active
+        You have <strong><%= pluralize(current_user.monitors.count, "monitor") %></strong>,
+        but Free covers <%= Stablemate::FREE_PLAN_MONITOR_LIMIT %>. Nothing was suspended —
+        all of them are still running. Pick the <%= Stablemate::FREE_PLAN_MONITOR_LIMIT %> to keep active
         <% if deadline %>by <strong><%= deadline.strftime("%b %-d, %Y") %></strong><% end %>,
         or we'll keep your oldest <%= Stablemate::FREE_PLAN_MONITOR_LIMIT %> for you.
       </p>
