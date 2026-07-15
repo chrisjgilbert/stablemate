@@ -27,6 +27,16 @@ class ConfigurationTest < StablemateTest
     assert Stablemate::Configuration.new.register_on_boot
   end
 
+  # Terminal-failure reporting is ON by default, symmetric with ping_on_success.
+  def test_ping_on_failure_defaults_true
+    config = Stablemate::Configuration.new
+
+    assert config.ping_on_failure
+
+    config.ping_on_failure = false
+    refute config.ping_on_failure
+  end
+
   # nil restores key-presence-only gating for hosts that want it everywhere.
   def test_nil_environments_enables_everywhere
     config = Stablemate::Configuration.new

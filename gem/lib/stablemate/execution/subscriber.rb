@@ -4,13 +4,18 @@ module Stablemate
   module Execution
     # Layer 1 (architecture.md §9): subscribe to ActiveSupport::Notifications'
     # `perform.active_job` and, on a SUCCESSFUL perform, fire a fire-and-forget
-    # ping to the matching monitor's cached ping URL.
+    # ping to the matching monitor's cached ping URL. Its mirror is the
+    # after_discard path (subscribe_discards! / handle_discard): a TERMINAL
+    # failure — unhandled raise, retry_on exhausted, discard_on — reports the
+    # error (status=1 + message) to the same URL. Attempts that will be
+    # retried report nothing.
     #
     # Backend-agnostic: it keys off the ActiveJob notification, not Solid Queue,
     # so it works on the test/async/inline adapters too (decision #4 / §4.4).
     #
     # Safety: a raising perform does NOT ping (the notification carries the
-    # exception). The ping is dispatched to a background thread and nothing may
+    # exception; if the failure is terminal it becomes a failure report
+    # instead). Requests are dispatched to a background thread and nothing may
     # propagate into the host job. No API key on this path.
     class Subscriber
       include Logging
@@ -56,6 +61,20 @@ module Stablemate
         self
       end
 
+      # Register ONE global ActiveJob::Base.after_discard callback (Rails ≥ 7.1
+      # public API, inherited by every job class) routing terminal failures —
+      # unhandled raise, retry_on exhausted, discard_on — to handle_discard.
+      # On older hosts (no after_discard) this is a silent no-op: error
+      # reporting degrades to plain missed-beat detection. Returns self so the
+      # railtie can chain it after subscribe!.
+      def subscribe_discards!
+        return self unless defined?(::ActiveJob::Base) && ::ActiveJob::Base.respond_to?(:after_discard)
+
+        subscriber = self
+        ::ActiveJob::Base.after_discard { |job, exception| subscriber.handle_discard(job, exception) }
+        self
+      end
+
       def unsubscribe!
         ActiveSupport::Notifications.unsubscribe(@handle) if @handle
       end
@@ -75,6 +94,28 @@ module Stablemate
 
         warn_if_ambiguous(job.class.name, keys)
         keys.each { |key| ping(key) }
+      end
+
+      # Process one TERMINAL job failure (spec §3.2), delivered by the
+      # after_discard callback with (job, exception) in hand. Same key
+      # resolution and fire-and-forget dispatch as handle_event; the report is
+      # status=1 + "ExceptionClass: message" to the same ping URL, and a :stale
+      # result kicks the same bounded re-sync.
+      #
+      # The outer rescue is load-bearing, not belt-and-braces: ActiveJob's
+      # run_after_discard_procs RE-RAISES callback exceptions into the host
+      # worker, so nothing — not even a hostile exception#message — may escape.
+      def handle_discard(job, exception)
+        return unless @config.ping_on_failure
+
+        keys = resolve_keys(job.class.name)
+        return if keys.empty?
+
+        warn_if_ambiguous(job.class.name, keys)
+        message = "#{exception.class}: #{exception.message}"
+        keys.each { |key| report_failure(key, message) }
+      rescue StandardError => e
+        log_warn("failure report skipped: #{e.class}: #{e.message}")
       end
 
       private
@@ -102,17 +143,27 @@ module Stablemate
         end
 
         def ping(key)
+          dispatch(key) { |url| @client.ping(url) }
+        end
+
+        def report_failure(key, message)
+          dispatch(key) { |url| @client.report_failure(url, message: message) }
+        end
+
+        # Resolve the key's URL and hand the request (a block taking the URL and
+        # returning the client's :ok/:stale/:error) to the dispatcher.
+        def dispatch(key, &request)
           url = url_for(key)
           return unless url
 
-          @dispatcher.call(-> { deliver(url) })
+          @dispatcher.call(-> { deliver(url, &request) })
         rescue StandardError => e
           # Guards the dispatch itself (e.g. Thread.new raising under thread
           # exhaustion) — nothing may propagate into the host job.
           log_warn("ping dispatch failed: #{e.class}: #{e.message}")
         end
 
-        # The dispatched block. Client#ping swallows its own errors, but an
+        # The dispatched block. The real Client swallows its own errors, but an
         # injected/wrapping client is public API and may raise; uncaught, that
         # would escape the background thread — spewing via report_on_exception
         # and, under a host's Thread.abort_on_exception, killing the worker.
@@ -120,7 +171,7 @@ module Stablemate
           # A :stale result means the cached URL was rejected (token rotated) — kick
           # a bounded re-sync so the fresh URL is picked up, instead of silently
           # pinging a dead URL until the next boot/manual sync.
-          trigger_resync if @client.ping(url) == :stale
+          trigger_resync if yield(url) == :stale
         rescue StandardError => e
           log_warn("ping thread failed: #{e.class}: #{e.message}")
         end

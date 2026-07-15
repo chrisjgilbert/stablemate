@@ -284,4 +284,132 @@ class SubscriberTest < StablemateTest
     3.times { sub.handle_event(event("J")) }
     assert_equal 1, resyncs
   end
+
+  # --- handle_discard (spec §3.2): a TERMINAL job failure reports status=1 +
+  # "ExceptionClass: message" to the same ping URL, with the same key
+  # resolution, dispatch and swallow discipline as handle_event. ---
+
+  def test_handle_discard_reports_the_exception_to_the_mapped_url
+    client = Stablemate::FakeClient.new
+    sub = subscriber(
+      class_to_keys: { "DailyDigestJob" => [ "daily_digest" ] },
+      ping_urls: { "daily_digest" => "https://sm.test/ping/abc" },
+      client:
+    )
+
+    sub.handle_discard(job("DailyDigestJob"), RuntimeError.new("it broke"))
+
+    assert_equal [ { url: "https://sm.test/ping/abc", message: "RuntimeError: it broke" } ], client.reported
+    assert_empty client.pinged
+  end
+
+  # Manual fallback — same rule as handle_event: a monitor whose
+  # registration_key IS the job class name still gets the failure report.
+  def test_handle_discard_manual_fallback_by_job_class_name
+    client = Stablemate::FakeClient.new
+    sub = subscriber(
+      class_to_keys: {},
+      ping_urls: { "CleanupJob" => "https://sm.test/ping/cleanup" },
+      client:
+    )
+
+    sub.handle_discard(job("CleanupJob"), IOError.new("disk full"))
+
+    assert_equal [ { url: "https://sm.test/ping/cleanup", message: "IOError: disk full" } ], client.reported
+  end
+
+  def test_handle_discard_with_no_matching_key_reports_nothing
+    client = Stablemate::FakeClient.new
+    sub = subscriber(
+      class_to_keys: { "DailyDigestJob" => [ "daily_digest" ] },
+      ping_urls: { "daily_digest" => "u" },
+      client:
+    )
+
+    sub.handle_discard(job("SomeOtherJob"), RuntimeError.new("nope"))
+
+    assert_empty client.reported
+  end
+
+  # Ambiguity: same rule as handle_event — report all mapped tasks and warn.
+  def test_handle_discard_shared_class_reports_all_and_warns
+    client = Stablemate::FakeClient.new
+    logged = []
+    Stablemate.config.logger = Object.new.tap { |l| l.define_singleton_method(:warn) { |m| logged << m } }
+
+    sub = subscriber(
+      class_to_keys: { "ReportJob" => %w[morning_report evening_report] },
+      ping_urls: { "morning_report" => "https://sm.test/ping/m", "evening_report" => "https://sm.test/ping/e" },
+      client:
+    )
+
+    sub.handle_discard(job("ReportJob"), RuntimeError.new("boom"))
+
+    assert_equal %w[https://sm.test/ping/m https://sm.test/ping/e].sort, client.reported.map { |r| r[:url] }.sort
+    assert(logged.any? { |m| m.include?("ReportJob") && m.include?("multiple") })
+  end
+
+  def test_ping_on_failure_false_suppresses_failure_reports
+    Stablemate.config.ping_on_failure = false
+    client = Stablemate::FakeClient.new
+    sub = subscriber(
+      class_to_keys: { "J" => [ "k" ] },
+      ping_urls: { "k" => "u" },
+      client:
+    )
+
+    sub.handle_discard(job("J"), RuntimeError.new("boom"))
+
+    assert_empty client.reported
+  end
+
+  # NOTHING may escape handle_discard: ActiveJob's run_after_discard_procs
+  # RE-RAISES exceptions from after_discard callbacks into the host worker, so
+  # the swallow contract here is even more load-bearing than on handle_event.
+  def test_handle_discard_swallows_client_errors
+    client = Stablemate::FakeClient.new(ping_error: SocketError.new("no network"))
+    sub = subscriber(
+      class_to_keys: { "J" => [ "k" ] },
+      ping_urls: { "k" => "https://sm.test/ping/x" },
+      client:
+    )
+
+    begin
+      sub.handle_discard(job("J"), RuntimeError.new("boom"))
+    rescue StandardError
+      flunk("a client error propagated out of handle_discard")
+    end
+    assert_empty client.reported
+  end
+
+  # Even the message-building step is untrusted (a host's exception subclass may
+  # override #message with something that raises) — still nothing escapes.
+  def test_handle_discard_swallows_errors_raised_while_building_the_message
+    client = Stablemate::FakeClient.new
+    sub = subscriber(
+      class_to_keys: { "J" => [ "k" ] },
+      ping_urls: { "k" => "u" },
+      client:
+    )
+    hostile = RuntimeError.new("boom")
+    hostile.define_singleton_method(:message) { raise IOError, "broken message" }
+
+    begin
+      sub.handle_discard(job("J"), hostile)
+    rescue StandardError
+      flunk("an error from exception#message propagated out of handle_discard")
+    end
+    assert_empty client.reported
+  end
+
+  # A :stale failure report (rotated token) triggers the same bounded re-sync
+  # as a stale success ping.
+  def test_stale_failure_report_triggers_a_resync
+    resyncs = 0
+    sub = resync_subscriber(client: Stablemate::FakeClient.new(ping_status: :stale), resync: -> { resyncs += 1 })
+
+    sub.handle_discard(job("J"), RuntimeError.new("boom"))
+
+    assert_equal 1, resyncs
+  end
 end

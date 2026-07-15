@@ -79,6 +79,9 @@ Stablemate.configure do |c|
   c.api_key         = Rails.application.credentials.dig(:stablemate, :api_key)
   c.endpoint        = "https://stablemate.dev"   # ← your own domain if self-hosting
   c.ping_on_success = true          # ping when a monitored job finishes cleanly
+  c.ping_on_failure = true          # report terminal job failures (unhandled raise,
+                                    # retry_on exhausted, discard_on) as error
+                                    # notices — the alert says what raised
   # c.environments   = ["production"] # default; add "staging" to monitor staging
   # c.register_on_boot = true         # default; false = don't auto-register from
   #                                   # recurring.yml on boot (manage monitors
@@ -146,13 +149,20 @@ Sync is **idempotent** — it upserts monitors keyed on the task key, so running
 repeatedly is safe. A sync failure logs a warning and never crashes boot.
 
 That's it. On each **successful** job run the gem fires a fire-and-forget ping in
-the background. A job that raises does **not** ping — the missed beat is the
-signal.
+the background. A job that fails **for good** — an unhandled raise, `retry_on`
+with its attempts exhausted, or a `discard_on` match — now reports too: the gem
+sends the error (`ExceptionClass: message`) to the same monitor, which goes
+**down immediately** and the alert email says what raised. Attempts that will
+be retried stay silent — a job that fails once and succeeds on retry never
+alerts. Terminal-failure reporting needs Rails ≥ 7.1 (Active Job's
+`after_discard` hook); on older hosts, and for a job that never runs at all, the
+**missed beat remains the backstop** — the monitor still goes down when the
+ping is overdue past the grace period.
 
 > **Manual fallback without `recurring.yml`.** You can skip registration and use
 > execution tracking alone: create a monitor by hand whose **registration key**
 > equals the job class name (e.g. `CleanupJob`). The gem's subscriber will ping it
-> on every successful run.
+> on every successful run and report its terminal failures.
 
 ---
 
@@ -221,8 +231,11 @@ end
 - A **pending** monitor flips to **up** on its first ping.
 - If a ping is overdue past the grace period, the monitor goes **down** and you
   get one `down` email.
-- A **failure ping** (`status` non-zero) flips the monitor **down immediately**
-  and the `down` email says what error was reported — no grace wait.
+- A **failure ping** (`status` non-zero — sent by the gem on a terminal job
+  failure, or manually via `status`/`message`) flips the monitor **down
+  immediately** — no grace wait. The email is titled "*<name>* reported an
+  error" and shows the reported error, as does the red incident banner on the
+  monitor's detail page.
 - The next successful ping flips it back to **up** and sends one `recovered` email.
 - The dashboard shows a 90-day uptime bar per monitor.
 

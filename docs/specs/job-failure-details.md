@@ -173,9 +173,14 @@ propagate into the host).
   `ping_on_success`.
 - Version guard: `if ActiveJob::Base.respond_to?(:after_discard)` — on hosts
   older than Rails 7.1 error reporting silently degrades to today's
-  missed-beat behaviour. (Verify at implementation time that `after_discard`
-  fires before a `retry_on` custom block; if a host's block re-enqueues its own
-  work that's their deviation to own.)
+  missed-beat behaviour. (VERIFIED at implementation time against
+  activejob 8.1 source + an adapter-level harness: fires exactly once per
+  terminal failure with `(job, exception)`, never on retried attempts. One
+  nuance vs this spec's original guess: it fires **after** a `retry_on`
+  custom block, not before — irrelevant to once-per-terminal-failure; if a
+  host's block re-enqueues its own work that's their deviation to own. Also
+  note ActiveJob **re-raises** callback exceptions into the host worker, so
+  the gem's swallow-everything rescue in `handle_discard` is load-bearing.)
 - Client truncates `message` to 1 000 chars before sending (§10).
 - **The existing success subscriber is unchanged** — it already ignores raising
   performs, which is correct: attempt-level exceptions are not successes and

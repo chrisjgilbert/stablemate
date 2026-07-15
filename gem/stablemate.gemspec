@@ -28,4 +28,7 @@ Gem::Specification.new do |spec|
   # Used only in tests to exercise the real perform.active_job notification path
   # (Layer 1 is backend-agnostic — it keys off ActiveSupport::Notifications).
   spec.add_development_dependency "activesupport", ">= 7.0"
+  # Used only in tests to exercise the real ActiveJob::Base.after_discard wiring
+  # (terminal-failure reporting; the runtime guard degrades gracefully without it).
+  spec.add_development_dependency "activejob", ">= 7.1"
 end

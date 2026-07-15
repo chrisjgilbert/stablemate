@@ -7,12 +7,13 @@ module Stablemate
   # A fake client capturing sync payloads and pings — the gem's tests must make
   # NO real network calls (CLAUDE.md environment rule).
   class FakeClient
-    attr_reader :synced, :pinged, :listed
+    attr_reader :synced, :pinged, :listed, :reported
 
     # sync_response: the parsed hash sync_monitors should return.
     # list_response: the parsed hash list_monitors should return (register_on_boot
     #   = false path).
-    # ping_error: raise this from #ping to exercise the swallow-everything path.
+    # ping_error: raise this from #ping / #report_failure to exercise the
+    #   swallow-everything path.
     def initialize(sync_response: { "monitors" => [], "skipped" => [] }, list_response: { "monitors" => [] },
                    ping_error: nil, ping_status: :ok)
       @sync_response = sync_response
@@ -22,6 +23,7 @@ module Stablemate
       @synced = []
       @listed = 0
       @pinged = []
+      @reported = []
       # pings arrive from the subscriber's background threads, so the sink must be
       # thread-safe for the concurrency test.
       @lock = Mutex.new
@@ -43,6 +45,15 @@ module Stablemate
       raise @ping_error if @ping_error
 
       @lock.synchronize { @pinged << ping_url }
+      @ping_status
+    end
+
+    # Mirrors the real Client#report_failure contract (same statuses, same
+    # error-injection knob) and records the url + message for assertions.
+    def report_failure(ping_url, message:)
+      raise @ping_error if @ping_error
+
+      @lock.synchronize { @reported << { url: ping_url, message: message } }
       @ping_status
     end
   end

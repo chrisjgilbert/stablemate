@@ -12,6 +12,10 @@ module Stablemate
 
     Error = Class.new(StandardError)
 
+    # Client-side bound on a reported error message (defence in depth — the
+    # server truncates authoritatively to the same limit).
+    ERROR_MESSAGE_LIMIT = 1_000
+
     def initialize(config = Stablemate.config)
       @config = config
     end
@@ -60,6 +64,19 @@ module Stablemate
       classify(http_for(uri).post(uri.request_uri, ""))
     rescue StandardError => e
       log_warn("ping failed: #{e.class}: #{e.message}")
+      :error
+    end
+
+    # Report a terminal job failure to the SAME ping URL (no /fail suffix):
+    # form-encoded status=1&message=…, message truncated to ERROR_MESSAGE_LIMIT.
+    # Same fire-and-forget contract and :ok/:stale/:error classification as
+    # #ping — never raises.
+    def report_failure(ping_url, message:)
+      uri = URI(ping_url)
+      body = URI.encode_www_form(status: 1, message: message.to_s[0, ERROR_MESSAGE_LIMIT])
+      classify(http_for(uri).post(uri.request_uri, body, "Content-Type" => "application/x-www-form-urlencoded"))
+    rescue StandardError => e
+      log_warn("failure report failed: #{e.class}: #{e.message}")
       :error
     end
 

@@ -45,10 +45,15 @@ module Stablemate
 
       # Pass the bounded refresh so a ping rejected after a token rotation reloads
       # the cached URLs (the subscriber throttles it to once per interval).
+      # subscribe_discards! additionally registers ONE global
+      # ActiveJob::Base.after_discard callback (Rails ≥ 7.1; guarded inside, so
+      # older hosts silently keep missed-beat-only detection) reporting
+      # terminal job failures — unhandled raise, retry_on exhausted,
+      # discard_on — as error notices on the same ping URL.
       Execution::Subscriber.new(
         class_to_keys: registrar.class_to_keys,
         resync: load_ping_urls
-      ).subscribe!
+      ).subscribe!.subscribe_discards!
     rescue StandardError => e
       Stablemate.logger.warn("[stablemate] boot wiring skipped: #{e.class}: #{e.message}")
     end
