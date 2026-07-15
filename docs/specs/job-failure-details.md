@@ -1,9 +1,13 @@
-# Job-failure details — show *what error* took a monitor down
+# Error notices — show *what error* took a monitor down, not just lateness
 
 Status: **design spec — exploration + proposal, not yet pressure-tested**.
-Author: Claude (session), 2026-07-15. Owner: @chrisjgilbert. Extends the V1 data
-model in [`README.md`](README.md); composes with (and partially fulfils) the
-`PingEvent.kind "failure"` reservation in
+Author: Claude (session), 2026-07-15; **merges @chrisjgilbert's Dead-Man's-Snitch-style
+"Error Notices" draft** (same date — the ping-param contract, the single `error`
+column, the single-entrypoint behaviour, and the demand that the locked-decision-#2
+impact be decided here, not worked around in code, all come from that draft).
+Owner: @chrisjgilbert. Extends the V1 data model in [`README.md`](README.md) and
+**amends locked decision #2** (see §5.1). Composes with (and partially fulfils)
+the `PingEvent.kind "failure"` + nullable `error` reservation in
 [`uptime-monitor.md`](uptime-monitor.md) §3. Follow the architecture rulebook in
 [`../../CLAUDE.md`](../../CLAUDE.md).
 
@@ -28,64 +32,100 @@ object in its hands** at the instant the job died — class, message, backtrace 
 and threw it away. The user gets woken up by an email that tells them to go
 find, by hand, information we already touched.
 
-This spec closes that loop:
+This spec adds **error notices** (Dead Man's Snitch's term): a job can report
+*"I ran, but I failed"* on an otherwise on-time ping, triggering an immediate
+alert distinct from a missed check-in.
 
 1. **Capture** — when a monitored job fails for good, the gem reports the error
-   (class + message) to Stablemate instead of staying silent.
-2. **Surface in email** — the `down` alert for a reported failure says *what
-   raised and why*, not "go check your logs".
-3. **Surface in UI** — the monitor detail page's incident banner and
+   to Stablemate instead of staying silent (the "Rails-native Field Agent":
+   DMS needs a shell-wrapper CLI to auto-capture failures; our gem is already
+   inside the process with the exception in hand).
+2. **Manual path** — non-gem users (cron + curl, any language) send the same
+   signal with two extra params on the ping URL they already have.
+3. **Surface in email** — the alert for a reported error says *what raised and
+   why*, not "go check your logs", via a distinct "job reported an error"
+   template (vs today's "job went silent").
+4. **Surface in UI** — the monitor detail page's incident banner and
    recent-events feed show the error; history keeps it per incident.
 
 Two side benefits fall out of the design:
 
-- **Faster detection.** An explicit failure report flips the monitor `down`
+- **Faster detection.** An explicit error report flips the monitor `down`
   *immediately* — no waiting out `interval + grace` for the absence to become
   visible. For a daily job with a 1-hour grace, that is hours of earlier
   alerting.
-- **A manual `/fail` path.** Non-gem users (cron + curl, any language) get the
-  same power: `curl .../ping/<token>/fail` from an error trap. This also lays
-  the exact rails the future uptime probe needs (`uptime-monitor.md` records
-  failed probes as `kind: "failure"` with an error reason — same columns, same
-  transitions).
+- **Prepared ground for the uptime probe.** `uptime-monitor.md` records failed
+  probes as `kind: "failure"` with an error reason — this spec builds exactly
+  the columns it reserved.
 
 ---
 
 ## 2 · The core reuse insight
 
 Almost everything downstream of "a monitor went down" is already cause-agnostic
-and keeps working unchanged:
+and keeps working unchanged — this is additive, not a rework:
 
 - **`Incident`** already has a `cause` string column (default `"missed_ping"`)
   — the schema anticipated a second cause. One open incident per monitor stays
   enforced by the partial unique index.
 - **`Notification` + `Notifications::Dispatch` + `EmailChannel`** — the `down` /
-  `recovered` events and transition-only alerting (locked decision #2) apply
-  as-is; a failure-caused incident is still one `down` email, resolved by the
-  next successful ping with one `recovered` email.
+  `recovered` events and transition-only alerting apply as-is; a reported-error
+  incident is still one `down`-class email, resolved by the next successful
+  ping with one `recovered` email.
 - **Recovery** — `Monitor::CheckIn#recover` resolves *whatever* open incident
-  exists, regardless of cause. A failure incident recovers by the next
+  exists, regardless of cause. An error incident recovers by the next
   successful ping with zero new code.
-- **`PingEvent.kind`** already defaults to `"success"` and is free to carry
-  `"failure"` (reserved by `uptime-monitor.md` §3).
+- **`PingEvent.kind`** already defaults to `"success"` and is free to carry the
+  reserved `"failure"` value — we just start writing it.
+- **The ping endpoint itself** — reporting rides the existing
+  `/ping/:ping_token` route (§6), so the rate limits, the opaque-404 token
+  handling, forgery skip, and row-locking discipline are inherited, not
+  re-implemented. No new controller, no new route.
 - **`mini_ticks`** (`app/models/monitoring/monitor/uptime.rb:96`) already maps
   any non-`success` kind to a red tick — the dashboard sparkline lights up for
   failures with **zero changes**.
 - **`UptimeRollup`** computes up/down seconds from incidents + `monitored?`,
-  never from how the signal arrived — failure incidents count as downtime
+  never from how the signal arrived — error incidents count as downtime
   correctly, unchanged.
 - **`broadcast_status_update`**, badge/row partials, pause/suspend semantics —
   untouched.
 
-The genuinely new machinery is small: a failure-report endpoint, one operation
-object (`Monitoring::Monitor::FailureReport`), three nullable columns, a gem
-hook, and cause-aware copy in the email + banner.
+The genuinely new machinery is small: two optional ping params, one operation
+object for the failure branch, two nullable `error` columns, a gem hook, and
+cause-aware copy in the email + banner.
 
 ---
 
 ## 3 · How a failure reaches the server
 
-### 3.1 The gem path: `ActiveJob::Base.after_discard` (terminal failures only)
+### 3.1 The manual path: `status` / `message` params on the existing ping
+
+Dead Man's Snitch convention, folded in as the **primary contract**: the ping
+endpoint (`app/controllers/pings_controller.rb`) accepts two new optional
+params alongside the existing `duration_ms`:
+
+| Param | Alias | Meaning |
+|---|---|---|
+| `status` | `s` | Job exit code. `0`, blank, or absent = success; **anything else = failure**. |
+| `message` | `m` | Free-text error string (the exception, the last log line, …). |
+
+This beats a separate `/fail` URL for cron ergonomics: one snippet always
+fires and `$?` decides the polarity — no conditional logic in the shell:
+
+```sh
+# end of any cron job — success and failure ride the same line
+run_backup 2>/tmp/backup.err
+curl -fsS "https://stablemate.dev/ping/$TOKEN" \
+  --data-urlencode "status=$?" \
+  --data-urlencode "message=$(tail -c 500 /tmp/backup.err)"
+```
+
+Same credential model as today: the token **is** the auth, opaque `404` on
+unknown token, `GET` and `POST` both accepted, params by query string or form
+body. A non-zero `status` with no `message` still records a failure, with
+`error` set to `"exited with status <n>"` so the alert is never blank.
+
+### 3.2 The gem path: `ActiveJob::Base.after_discard` (terminal failures only)
 
 **The key design decision is *when* a failed job run counts as "failed".**
 ActiveJob retries make attempt-level failure the wrong signal: a job with
@@ -106,7 +146,9 @@ That is precisely our set, with the exception object in hand, backend-agnostic
 `perform.active_job` notification, which records the exception on **every**
 attempt including ones that will be retried — it fires exactly once per
 terminal failure. No thread-local correlation of `perform` / `enqueue_retry`
-events, no per-attempt noise.
+events, no per-attempt noise. (The original draft sketched "rescue job
+exceptions and auto-send" — `after_discard` is that sketch made concrete, with
+retry-awareness for free.)
 
 The railtie registers one global callback (inherited by every job class)
 alongside the existing execution subscriber:
@@ -120,56 +162,50 @@ end
 
 `handle_discard` mirrors `handle_event`: resolve the job class to task key(s)
 via the same `class_to_keys` / manual-fallback rules, then fire-and-forget a
-**fail ping** on the dispatcher thread. Errors are swallowed exactly as today
-(locked decision #4 — nothing may propagate into the host).
+POST to the same cached ping URL with `status=1` and
+`message="#{exception.class}: #{exception.message}"` on the dispatcher thread.
+Errors are swallowed exactly as today (locked decision #4 — nothing may
+propagate into the host).
 
 - New config: `ping_on_failure` (default `true`), symmetric with
   `ping_on_success`.
 - Version guard: `if ActiveJob::Base.respond_to?(:after_discard)` — on hosts
-  older than Rails 7.1 failure reporting silently degrades to today's
+  older than Rails 7.1 error reporting silently degrades to today's
   missed-beat behaviour. (Verify at implementation time that `after_discard`
   fires before a `retry_on` custom block; if a host's block re-enqueues its own
   work that's their deviation to own.)
-- Client truncates before sending (§10): error class ≤ 200 chars, message
-  ≤ 1 000 chars.
+- Client truncates `message` to 1 000 chars before sending (§10).
 - **The existing success subscriber is unchanged** — it already ignores raising
   performs, which is correct: attempt-level exceptions are not successes and
   (if non-terminal) not failures either.
-
-### 3.2 The manual path: `POST /ping/:ping_token/fail`
-
-Every monitor's ping URL grows a `/fail` sibling (the Healthchecks-style
-convention), so any language/scheduler can report a failure from an error trap:
-
-```sh
-# bash cron job
-run_backup || curl -fsS "https://stablemate.dev/ping/$TOKEN/fail" \
-  --data-urlencode "error_message=backup exited $? — $(tail -c 500 /tmp/backup.err)"
-```
-
-Same credential model as the ping path: the token **is** the auth, opaque `404`
-on unknown token, both `GET` and `POST` accepted (a bare curl in a trap must
-work; params may arrive by query string or form body).
 
 ---
 
 ## 4 · Data model changes
 
+Mostly already scaffolded — `PingEvent.kind` has the unused `"failure"` value
+and `Incident.cause` is a plain string. One small migration.
+
 ### `PingEvent` — the event log (pruned at 90 days)
 
 | Column | Type | Notes |
 |---|---|---|
-| `kind` | *(exists)* | Gains the reserved `"failure"` value. Add a `kind` inclusion validation (`success`/`failure`) while we're here. |
-| ⊕ `error_class` | `string`, null | e.g. `"ActiveRecord::Deadlocked"`. Null for successes. |
-| ⊕ `error_message` | `text`, null | Truncated server-side to 1 000 chars (§10). |
+| `kind` | *(exists)* | Start writing the reserved `"failure"` value. Add a `kind` inclusion validation (`success`/`failure`) while we're here. |
+| ⊕ `error` | `text`, null | The reported message, truncated server-side to 1 000 chars (§10). Null for successes. This is the column `uptime-monitor.md` §3 proposed. |
+
+A **single free-text column, not structured `error_class`/`error_message`
+pairs**: the manual path sends arbitrary text (an exit code, a log line), so
+class/message structure can't be guaranteed anyway; the gem simply prefixes
+conventionally (`"ActiveRecord::Deadlocked: deadlock detected"`). One column,
+one truncation rule, and the email/banner render one string. Structured
+columns can be split out later if filtering-by-class ever becomes a feature.
 
 ### `Incident` — the durable record (kept forever)
 
 | Column | Type | Notes |
 |---|---|---|
-| `cause` | *(exists)* | Gains `"job_failed"` alongside `"missed_ping"`. Add an inclusion validation. |
-| ⊕ `error_class` | `string`, null | Copied from the failure ping that **opened** the incident. |
-| ⊕ `error_message` | `text`, null | Same. |
+| `cause` | *(exists)* | Gains `"reported_error"` alongside `"missed_ping"`. Add an inclusion validation. |
+| ⊕ `error` | `text`, null | Copied from the failure ping that **opened** the incident. |
 
 **Why denormalise onto the incident?** Two reasons: (a) raw pings are pruned
 after `PING_RETENTION` (90 days) but incidents are the permanent outage
@@ -181,10 +217,8 @@ transaction — no drift.
 ### Migration sketch
 
 ```ruby
-add_column :ping_events, :error_class,   :string
-add_column :ping_events, :error_message, :text
-add_column :incidents,   :error_class,   :string
-add_column :incidents,   :error_message, :text
+add_column :ping_events, :error, :text
+add_column :incidents,   :error, :text
 ```
 
 Reversible, additive, no backfill (all existing rows are legitimately null —
@@ -193,31 +227,46 @@ lookups ride the existing `monitor_id` indexes.
 
 ---
 
-## 5 · Server behaviour: the `FailureReport` operation
+## 5 · Server behaviour: one entrypoint, two operations
 
-Per the decision table: a complex one-shot operation owned by one entity →
-**operation object**, noun-named, entity-scoped, verb-named public method.
-
-```
-app/models/monitoring/monitor/failure_report.rb   # Monitoring::Monitor::FailureReport
-```
-
-Facade on the monitor, next to `check_in!` / `flag_missed!`:
+A failed ping is still a check-in — of bad news — so the controller stays a
+one-liner and **`monitor.check_in!` remains the single entrypoint** (per the
+draft: no new controller action). The facade grows the new params and routes by
+polarity:
 
 ```ruby
-# Record a reported job failure: persist a failure PingEvent and, if the
-# monitor was live, flip it down, open a job_failed Incident and alert.
-def report_failure!(received_at: Time.current, error_class: nil,
-                    error_message: nil, source_ip: nil, duration_ms: nil)
-  FailureReport.new(self).report_failure!(...)
+# Monitoring::Monitor — the facade routes by kind; each outcome keeps its own
+# tidy operation object, mirroring the existing CheckIn / MissedPing split.
+def check_in!(received_at: Time.current, kind: "success", error: nil,
+              source_ip: nil, duration_ms: nil)
+  if kind == "failure"
+    FailureReport.new(self).report_failure!(received_at:, error:, source_ip:, duration_ms:)
+  else
+    CheckIn.new(self).check_in!(received_at:, source_ip:, duration_ms:)
+  end
 end
 ```
 
-`FailureReport` is the structural sibling of `CheckIn` (it *is* a check-in — of
-bad news) and borrows `MissedPing`'s incident/notification half:
+`PingsController#create` maps the wire params to that call: `status`/`s`
+present and non-zero → `kind: "failure"`, `error: message.presence ||
+"exited with status <n>"`; otherwise the success path, unchanged.
+
+**Why a sibling operation instead of branching inside `CheckIn`?** The draft
+sketched "new logic on `CheckIn`", and the shared half (event row, timestamp
+advancement, the lock) is indeed identical — but the transition halves point in
+opposite directions (`CheckIn` recovers/holds `up`; the failure path opens
+incidents and alerts, which is `MissedPing`'s shape). Folding both into one
+class makes `apply_transition` a two-axis matrix; the codebase's established
+pattern is one operation per outcome (`CheckIn` / `MissedPing`). So:
+`Monitoring::Monitor::FailureReport` (noun, entity-scoped, verb-named method —
+`app/models/monitoring/monitor/failure_report.rb`), structurally `CheckIn`'s
+sibling with `MissedPing`'s incident half. The single-entrypoint intent of the
+draft is preserved at the facade, where callers live.
+
+`FailureReport#report_failure!`:
 
 1. Under `with_lock` (same serialisation discipline as `CheckIn`/`MissedPing`):
-   - create a `PingEvent` `kind: "failure"` with the (truncated) error fields;
+   - create a `PingEvent` `kind: "failure"` with the (truncated) `error`;
    - advance `last_ping_at` and `next_due_at = received_at + interval` — the
      job **did** run and the next run is still expected on cadence. Advancing
      `next_due_at` also keeps the detection sweep honest: the monitor is
@@ -227,12 +276,11 @@ bad news) and borrows `MissedPing`'s incident/notification half:
      starts (the alternative leaves the uptime bar showing no-data through a
      reported outage, which reads as "not monitored" when it's "down");
    - transition by status:
-     - `up` / `pending` → `down`; open an `Incident(cause: "job_failed",
-       error_class:, error_message:)` (same open-incident guard + savepoint
-       pattern as `MissedPing#open_incident`); create the `down` Notification;
-     - `down` → record the event only. **No new incident, no email** (locked
-       decision #2, transition-only). The open incident keeps its original
-       cause/error (§12-B);
+     - `up` / `pending` → `down`; open an `Incident(cause: "reported_error",
+       error:)` (same open-incident guard + savepoint pattern as
+       `MissedPing#open_incident`); create the `down` Notification;
+     - `down` → record the event only. **No new incident, no email** (§5.1).
+       The open incident keeps its original cause/error (§12-B);
      - `paused` / `suspended` → record the event only, no transition, no alert
        — exactly `CheckIn`'s rule: a stray ping (of either polarity) must not
        resume or alert a deliberately-unmonitored monitor.
@@ -242,19 +290,38 @@ bad news) and borrows `MissedPing`'s incident/notification half:
 **No grace period on explicit failures.** Grace exists to absorb *uncertainty
 of absence* (a slow run, clock skew). A terminal-failure report is a positive
 statement — the job is dead this cycle — so it flips `down` immediately. This
-is the headline UX win (§1) and mirrors every heartbeat product's `/fail`
-semantics.
+is the headline UX win (§1) and matches DMS/Healthchecks `/fail` semantics.
 
 **Recovery needs zero new code.** The next successful `check_in!` finds the
 open incident (whatever its cause), resolves it, and emits the one `recovered`
 email — `CheckIn#recover` is already cause-agnostic.
 
+### 5.1 · Amending locked decision #2 (deliberate, not a workaround)
+
+Locked decision #2 (`README.md` §1) reads *"Transition-only — one `down` email
+per incident, one `recovered` email on resolution."* It was written when the
+only alert trigger was a missed ping; an on-time-but-failed ping is a new
+trigger the decision doesn't cover. Per the draft's demand, the decision is
+**extended here, deliberately**, and `README.md` §1 must be updated when this
+ships:
+
+> **#2 (amended): Alerts are transition-only, and a reported error on a live
+> (`up`/`pending`) monitor IS a transition — to `down`, immediately, with no
+> grace.** One `down`-class email per incident regardless of cause; a repeat
+> reported error while an incident is already open records a `PingEvent` but
+> re-alerts **nothing** (exactly like today's repeat-missed-ping behaviour);
+> one `recovered` email on resolution. Grace applies only to *absence*.
+
+So: does a second reported error during the same open incident re-alert? **No —
+stays silent**, preserving the original decision's noise ceiling: an incident
+is one email in, one email out, whatever caused it.
+
 ### Transition table (new rows only)
 
-| Status before | Fail ping arrives | After | Incident | Email |
+| Status before | Failure ping arrives | After | Incident | Email |
 |---|---|---|---|---|
-| `pending` | record failure event | `down` | open `job_failed` + error | one `down` (with error) |
-| `up` (incl. inside grace) | record failure event | `down` | open `job_failed` + error | one `down` (with error) |
+| `pending` | record failure event | `down` | open `reported_error` + error | one `down` (with error) |
+| `up` (incl. inside grace) | record failure event | `down` | open `reported_error` + error | one `down` (with error) |
 | `down` | record failure event | `down` | unchanged | none |
 | `paused` / `suspended` | record failure event | unchanged | none | none |
 
@@ -262,40 +329,24 @@ email — `CheckIn#recover` is already cause-agnostic.
 
 ## 6 · HTTP contract (`api.md` delta)
 
+No new route — the existing endpoint grows two optional params:
+
 ```
-GET  /ping/:ping_token/fail
-POST /ping/:ping_token/fail
+GET  /ping/:ping_token
+POST /ping/:ping_token
 ```
 
 | Param | Type | Meaning |
 |---|---|---|
-| `error_class` | string | Optional. Exception class name. Truncated to 200 chars. |
-| `error_message` | string | Optional. Human-readable error. Truncated to 1 000 chars. |
-| `duration_ms` | integer | Optional, same semantics/parsing as the ping path. |
+| `status` (alias `s`) | string | Optional exit code. Blank/absent/`0` = success; anything else = failure. `status` wins if both spellings are sent. |
+| `message` (alias `m`) | string | Optional error text. Recorded only on failures; truncated to 1 000 chars. Ignored on success pings in V1 (§12-E). |
+| `duration_ms` | integer | Unchanged. |
 
-Responses mirror the ping endpoint exactly: `200 {"ok":true}` on a known token
-(recorded even when it causes no transition), opaque `404` on unknown token,
-`429` over limit. Rate limiting **shares the same per-token and per-IP buckets**
-as `/ping/:token` (same `RATE_LIMIT_STORE`, same limits) — `/fail` must not be
-a second, independent budget for a runaway loop or a token scanner.
-
-### Routing / controller
-
-Per CLAUDE.md rule 4 (custom verb → sub-resource): the noun hiding in "ping
-failed" is a **failure**.
-
-```ruby
-# config/routes.rb — beside the existing ping match
-match "/ping/:ping_token/fail", to: "pings/failures#create",
-      via: %i[get post], as: :ping_failure
-```
-
-`Pings::FailuresController#create` stays as thin as `PingsController#create`:
-find by token, opaque 404, `monitor.report_failure!(...)`. The shared plumbing
-(skip_forgery_protection, the two `rate_limit` declarations + store, the
-numeric-param guard) is extracted to an abstract `Pings::BaseController` that
-both inherit from — the limiter buckets stay shared because the `by:` lambdas
-key on token/IP, not controller.
+Responses are **identical to today** — `200 {"ok":true}` on a known token
+(recorded even when the failure causes no transition), opaque `404`, `429` —
+and the per-token / per-IP rate limits apply automatically because it *is* the
+same endpoint. `PingsController#create` stays thin: parse polarity, call
+`monitor.check_in!(kind:, error:, ...)`.
 
 ---
 
@@ -304,11 +355,12 @@ key on token/IP, not controller.
 - `Configuration`: add `ping_on_failure` (default `true`).
 - `Execution::Subscriber` (or a sibling `Execution::DiscardReporter` if the
   class gets crowded): add `handle_discard(job, exception)` — resolve keys
-  exactly like `handle_event`, then dispatch `client.fail_ping(url,
-  error_class:, error_message:)` fire-and-forget.
-- `Client#fail_ping(ping_url, error_class:, error_message:)` — POST to
-  `<ping_url>/fail` with form-encoded params; same timeouts, same
-  `:ok/:stale/:error` classification and stale-triggered resync as `#ping`.
+  exactly like `handle_event`, then dispatch
+  `client.report_failure(url, message: "#{exception.class}: #{exception.message}")`
+  fire-and-forget.
+- `Client#report_failure(ping_url, message:)` — POST to the same ping URL with
+  form-encoded `status=1&message=…`; same timeouts, same `:ok/:stale/:error`
+  classification and stale-triggered resync as `#ping`.
 - Railtie: register the global `ActiveJob::Base.after_discard` callback when
   the gem is enabled and `respond_to?(:after_discard)`.
 - Client-side truncation before send (defence in depth with §10's server-side
@@ -328,25 +380,25 @@ MonitorMailer.send(@notification.event, @notification.monitor,
                    incident: @notification.incident).deliver_later
 ```
 
-`MonitorMailer#down(monitor, incident: nil)` branches on `incident&.cause`:
+`MonitorMailer#down(monitor, incident: nil)` branches on `incident&.cause` —
+the draft's "job reported an error" vs "job went silent" split:
 
 - **`missed_ping`** (and nil, defensively): today's copy, unchanged — subject
   `"<name> missed its check-in"`, "No ping arrived by …".
-- **`job_failed`**: subject **`"<name> failed"`**; body leads with the error:
+- **`reported_error`**: subject **`"<name> reported an error"`**; body leads
+  with the error:
 
-  > **Nightly backup failed.**
+  > **Nightly backup reported an error.**
   >
-  > The job reported an error:
+  > The job ran and reported a failure:
   >
   > `ActiveRecord::Deadlocked: deadlock detected (PG::TRDeadlockDetected)`
   >
   > [View monitor]
 
-  Error rendered in a monospace block, `error_class` and `error_message`
-  separated by `: ` (class alone / message alone degrade gracefully — both are
-  optional params on the manual path). Text part mirrors it. The "check your
-  job logs" sentence only survives in the missed-ping branch — for a reported
-  failure we *are* the log's headline.
+  Error rendered in a monospace block, wrapped. Text part mirrors it. The
+  "check your job logs" sentence only survives in the missed-ping branch — for
+  a reported error we *are* the log's headline.
 
 `recovered` is untouched.
 
@@ -363,22 +415,21 @@ Cause-aware heading and an error block:
 
 - `missed_ping`: exactly today's banner ("Monitor is down — no ping received",
   expected-by / grace / down-for).
-- `job_failed`: heading **"Monitor is down — the job reported a failure"**;
+- `reported_error`: heading **"Monitor is down — the job reported an error"**;
   the `dl` swaps expected-by/grace (meaningless here — nothing was late) for
   the error itself: a monospace, red-on-`down-bg` block showing
-  `error_class` and `error_message` (wrapped, `break-words`), plus the same
-  "Down for …" row. `data-testid="incident-error"` for the system test.
+  `incident.error` (wrapped, `break-words`), plus the same "Down for …" row.
+  `data-testid="incident-error"` for the system test.
 
 ### Recent events feed (`uptime.rb#recent_events` + partial)
 
 - Failure pings become their own event kind: red dot, label
-  `"Failure reported — ActiveRecord::Deadlocked"` (class only in the label;
-  the full message lives on the banner/incident — the feed row stays one
-  truncated line, as the partial already `truncate`s).
+  `"Error reported — <error>"` with the error truncated to keep the row one
+  line (the full text lives on the banner/incident).
 - Incident-open labels become cause-aware: `"Went down — no ping received"`
-  vs `"Went down — job reported a failure"`.
+  vs `"Went down — job reported an error"`.
 - `recent_events` today plucks only `received_at`/`duration_ms` — extend the
-  pluck with `kind`/`error_class`. The `Event` struct already carries `kind`.
+  pluck with `kind`/`error`. The `Event` struct already carries `kind`.
 
 ### Dashboard
 
@@ -390,24 +441,27 @@ partial stays untouched.
 
 ## 10 · Security & abuse bounds
 
-- **The token is still the only credential.** `/fail` grants nothing `/ping`
-  doesn't: anyone holding the token could already manipulate status by
-  pinging/withholding. Same opaque 404, same shared rate-limit buckets (§6).
+- **The token is still the only credential.** The `status`/`message` params
+  grant nothing the bare ping doesn't: anyone holding the token could already
+  manipulate status by pinging/withholding. Same endpoint, so the opaque 404
+  and both rate-limit buckets apply with zero new wiring.
 - **Error text is untrusted input.** Rendered only through default ERB escaping
   (HTML) and plain-text email — never `html_safe`, never interpolated into
   headers. Subject lines use only the monitor name (existing behaviour), never
   the error text (header-injection surface, and subjects shouldn't leak error
   contents to notification previews on lock screens either — §12-D).
-- **Truncation is server-side and unconditional**: `error_class` → 200 chars,
-  `error_message` → 1 000 chars, applied in `FailureReport` (the model layer,
-  so the API and any future channel share the bound). Client-side truncation in
-  the gem is defence in depth, not the guarantee. Bounds storage: worst case
-  ~1.2 KB per failure ping, already rate-capped at 30/min/token and pruned at
-  90 days.
+- **Truncation is server-side and unconditional**: `error` → 1 000 chars,
+  applied in `FailureReport` (the model layer, so the API and any future
+  channel share the bound). Client-side truncation in the gem is defence in
+  depth, not the guarantee. Bounds storage: worst case ~1 KB per failure ping,
+  already rate-capped at 30/min/token and pruned at 90 days.
+- **`status` parsing is polarity-only**: blank/absent/`"0"` → success; any
+  other value (numeric or not) → failure. A garbage `status` can at worst flip
+  the sender's own monitor down — same power the token already confers.
 - **Tenant scoping unchanged**: error details render only on the owner's pages
   (`current_user.monitors`) and in email to the owner's address.
 - **Backtraces are deliberately excluded in V1** (§12-A) — they are the most
-  likely place for secrets (file paths, SQL fragments, env dumps in messages
+  likely place for secrets (file paths, SQL fragments; env dumps in messages
   are the user's own data; full traces multiply the risk and the payload).
 - Run `/security-review` on the implementation diff — this touches the public
   ping surface (CLAUDE.md workflow rule 3).
@@ -420,35 +474,40 @@ partial stays untouched.
   `next_due_at`/`last_ping_at`/`first_ping_at` advancement; incident carries
   the error; second failure while down → event only, no incident/email;
   paused/suspended inertness; concurrent fail/success serialisation via the
-  lock (mirror the existing `CheckIn`/`MissedPing` test shapes).
-- **[request] `/ping/:token/fail`**: 200 + recorded on known token; opaque 404
-  unknown; GET and POST; query-string and form params; shared rate-limit
-  buckets with `/ping` (a token at its `/ping` limit is throttled on `/fail`
-  too); over-long params stored truncated.
-- **[mailer]**: `down` with `job_failed` incident renders subject `"<name>
-  failed"` + error block (HTML and text); `missed_ping` copy unchanged;
-  error-class-only and message-only degrade cleanly.
-- **[gem]**: `handle_discard` resolves keys and posts to `<url>/fail` with
-  truncated params; `ping_on_failure = false` disables; dispatcher/exception
+  lock (mirror the existing `CheckIn`/`MissedPing` test shapes). Facade
+  routing: `check_in!(kind: "failure")` reaches `FailureReport`; default kind
+  reaches `CheckIn` unchanged.
+- **[request] `/ping/:token`**: `status=1` → 200, failure recorded, monitor
+  down; `s=1` alias; `status=0` / absent → success path unchanged; `message`
+  stored truncated; non-zero status without message → `"exited with status
+  <n>"`; opaque 404 unknown token; GET and POST; existing rate-limit tests
+  still pass untouched (same endpoint).
+- **[mailer]**: `down` with a `reported_error` incident renders subject
+  `"<name> reported an error"` + error block (HTML and text); `missed_ping`
+  copy unchanged; a nil incident degrades to the missed-ping copy.
+- **[gem]**: `handle_discard` resolves keys and posts `status=1&message=…`
+  with truncation; `ping_on_failure = false` disables; dispatcher/exception
   swallowing; `after_discard` wiring smoke test on the inline adapter
-  (raise with no retry_on → one fail ping; retry_on succeeding on attempt 2 →
-  **zero** fail pings; retries exhausted → exactly one).
-- **[system] — non-negotiable browser flow**: seed a monitor `up`; hit the fail
-  endpoint; assert the detail page shows the red banner **with the error class
-  and message**, the recent-events row, and the row badge flipped without a
-  reload (Turbo Stream); `perform_enqueued_jobs` and assert the `down` email
-  contains the error; then a success ping → banner gone, `recovered` email.
-  One robust flow test, per the "flows, not coverage theatre" rule.
+  (raise with no retry_on → one failure report; retry_on succeeding on attempt
+  2 → **zero** reports; retries exhausted → exactly one).
+- **[system] — non-negotiable browser flow**: seed a monitor `up`; hit the
+  ping URL with `status=1&message=…`; assert the detail page shows the red
+  banner **with the error text**, the recent-events row, and the row badge
+  flipped without a reload (Turbo Stream); `perform_enqueued_jobs` and assert
+  the down email contains the error; then a success ping → banner gone,
+  `recovered` email. One robust flow test, per the "flows, not coverage
+  theatre" rule.
 
-Docs: update `api.md` (the `/fail` contract), `integrating.md` (§1.3 new
-config flag, §2 curl-on-failure pattern, §3 "what you'll see"), and
-`specs/README.md`'s data-model section (new columns/values) when this ships.
+Docs: update `api.md` (the new params), `integrating.md` (§1.3 new config
+flag, §2 curl-with-`$?` pattern, §3 "what you'll see"), and — **required by
+§5.1** — the locked-decisions table in `specs/README.md` (amended #2, the new
+columns/values in the data-model section).
 
 ---
 
 ## 12 · Open decisions (each with a recommendation)
 
-- **A · Backtraces?** Ship class + message only. **Recommend: yes, defer
+- **A · Backtraces?** Ship the free-text `error` only. **Recommend: yes, defer
   backtraces.** They answer the *next* question (where), not this spec's
   question (what); they balloon payload/storage; they're the highest-risk text
   for secret leakage (§10); and the user's error tracker already owns "where".
@@ -458,31 +517,40 @@ config flag, §2 curl-on-failure pattern, §3 "what you'll see"), and
   **Recommend: keep the first error** (it's what the email said; an incident is
   "what took it down"). Later failures are visible in recent events. Updating
   in place would make the banner disagree with the email in the user's inbox.
+  (Whether repeats *re-alert* is not open — decided **no** in §5.1.)
 - **C · Should a failure ping while `pending` alert?** Spec says yes (§5): the
   first-ever signal being "I failed" is exactly when a new user most needs the
   loop to work. The alternative (stay pending, wait for a success first) hides
   a real failure behind onboarding state. **Recommend: alert.**
 - **D · Error in the email subject?** **Recommend: no** — subject stays
-  `"<name> failed"`. Keeps headers injection-proof and lock-screen previews
-  clean; the body carries the detail.
-- **E · Per-attempt failure reporting (a `ping_on_retry`-style option)?**
+  `"<name> reported an error"`. Keeps headers injection-proof and lock-screen
+  previews clean; the body carries the detail.
+- **E · Store `message` on success pings too?** DMS captures output on every
+  check-in. **Recommend: not in V1** — success messages have no surface to
+  render on (no incident, no email) and would 10× the text volume of the
+  hottest table for nothing. Additive later if a "last run output" panel is
+  wanted; the param is simply ignored on success meanwhile.
+- **F · Also support a `/fail` URL alias (Healthchecks convention)?**
+  **Recommend: defer.** Two public contracts means double documentation and
+  tests for zero new capability — `status=$?` covers the trap-based shell case
+  a `/fail` URL serves. Trivially additive later (a route that forces
+  `kind: "failure"` into the same controller).
+- **G · Per-attempt failure reporting (a `ping_on_retry`-style option)?**
   **Recommend: not in V1.** Terminal-only (`after_discard`) is the correct
-  default signal (§3.1); per-attempt reporting reintroduces the down/recovered
+  default signal (§3.2); per-attempt reporting reintroduces the down/recovered
   noise this design avoids. Revisit only if users ask to see flappy retries.
-- **F · New locked decision to record on ship:** *"An explicit failure report
-  flips a live monitor `down` immediately — grace applies only to absence"*
-  (§5), alongside the existing table in `README.md` §1.
 
 ---
 
 ## 13 · Out of scope / future
 
-- Webhook/Slack channels for failure alerts — arrives free with the V2
+- Webhook/Slack channels for error alerts — arrives free with the V2
   `Notifications::Channel` expansion; the error already rides the
   incident/notification.
 - Error grouping/dedup ("this job has failed with the same error 4 runs
   running"), links out to error trackers, failure-rate stats.
-- The uptime probe (`uptime-monitor.md`) writing `kind: "failure"` +
-  `error_class` (e.g. `Net::ReadTimeout`, `HTTP 503`) through these same
-  columns — this spec deliberately builds the columns it reserved, so the
-  probe lands on prepared ground.
+- Success-ping output capture (§12-E) and a "last run output" panel.
+- The uptime probe (`uptime-monitor.md`) writing `kind: "failure"` + `error`
+  (e.g. `Net::ReadTimeout`, `HTTP 503`) through these same columns — this spec
+  deliberately builds the columns it reserved, so the probe lands on prepared
+  ground.
