@@ -18,10 +18,10 @@ module Billing
         mode: "subscription",
         line_items: price_id,
         # One Pro subscription per customer.
-        subscription_data: { metadata: { user_id: current_user.id } },
+        subscription_data: {metadata: {user_id: current_user.id}},
         # Stripe Tax (PRD §12): compute VAT/sales tax at checkout.
-        automatic_tax: { enabled: true },
-        customer_update: { address: "auto" },
+        automatic_tax: {enabled: true},
+        customer_update: {address: "auto"},
         success_url: billing_subscription_url,
         cancel_url: billing_subscription_url
       )

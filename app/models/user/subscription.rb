@@ -15,6 +15,10 @@ class User
     included do
       # Make the User a Pay billable: pay_customers / subscriptions / charges.
       pay_customer
+
+      # Pay reads the Stripe customer email from `owner.email`; Rails 8 auth stores it
+      # as email_address.
+      alias_attribute :email, :email_address
     end
 
     # Find or create the user's default Stripe customer, ready for Checkout/Portal.
@@ -123,10 +127,11 @@ class User
     end
 
     private
-      # The user's active Pro subscription per Pay's mirror (active scope, not just
-      # newest-created), so we never act on a stale/canceled row.
-      def pro_subscription
-        payment_processor&.subscriptions&.active&.find_by(name: PRO_PRODUCT)
-      end
+
+    # The user's active Pro subscription per Pay's mirror (active scope, not just
+    # newest-created), so we never act on a stale/canceled row.
+    def pro_subscription
+      payment_processor&.subscriptions&.active&.find_by(name: PRO_PRODUCT)
+    end
   end
 end
