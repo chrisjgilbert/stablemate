@@ -129,22 +129,41 @@ module Monitoring
         end
 
         # The live status of the current, not-yet-rolled day, derived from the
-        # monitor's present state: paused/suspended/pending → no-data; an open
-        # incident today → down (or partial if the day also saw up time); otherwise
-        # up. `suspended` (plan-downgrade, issue #19) is not-monitored like `paused`,
-        # so today's segment is no-data, not a phantom green `up`.
+        # monitor's present state: paused/suspended/pending → no-data; otherwise
+        # today's down seconds so far (from ANY incident overlapping today, open OR
+        # already resolved — a same-day down-then-recovery must still show
+        # partial, never a phantom green `up`) versus the elapsed monitored time,
+        # classified by the same up/down/partial cutoffs as a rolled-up day
+        # (UptimeDayStat#status) via an unsaved instance, so today never drifts
+        # from how it will be classified once tonight's rollup persists it.
+        # `suspended` (plan-downgrade, issue #19) is not-monitored like `paused`, so
+        # today's segment is no-data, not a phantom green `up`.
         def live_today_status
           return :no_data if paused? || suspended? || pending?
 
-          incident = open_incident
-          if incident
-            started_today = incident.started_at.to_date >= Date.current
-            # Down all of today so far if the incident predates today; otherwise it
-            # only covers part of today → partial.
-            started_today ? :partial : :down
-          else
-            :up
-          end
+          now = Time.current
+          window_start = [ created_at, first_ping_at, Date.current.to_time(:utc) ].compact.max
+          return :no_data if window_start >= now
+
+          down = today_down_seconds(window_start, now)
+          up   = [ (now - window_start).to_i - down, 0 ].max
+          UptimeDayStat.new(up_seconds: up, down_seconds: down).status
+        end
+
+        # Down seconds from window_start through now, overlapped by any incident
+        # interval (mirrors UptimeRollup#raw_down_seconds, but the window end is
+        # "now" rather than end-of-day since today isn't rolled up yet). An
+        # already-resolved incident counts the same as a still-open one. Scoped to
+        # incidents that could actually overlap the window, so a long-lived
+        # monitor's full incident history isn't scanned on every render.
+        def today_down_seconds(window_start, now)
+          incidents
+            .where("started_at < ? AND (resolved_at IS NULL OR resolved_at >= ?)", now, window_start)
+            .find_each.sum do |incident|
+              overlap_start = [ incident.started_at, window_start ].max
+              overlap_end   = [ incident.resolved_at || now, now ].min
+              [ (overlap_end - overlap_start).to_i, 0 ].max
+            end
         end
     end
   end
