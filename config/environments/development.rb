@@ -34,6 +34,12 @@ Rails.application.configure do
   # Don't care if the mailer can't send.
   config.action_mailer.raise_delivery_errors = false
 
+  # View emails in the browser instead of sending them — letter_opener opens each
+  # one in a new tab and nothing ever leaves the machine. (The non-prod mail guard
+  # in config/initializers/mail_interceptor.rb is a no-op for this local method and
+  # only kicks in if you point dev at real SMTP.)
+  config.action_mailer.delivery_method = :letter_opener
+
   # Make template changes take effect immediately.
   config.action_mailer.perform_caching = false
 
