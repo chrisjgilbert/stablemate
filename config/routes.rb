@@ -65,6 +65,11 @@ Rails.application.routes.draw do
   # `curl` works; recorded as a "create" of a ping. (architecture.md §7)
   match "/ping/:ping_token", to: "pings#create", via: %i[get post], as: :ping
 
+  # Public marketing pricing page (issue #45). Renders for everyone, signed in
+  # or not, regardless of the billing config-gate — it's marketing, not a
+  # billing surface (unlike the Billing:: namespace, which 404s when keyless).
+  get "pricing", to: "pages#pricing"
+
   # Defines the root path route ("/"). Anonymous visitors get the marketing
   # landing page; signed-in users are redirected to their dashboard. (phase-4)
   root "pages#home"

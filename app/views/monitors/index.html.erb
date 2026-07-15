@@ -21,7 +21,7 @@
 </div>
 
 <% if at_cap %>
-  <% if billing_enabled? && current_user.free? %>
+  <% if current_user.can_upgrade_to_pro? %>
     <%# Hosted tier: the at-limit prompt is an upgrade nudge (PRD §5.6). %>
     <div class="mb-6 flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 shadow-sm" data-testid="at-limit-note">
       <p class="text-[13px] text-muted">

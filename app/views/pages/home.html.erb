@@ -6,9 +6,11 @@
   wraps the yield) so the authenticated app's Tailwind tokens are untouched.
 
   Deviations from the design mockup (all deliberate):
-    * No pricing/tier/upgrade UI (locked: one Free plan) — the mockup's "Pricing"
-      footer link is dropped and hosted-allowance copy flows through
-      free_plan_monitors_phrase so it reads for both the capped and uncapped plan.
+    * Pricing lives on its own page (GET /pricing, issue #45) rather than inline
+      here — this page keeps its general "let us host it" copy via
+      free_plan_monitors_phrase (reads for both the capped and uncapped self-host
+      plan); /pricing states the real hosted Free/Pro numbers from the plan
+      constants, since that's the one place a concrete figure belongs.
     * Brand uses the typographic wordmark "Stablemate." (Zilla Slab, red period)
       per the mockup, not shared/logo (that glyph stays for the authenticated app).
     * The 90-day ledger bars are rendered SERVER-SIDE via an ERB loop over
@@ -16,25 +18,10 @@
     * Every "90 days" reference goes through ping_retention_days so marketing can't
       drift from the product's actual retention.
 %>
-<% docs_url = "https://github.com/chrisjgilbert/stablemate/blob/main/docs/integrating.md" %>
-<% repo_url = "https://github.com/chrisjgilbert/stablemate" %>
+<% repo_url = stablemate_repo_url %>
 
 <%# ===== NAV ===== %>
-<nav class="nav">
-  <div class="wrap nav__row">
-    <%= link_to root_path, class: "brand" do %>Stablemate<span class="dot">.</span><% end %>
-    <div class="nav__links">
-      <a href="#how">How it works</a>
-      <a href="#spec">recurring.yml</a>
-      <a href="#mail">The email</a>
-      <a href="<%= docs_url %>">Docs</a>
-    </div>
-    <div class="nav__cta">
-      <%= link_to "Sign in", sign_in_path, class: "signin" %>
-      <%= link_to sign_up_path, class: "btn btn--primary" do %>Start free <span class="arw">→</span><% end %>
-    </div>
-  </div>
-</nav>
+<%= render "nav" %>
 
 <%# ===== HERO ===== %>
 <section class="hero">
@@ -203,8 +190,8 @@
 <%# ===== HONEST LINE ===== %>
 <section class="honest">
   <div class="wrap">
-    <h2 class="flow h2">No paid tier. No upsell. The code's on <a href="<%= repo_url %>">GitHub</a>.</h2>
-    <p>We can say it because it's true — there's nothing to sell you. Run it yourself for free, forever, or let us host it while it's small.</p>
+    <h2 class="flow h2">Free forever to self-host. Fair pricing if you'd rather we run it.</h2>
+    <p>The code's on <a href="<%= repo_url %>">GitHub</a>, AGPLv3 — run it yourself, no limits, nothing to buy. Prefer we host it? <a href="<%= pricing_path %>">See pricing</a>.</p>
   </div>
 </section>
 
@@ -225,23 +212,4 @@
 </section>
 
 <%# ===== COLOPHON ===== %>
-<footer>
-  <div class="wrap colophon">
-    <div>
-      <%= link_to root_path, class: "brand" do %>Stablemate<span class="dot">.</span><% end %>
-      <p>Super simple job monitoring for Rails. Open source under AGPLv3, or fully managed at stablemate.dev.</p>
-    </div>
-    <div>
-      <h4>Product</h4>
-      <a href="#how">How it works</a>
-      <a href="#spec">recurring.yml</a>
-      <a href="#mail">The email</a>
-    </div>
-    <div>
-      <h4>Elsewhere</h4>
-      <a href="<%= docs_url %>">Documentation</a>
-      <a href="<%= repo_url %>">GitHub</a>
-      <%= link_to "Sign in", sign_in_path %>
-    </div>
-  </div>
-</footer>
+<%= render "colophon" %>

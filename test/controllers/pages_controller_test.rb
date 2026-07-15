@@ -16,9 +16,74 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to monitors_path
   end
 
-  # No pricing/tier/upgrade UI anywhere on the landing page (one Free plan).
-  test "the landing page has no pricing or upgrade UI" do
+  # The landing page links to the pricing page but never hardcodes a figure
+  # itself — the numbers live on /pricing, sourced from the plan constants.
+  test "the landing page links to pricing without hardcoding a price" do
     get root_path
-    assert_no_match(/pricing|upgrade|\$\d|per month|\/mo\b/i, response.body)
+    assert_select "a[href=?]", pricing_path, text: "Pricing"
+    assert_no_match(/upgrade|\$\d|£\d|per month|\/mo\b/i, response.body)
+  end
+
+  # GET /pricing (issue #45) — public marketing page, no auth required.
+  test "the pricing page is public and shows both plans with their real limits" do
+    get pricing_path
+    assert_response :success
+    assert_select "a[href=?]", sign_up_path
+    assert_match(/Free/, response.body)
+    assert_match(/Pro/, response.body)
+    assert_match(/#{Stablemate::FREE_PLAN_MONITOR_LIMIT}/, response.body)
+    assert_match(/#{Stablemate::PRO_PLAN_MONITOR_LIMIT}/, response.body)
+  end
+
+  # It renders regardless of the billing config-gate — it's marketing, not a
+  # billing surface (unlike the Billing:: namespace, which 404s when keyless).
+  test "the pricing page renders even when billing is disabled (self-host default)" do
+    with_billing_disabled do
+      get pricing_path
+      assert_response :success
+    end
+  end
+
+  # Anonymous visitors can't buy Pro without an account — both CTAs go to sign-up.
+  test "an anonymous visitor's Pro CTA routes to sign-up, not straight to checkout" do
+    get pricing_path
+    assert_response :success
+    assert_select "form[action=?]", billing_checkout_path, count: 0
+  end
+
+  # A signed-in Free user on a billing-enabled instance gets a direct upgrade
+  # button (issue #45: "cheap to do" — skip the sign-up detour they don't need).
+  test "a signed-in free user on a billing-enabled instance can upgrade directly from pricing" do
+    with_billing_enabled do
+      sign_in users(:alice)
+      get pricing_path
+      assert_response :success
+      assert_select "form[action=?]", billing_checkout_path
+    end
+  end
+
+  # A signed-in Free user on a billing-DISABLED (self-host) instance has
+  # nothing to buy — the Pro CTA must not fall through to the anonymous
+  # "Start free" sign-up link (that would send an existing account back to
+  # registration). It gets sent to their dashboard instead, same as Free.
+  test "a signed-in free user on a billing-disabled instance never sees sign-up CTAs" do
+    with_billing_disabled do
+      sign_in users(:alice)
+      get pricing_path
+      assert_response :success
+      assert_select "a[href=?]", sign_up_path, count: 0
+      assert_select "a[href=?]", monitors_path, minimum: 1
+    end
+  end
+
+  # Signed-in visitors reach /pricing directly (unlike the root, it doesn't
+  # redirect them away) — the shared nav/footer must reflect that instead of
+  # offering "Sign in" / "Start free" to someone already signed in.
+  test "a signed-in visitor's nav on the pricing page offers their dashboard, not sign-up" do
+    sign_in users(:alice)
+    get pricing_path
+    assert_response :success
+    assert_select "a[href=?]", sign_in_path, count: 0
+    assert_select "a[href=?]", monitors_path, minimum: 2 # nav + colophon
   end
 end

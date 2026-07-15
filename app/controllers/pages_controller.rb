@@ -1,11 +1,12 @@
 class PagesController < ApplicationController
-  # The marketing landing page is public; signed-in users skip it and go straight
-  # to their dashboard.
-  allow_unauthenticated_access only: :home
+  # The marketing landing and pricing pages are public. Signed-in users skip the
+  # landing page and go straight to their dashboard; pricing stays visible to
+  # everyone, signed in or not — it's marketing, not app chrome.
+  allow_unauthenticated_access only: %i[home pricing]
 
-  # The marketing landing renders full-bleed — its own nav/footer and full-width
-  # dark sections — so it opts out of the constrained authenticated app chrome.
-  layout "landing", only: :home
+  # Both render full-bleed — their own nav/footer and full-width sections — so
+  # they opt out of the constrained authenticated app chrome.
+  layout "landing", only: %i[home pricing]
 
   def home
     if authenticated?
@@ -14,5 +15,8 @@ class PagesController < ApplicationController
       flash.keep
       redirect_to monitors_path
     end
+  end
+
+  def pricing
   end
 end

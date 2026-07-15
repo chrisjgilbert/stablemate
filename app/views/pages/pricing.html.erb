@@ -1,0 +1,143 @@
+<% content_for :title, "Pricing — Stablemate" %>
+<%#
+  Marketing pricing page (issue #45). Same "Omakase" system as home.html.erb —
+  no new CSS system, no client JS, styled entirely with app/assets/stylesheets/
+  landing.css (a few pricing-specific classes were added there: .plans/.plan,
+  .band, .faq — all built from the same tokens as everything else on .lp).
+
+  Sense-checks (see the issue for the full list):
+    * The Pro price is NOT decided yet. It's shown as a clearly-marked "TBC"
+      placeholder rather than a hardcoded figure — flagged again in the PR.
+    * Only features that ship today are listed. Projects / per-project API keys
+      (docs/specs/projects.md) and Slack/webhook alerts are specced but not
+      built, so they're omitted rather than presented as available.
+    * Plan allowances come straight from Stablemate::FREE_PLAN_MONITOR_LIMIT /
+      PRO_PLAN_MONITOR_LIMIT — never a bare "5" or "100" in this file.
+    * Renders regardless of Stablemate.billing_enabled? — it's marketing, not a
+      billing surface. Both CTAs branch on signed-in-ness first (never fall
+      through to a sign-up link for someone already signed in): anonymous
+      visitors go to sign-up (you can't buy Pro without an account); a
+      signed-in Pro user gets "Manage plan"; a signed-in Free user gets a
+      direct Upgrade button when billing is enabled, or "Go to dashboard"
+      otherwise (self-host — there's nothing to buy).
+%>
+<% repo_url = stablemate_repo_url %>
+<% install_guide_url = stablemate_docs_url("install.md") %>
+<% free_limit = Stablemate::FREE_PLAN_MONITOR_LIMIT %>
+<% pro_limit = Stablemate::PRO_PLAN_MONITOR_LIMIT %>
+<% signed_in = authenticated? %>
+
+<%# ===== NAV ===== %>
+<%= render "nav" %>
+
+<%# ===== HEADER ===== %>
+<section class="section" id="pricing-header">
+  <div class="wrap sec-intro">
+    <p class="kicker">Pricing</p>
+    <h1 class="flow h2">Simple, <span class="hl">honest</span> pricing.</h1>
+    <p class="sub">Self-host it for free, forever. Or let us run it — one hosted plan free, one paid.</p>
+  </div>
+</section>
+
+<%# ===== PLANS ===== %>
+<section class="section" style="padding-top:0">
+  <div class="wrap">
+    <div class="plans">
+      <div class="plan">
+        <h2 class="plan__name">Free</h2>
+        <p class="plan__for">Side projects and small apps — or anyone trying us out before self-hosting.</p>
+        <p class="plan__price"><span class="tnum">£0</span><span class="per">/forever</span></p>
+        <ul class="checklist">
+          <li><span class="tick">✓</span><div>Up to <b><%= free_limit %> monitors</b></div></li>
+          <li><span class="tick">✓</span><div>One-line gem — reads <b>config/recurring.yml</b> on boot</div></li>
+          <li><span class="tick">✓</span><div>Down + recovered email alerts</div></li>
+          <li><span class="tick">✓</span><div><%= ping_retention_days %>-day ping history &amp; uptime stats</div></li>
+          <li><span class="tick">✓</span><div>API key access</div></li>
+        </ul>
+        <% if signed_in %>
+          <%= link_to "Go to dashboard", monitors_path, class: "btn btn--ghost" %>
+        <% else %>
+          <%= link_to "Start free", sign_up_path, class: "btn btn--ghost" %>
+        <% end %>
+      </div>
+
+      <div class="plan plan--pro">
+        <span class="plan__badge">More room to grow</span>
+        <h2 class="plan__name">Pro</h2>
+        <p class="plan__for">Teams running more scheduled jobs than the Free cap covers.</p>
+        <p class="plan__price"><span class="tnum ph" title="Price not yet finalised">TBC</span><span class="per">/month, excl. VAT where applicable</span></p>
+        <p class="plan__note">Placeholder — final Pro pricing hasn't been signed off yet.</p>
+        <ul class="checklist">
+          <li><span class="tick">✓</span><div>Up to <b><%= pro_limit %> monitors</b></div></li>
+          <li><span class="tick">✓</span><div>Everything in Free — same engine, more room</div></li>
+          <li><span class="tick">✓</span><div>Downgrade any time, no lock-in</div></li>
+        </ul>
+        <% if !signed_in %>
+          <%= link_to "Start free", sign_up_path, class: "btn btn--primary" %>
+        <% elsif current_user.pro? %>
+          <%= link_to "Manage plan", billing_subscription_path, class: "btn btn--ghost" %>
+        <% elsif current_user.can_upgrade_to_pro? %>
+          <%= button_to "Upgrade to Pro", billing_checkout_path, class: "btn btn--primary", form: { style: "margin:0" } %>
+        <% else %>
+          <%# Signed-in Free user on a billing-disabled (self-host) instance — nothing
+              to buy here, so send them where the rest of the app does. %>
+          <%= link_to "Go to dashboard", monitors_path, class: "btn btn--ghost" %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+</section>
+
+<%# ===== SELF-HOST BAND ===== %>
+<section class="band">
+  <div class="wrap band__in">
+    <div class="stamp stamp--inline"><span class="b">FREE</span><span class="s">to self-host</span></div>
+    <p class="kicker">Run it yourself</p>
+    <h2 class="flow h2">Unlimited monitors. AGPLv3. Nothing to buy.</h2>
+    <p>Self-hosting has no monitor cap and no signup cap — the plans above are only for the instance we host at stablemate.dev. Clone the repo, point it at your own Postgres, and it's yours.</p>
+    <div class="hero__cta">
+      <a href="<%= repo_url %>" class="btn btn--cream">View on GitHub</a>
+      <a href="<%= install_guide_url %>" class="btn btn--onred">Self-host guide</a>
+    </div>
+  </div>
+</section>
+
+<%# ===== FAQ ===== %>
+<section class="section">
+  <div class="wrap">
+    <div class="sec-intro">
+      <p class="kicker">Questions</p>
+      <h2 class="flow h2">A few things people ask.</h2>
+    </div>
+
+    <dl class="faq">
+      <div>
+        <dt>What counts as a monitor?</dt>
+        <dd>One recurring job you're watching — one row in <code>config/recurring.yml</code>, or one you add by hand. Paused monitors still count toward the cap; only deleting one frees the slot.</dd>
+      </div>
+      <div>
+        <dt>What happens if I go over the Free cap?</dt>
+        <dd>New monitors are blocked once you're at the limit — nothing existing breaks. Delete one to make room, or upgrade to Pro for <%= pro_limit %>.</dd>
+      </div>
+      <div>
+        <dt>Can I cancel any time?</dt>
+        <dd>Yes. Cancelling drops you back to Free; if you're over the Free cap you choose which monitors to keep active, and the rest are suspended (not deleted) until you're back within it.</dd>
+      </div>
+      <div>
+        <dt>Do I need a card to start?</dt>
+        <dd>No. Free needs nothing but an email address. A card is only ever needed if you choose to upgrade to Pro.</dd>
+      </div>
+      <div>
+        <dt>Can I self-host instead?</dt>
+        <dd>Always. The full app is AGPLv3 on <a href="<%= repo_url %>">GitHub</a> — unlimited monitors, no account with us required. See the <a href="<%= install_guide_url %>">self-host guide</a>.</dd>
+      </div>
+      <div>
+        <dt>Where does my data live?</dt>
+        <dd>On the hosted plans, in our PostgreSQL database, backed up regularly. Ping history is kept for <%= ping_retention_days %> days on every plan. Self-hosted, it's wherever you run Postgres — entirely yours.</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<%# ===== COLOPHON ===== %>
+<%= render "colophon" %>

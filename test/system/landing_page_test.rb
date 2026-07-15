@@ -16,7 +16,7 @@ class LandingPageTest < ApplicationSystemTestCase
     assert_text "It's genuinely this simple"
     assert_text "already the to-do list"
     assert_text "it's worth reading"
-    assert_text "No paid tier. No upsell"
+    assert_text "Free forever to self-host"
     assert_text "shouldn't be a"
     assert_text "9 a.m. surprise"
 
@@ -32,11 +32,20 @@ class LandingPageTest < ApplicationSystemTestCase
     assert_current_path sign_up_path
   end
 
-  test "no pricing or paid-plan UI on the landing page (one free plan)" do
+  # The landing page links out to /pricing but never states a figure itself —
+  # the numbers live on the pricing page, sourced from the plan constants.
+  test "the landing page links to pricing without stating a price itself" do
     visit root_path
-    assert_no_text(/pricing/i)
-    assert_no_text(/\$\d/)        # no dollar prices
+    assert_link "Pricing", href: pricing_path
+    assert_no_text(/\$\d/)
+    assert_no_text(/£\d/)
     assert_no_text(/most popular/i)
+  end
+
+  test "the Pricing nav link leads to the pricing page" do
+    visit root_path
+    click_on "Pricing", match: :first
+    assert_current_path pricing_path
   end
 
   test "signed-in visitors are sent from the root to their dashboard" do

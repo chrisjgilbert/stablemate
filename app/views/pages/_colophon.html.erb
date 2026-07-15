@@ -1,0 +1,26 @@
+<%# Shared marketing footer — rendered by both home.html.erb and pricing.html.erb. %>
+<footer>
+  <div class="wrap colophon">
+    <div>
+      <%= link_to root_path, class: "brand" do %>Stablemate<span class="dot">.</span><% end %>
+      <p>Super simple job monitoring for Rails. Open source under AGPLv3, or fully managed at stablemate.dev.</p>
+    </div>
+    <div>
+      <h4>Product</h4>
+      <a href="<%= root_path %>#how">How it works</a>
+      <a href="<%= root_path %>#spec">recurring.yml</a>
+      <a href="<%= root_path %>#mail">The email</a>
+      <%= link_to "Pricing", pricing_path %>
+    </div>
+    <div>
+      <h4>Elsewhere</h4>
+      <a href="<%= stablemate_docs_url("integrating.md") %>">Documentation</a>
+      <a href="<%= stablemate_repo_url %>">GitHub</a>
+      <% if authenticated? %>
+        <%= link_to "Dashboard", monitors_path %>
+      <% else %>
+        <%= link_to "Sign in", sign_in_path %>
+      <% end %>
+    </div>
+  </div>
+</footer>

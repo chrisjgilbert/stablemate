@@ -223,6 +223,42 @@ html:has(.lp){background:var(--paper)}
 .lp .finale .deck em{color:inherit}   /* emphasis stays light on the red ground */
 .lp .finale .hero__cta{margin-top:32px}
 
+/* ---- pricing: plan cards (issue #45) ---- */
+.lp .plans{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start;margin-top:8px}
+.lp .plan{background:var(--paper-2);border:1.5px solid var(--rule-strong);border-radius:14px;
+  padding:34px 30px;display:flex;flex-direction:column;position:relative}
+.lp .plan--pro{background:var(--paper);border-color:var(--rails);box-shadow:6px 6px 0 var(--paper-3)}
+.lp .plan__badge{position:absolute;top:-14px;right:24px;background:var(--rails);color:var(--paper);
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 10px;border-radius:5px}
+.lp .plan__name{font-family:var(--display);font-weight:700;font-size:1.6rem;margin:0;letter-spacing:-.01em}
+.lp .plan__for{color:var(--ink-soft);font-size:.98rem;line-height:1.45;margin:8px 0 0}
+.lp .plan__price{margin:24px 0 0;font-family:var(--display);font-weight:700;font-size:2.3rem;
+  color:var(--ink);display:flex;align-items:baseline;gap:7px}
+.lp .plan__price .per{font-family:var(--mono);font-size:12.5px;font-weight:400;color:var(--ink-faint)}
+.lp .plan__price .ph{color:var(--rails)}
+.lp .plan__note{font-family:var(--mono);font-size:11px;color:var(--rails-deep);margin:6px 0 0}
+.lp .plan .checklist{margin-top:26px;flex:1}
+.lp .plan .btn{margin-top:28px;justify-content:center}
+@media(max-width:760px){.lp .plans{grid-template-columns:1fr}}
+
+/* ---- self-host band (dark, reuses the FREE-stamp motif inline) ---- */
+.lp .band{background:var(--ink);color:var(--paper)}
+.lp .band__in{padding:74px 0;text-align:center}
+.lp .band .stamp--inline{position:static;display:inline-block;transform:rotate(-6deg);margin-bottom:20px}
+.lp .band .kicker{color:var(--marker)}
+.lp .band .flow{color:var(--paper);margin-top:14px}
+.lp .band p{color:#C9C2B2;max-width:36rem;margin:18px auto 0;font-size:1.05rem;line-height:1.55}
+.lp .band .hero__cta{justify-content:center;margin-top:30px}
+
+/* ---- pricing FAQ ---- */
+.lp .faq{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:30px 44px}
+.lp .faq dt{font-family:var(--display);font-weight:700;font-size:1.14rem;color:var(--ink);margin:0 0 8px}
+.lp .faq dd{margin:0;color:var(--ink-soft);font-size:1rem;line-height:1.55}
+.lp .faq dd a{color:var(--rails);text-decoration:none;border-bottom:1px solid var(--rule-strong)}
+.lp .faq dd a:hover{color:var(--rails-deep);border-bottom-color:var(--rails)}
+@media(max-width:760px){.lp .faq{grid-template-columns:1fr}}
+
 /* ---- colophon ---- */
 .lp .colophon{border-top:1px solid var(--rule);padding:46px 0 60px;display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:32px}
 .lp .colophon .brand{font-size:20px}
