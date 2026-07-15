@@ -105,12 +105,19 @@ module Monitoring
       def recent_events(limit: 12)
         events = []
 
-        ping_events.order(received_at: :desc).limit(limit).pluck(:received_at, :duration_ms).each do |received_at, duration_ms|
-          events << Event.new(:ping, received_at, "Ping received", duration_ms)
+        ping_events.order(received_at: :desc).limit(limit)
+                   .pluck(:received_at, :duration_ms, :kind, :error).each do |received_at, duration_ms, kind, error|
+          if kind == "failure"
+            # The label stays one line in the feed (the partial truncates);
+            # the full error lives on the incident banner.
+            events << Event.new(:failure, received_at, "Error reported — #{error}", duration_ms)
+          else
+            events << Event.new(:ping, received_at, "Ping received", duration_ms)
+          end
         end
 
         incidents.order(started_at: :desc).limit(limit).each do |incident|
-          events << Event.new(:down, incident.started_at, "Went down — no ping received")
+          events << Event.new(:down, incident.started_at, incident_opened_label(incident))
           events << Event.new(:recovered, incident.resolved_at, "Recovered") if incident.resolved_at
         end
 
@@ -121,6 +128,16 @@ module Monitoring
       Event = Struct.new(:kind, :at, :label, :duration_ms)
 
       private
+        # Cause-aware "went down" copy (job-failure-details.md §9): what took the
+        # monitor down, not just that it went down.
+        def incident_opened_label(incident)
+          if incident.cause == "reported_error"
+            "Went down — job reported an error"
+          else
+            "Went down — no ping received"
+          end
+        end
+
         # The rolled-up day stats for the window, loaded once and memoized so the
         # detail panel's uptime_series + uptime_percent share a single query.
         def windowed_day_stats(days)

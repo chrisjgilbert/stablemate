@@ -90,6 +90,47 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_nil @monitor.uptime_percent(days: 90)
   end
 
+  # Recent events feed: pings + incident open/resolve, cause-aware labels
+  # (job-failure-details.md §9).
+  test "recent_events renders a success ping as a ping event" do
+    @monitor.ping_events.create!(received_at: 1.minute.ago, duration_ms: 42)
+
+    event = @monitor.recent_events.first
+
+    assert_equal :ping, event.kind
+    assert_equal "Ping received", event.label
+    assert_equal 42, event.duration_ms
+  end
+
+  test "recent_events renders a failure ping as a failure event carrying the error" do
+    @monitor.ping_events.create!(received_at: 1.minute.ago, kind: "failure",
+                                 error: "RuntimeError: backup disk full")
+
+    event = @monitor.recent_events.first
+
+    assert_equal :failure, event.kind
+    assert_equal "Error reported — RuntimeError: backup disk full", event.label
+  end
+
+  test "recent_events labels a missed_ping incident open as no ping received" do
+    @monitor.incidents.create!(started_at: 1.minute.ago, cause: "missed_ping")
+
+    event = @monitor.recent_events.first
+
+    assert_equal :down, event.kind
+    assert_equal "Went down — no ping received", event.label
+  end
+
+  test "recent_events labels a reported_error incident open as job reported an error" do
+    @monitor.incidents.create!(started_at: 1.minute.ago, cause: "reported_error",
+                               error: "RuntimeError: backup disk full")
+
+    event = @monitor.recent_events.first
+
+    assert_equal :down, event.kind
+    assert_equal "Went down — job reported an error", event.label
+  end
+
   # MiniTicks helper: last 16 ping events mapped to up/down ticks.
   test "mini_ticks maps the last 16 ping events to up and down ticks" do
     18.times do |i|

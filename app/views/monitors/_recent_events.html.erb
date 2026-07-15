@@ -13,7 +13,7 @@
         <li class="py-2 flex items-center justify-between gap-4">
           <span class="flex items-center gap-2 min-w-0">
             <% dot = case event.kind
-                     when :down then "bg-down-dot"
+                     when :down, :failure then "bg-down-dot"
                      when :recovered then "bg-up-dot"
                      else "bg-paused-dot"
                      end %>

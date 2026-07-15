@@ -48,6 +48,19 @@ class ErrorNoticesTest < ApplicationSystemTestCase
     assert down_email, "expected a 'reported an error' email"
     assert_includes down_email.text_part.body.decoded, "RuntimeError: backup disk full"
 
+    # The detail page surfaces the cause: the banner leads with "reported an
+    # error" (not the missed-ping copy), shows the error text itself, and the
+    # recent-events feed carries the failure ping row.
+    visit monitor_path(monitor)
+    assert_selector "[data-testid=incident-banner]", text: "Monitor is down — the job reported an error"
+    assert_selector "[data-testid=incident-error]", text: "RuntimeError: backup disk full"
+    assert_selector "[data-testid=recent-events] li", text: "Error reported — RuntimeError: backup disk full"
+    assert_selector "[data-testid=recent-events] li", text: "Went down — job reported an error"
+    assert_no_text "no ping received"
+
+    # Back to the dashboard to watch the recovery land live.
+    visit monitors_path
+
     ActionMailer::Base.deliveries.clear
 
     # The next successful ping recovers it → one recovery email, badge flips back.
