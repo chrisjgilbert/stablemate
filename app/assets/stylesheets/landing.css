@@ -5,7 +5,8 @@
  * nothing here leaks into the authenticated app (which keeps the Tailwind
  * `@theme` tokens in app/assets/tailwind/application.css). The layout wraps the
  * page yield in `<div class="lp">`. @font-face is intentionally NOT ported —
- * the three families load via Google Fonts in layouts/landing.html.erb.
+ * the three families load via the self-hosted app/assets/stylesheets/fonts.css,
+ * included once for the whole app via layouts/_head.
  */
 
 :root{
