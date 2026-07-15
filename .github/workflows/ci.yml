@@ -38,7 +38,7 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check for a scaffolded app
         id: app
@@ -105,7 +105,7 @@ jobs:
       KNOWN_HOSTS: ${{ secrets.KNOWN_HOSTS }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Ruby (gives us bin/kamal)
         uses: ruby/setup-ruby@v1
