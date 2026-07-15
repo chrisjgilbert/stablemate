@@ -83,3 +83,6 @@ end
 gem "honeybadger", "~> 6.9"
 
 gem "letter_opener", "~> 1.10", group: :development
+
+# Catches unsafe migrations before they run [https://github.com/ankane/strong_migrations]
+gem "strong_migrations"
