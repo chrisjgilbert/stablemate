@@ -78,9 +78,17 @@ module Monitoring
     end
 
     # Record a ping: persist a PingEvent, advance the timestamps, transition, and
-    # (on recovery) resolve the incident + enqueue a `recovered` alert.
-    def check_in!(received_at: Time.current, source_ip: nil, duration_ms: nil)
-      CheckIn.new(self).check_in!(received_at:, source_ip:, duration_ms:)
+    # (on recovery) resolve the incident + enqueue a `recovered` alert. The facade
+    # routes by polarity — a failed ping is still a check-in, of bad news — with
+    # each outcome keeping its own operation, mirroring the CheckIn / MissedPing
+    # split (job-failure-details.md §5).
+    def check_in!(received_at: Time.current, kind: "success", error: nil,
+                  source_ip: nil, duration_ms: nil)
+      if kind == "failure"
+        FailureReport.new(self).report_failure!(received_at:, error:, source_ip:, duration_ms:)
+      else
+        CheckIn.new(self).check_in!(received_at:, source_ip:, duration_ms:)
+      end
     end
 
     # Flag this monitor down because its ping is overdue (called by the detection

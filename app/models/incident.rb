@@ -2,6 +2,13 @@ class Incident < ApplicationRecord
   belongs_to :monitor, class_name: "Monitoring::Monitor", inverse_of: :incidents
   has_many :notifications, dependent: :destroy
 
+  # What took the monitor down: a ping that never arrived, or a ping that
+  # explicitly reported an error (job-failure-details.md). A reported_error
+  # incident also carries the `error` text from the failure ping that opened it.
+  CAUSES = %w[missed_ping reported_error].freeze
+
+  validates :cause, inclusion: { in: CAUSES }
+
   scope :open, -> { where(resolved_at: nil) }
 
   # An incident is "open" until it is resolved by a recovering ping.

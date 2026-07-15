@@ -175,6 +175,26 @@ A bare `GET` works; `POST` is identical. Optionally report run latency:
 curl -fsS "https://stablemate.dev/ping/<ping_token>?duration_ms=842"
 ```
 
+### Report failures too (`status` / `message`)
+
+The same URL accepts an **error notice**: pass the job's exit code as `status`
+(`0`, blank, or absent = success; anything else = failure) and the error text as
+`message`. One snippet always fires and `$?` decides the polarity — no
+conditional logic in the shell:
+
+```sh
+# end of any cron job — success and failure ride the same line
+run_backup 2>/tmp/backup.err
+curl -fsS "https://stablemate.dev/ping/<ping_token>" \
+  --data-urlencode "status=$?" \
+  --data-urlencode "message=$(tail -c 500 /tmp/backup.err)"
+```
+
+A failure ping flips the monitor **down immediately** — no waiting out the
+grace window — and the alert email includes your `message` (or
+`exited with status <n>` if you send none). `s` and `m` work as short aliases;
+messages are truncated to 1,000 chars server-side.
+
 ### Ruby (Net::HTTP)
 
 ```ruby
@@ -201,6 +221,8 @@ end
 - A **pending** monitor flips to **up** on its first ping.
 - If a ping is overdue past the grace period, the monitor goes **down** and you
   get one `down` email.
+- A **failure ping** (`status` non-zero) flips the monitor **down immediately**
+  and the `down` email says what error was reported — no grace wait.
 - The next successful ping flips it back to **up** and sends one `recovered` email.
 - The dashboard shows a 90-day uptime bar per monitor.
 

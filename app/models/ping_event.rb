@@ -4,6 +4,12 @@ class PingEvent < ApplicationRecord
   # updated_at — no manual plumbing needed.
   belongs_to :monitor, class_name: "Monitoring::Monitor", inverse_of: :ping_events
 
+  # "success" is a normal check-in; "failure" is a reported error ("I ran, but I
+  # failed" — job-failure-details.md), which carries `error` text.
+  KINDS = %w[success failure].freeze
+
+  validates :kind, inclusion: { in: KINDS }
+
   # Raw pings older than the retention window are prunable (the rule lives here,
   # on the record; PrunePingEventsJob is iteration only). Relative to the constant
   # so changing PING_RETENTION changes the cutoff without touching the job/tests.

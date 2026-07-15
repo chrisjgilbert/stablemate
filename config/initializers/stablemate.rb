@@ -42,6 +42,11 @@ module Stablemate
 
   DEFAULT_GRACE_FRACTION = 0.15
 
+  # A reported failure's error text is truncated server-side to this many
+  # characters (job-failure-details.md §10) — the model layer applies it
+  # unconditionally, so the ping endpoint and any future channel share the bound.
+  ERROR_MESSAGE_LIMIT = 1_000
+
   def self.monitor_cap_enabled?
     MAX_MONITORS_PER_USER.positive?
   end
@@ -107,4 +112,5 @@ Rails.application.config.x.stablemate.tap do |c|
   c.detection_interval = Stablemate::DETECTION_INTERVAL
   c.ping_retention = Stablemate::PING_RETENTION
   c.default_grace_fraction = Stablemate::DEFAULT_GRACE_FRACTION
+  c.error_message_limit = Stablemate::ERROR_MESSAGE_LIMIT
 end

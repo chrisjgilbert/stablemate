@@ -93,7 +93,7 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
   # MiniTicks helper: last 16 ping events mapped to up/down ticks.
   test "mini_ticks maps the last 16 ping events to up and down ticks" do
     18.times do |i|
-      @monitor.ping_events.create!(received_at: i.minutes.ago, kind: i.even? ? "success" : "missed")
+      @monitor.ping_events.create!(received_at: i.minutes.ago, kind: i.even? ? "success" : "failure")
     end
 
     ticks = @monitor.mini_ticks
