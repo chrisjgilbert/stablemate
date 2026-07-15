@@ -11,25 +11,14 @@ class CreateProjectsAndReparentOwnership < ActiveRecord::Migration[8.1]
   # follows the backfill approach the spec's own adversarial review anticipated
   # for exactly this scenario (§13-B1, S1, S2): add the column nullable, backfill
   # each user's existing monitors/api_keys into a "Default" project (§13 line
-  # ~354 already names this project), then enforce NOT NULL.
+  # ~354 already names this project), then enforce NOT NULL. See the errata
+  # note added at docs/specs/projects.md §8.
   #
   # Written with explicit up/down (not `change`) so `db:rollback` round-trips.
   #
   # Ordering note: the old (user, registration_key) index must be dropped BEFORE
   # the user_id column, since Postgres auto-drops a composite index when one of its
   # columns goes — an explicit remove_index afterward would fail "does not exist".
-  class MigrationProject < ApplicationRecord
-    self.table_name = "projects"
-  end
-
-  class MigrationMonitor < ApplicationRecord
-    self.table_name = "monitors"
-  end
-
-  class MigrationApiKey < ApplicationRecord
-    self.table_name = "api_keys"
-  end
-
   def up
     create_table :projects do |t|
       t.references :user, null: false, foreign_key: true
@@ -86,6 +75,24 @@ class CreateProjectsAndReparentOwnership < ActiveRecord::Migration[8.1]
     change_column_null :monitors, :user_id, false
     change_column_null :api_keys, :user_id, false
 
+    # A user can now hold the same registration_key across two different
+    # projects (the exact collision the project scope fixes, §3.2) — that data
+    # can't be losslessly re-homed under the old per-user unique constraint.
+    # Fail with a clear message rather than a bare Postgres unique-violation.
+    collision = select_value(<<~SQL)
+      SELECT 1 FROM monitors
+      WHERE registration_key IS NOT NULL
+      GROUP BY user_id, registration_key
+      HAVING COUNT(*) > 1
+      LIMIT 1
+    SQL
+    if collision
+      raise ActiveRecord::IrreversibleMigration,
+        "Can't roll back: a user holds the same registration_key across multiple " \
+        "projects, which the old (user_id, registration_key) unique index can't " \
+        "represent. Reassign or remove the colliding monitors before rolling back."
+    end
+
     add_index :monitors, [ :user_id, :registration_key ],
               unique: true,
               where: "registration_key IS NOT NULL",
@@ -100,16 +107,36 @@ class CreateProjectsAndReparentOwnership < ActiveRecord::Migration[8.1]
 
   private
     # Every pre-existing user_id on monitors/api_keys moves into that user's
-    # "Default" project (find_or_create_by! so a retried/interrupted migration
-    # stays idempotent, per projects.md §13-S2).
+    # "Default" project — set-based SQL (not a per-user Ruby loop) so the
+    # ACCESS EXCLUSIVE locks add_reference/change_column_null already hold on
+    # these tables aren't extended by N round trips per pre-existing user
+    # (projects.md §13-S1). ON CONFLICT DO NOTHING makes it retry-safe.
     def backfill_default_projects
-      user_ids = (MigrationMonitor.where(project_id: nil).distinct.pluck(:user_id) +
-                  MigrationApiKey.where(project_id: nil).distinct.pluck(:user_id)).uniq
+      execute <<~SQL
+        INSERT INTO projects (user_id, name, created_at, updated_at)
+        SELECT DISTINCT user_id, 'Default', now(), now()
+        FROM (
+          SELECT user_id FROM monitors WHERE project_id IS NULL
+          UNION
+          SELECT user_id FROM api_keys WHERE project_id IS NULL
+        ) AS legacy_owners
+        ON CONFLICT (user_id, name) DO NOTHING
+      SQL
 
-      user_ids.each do |user_id|
-        project_id = MigrationProject.find_or_create_by!(user_id: user_id, name: "Default").id
-        MigrationMonitor.where(user_id: user_id, project_id: nil).update_all(project_id: project_id)
-        MigrationApiKey.where(user_id: user_id, project_id: nil).update_all(project_id: project_id)
-      end
+      execute <<~SQL
+        UPDATE monitors SET project_id = projects.id
+        FROM projects
+        WHERE projects.user_id = monitors.user_id
+          AND projects.name = 'Default'
+          AND monitors.project_id IS NULL
+      SQL
+
+      execute <<~SQL
+        UPDATE api_keys SET project_id = projects.id
+        FROM projects
+        WHERE projects.user_id = api_keys.user_id
+          AND projects.name = 'Default'
+          AND api_keys.project_id IS NULL
+      SQL
     end
 end
