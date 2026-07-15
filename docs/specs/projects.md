@@ -484,6 +484,16 @@ Per-project caps (e.g. as a paid lever) are explicitly **out of scope** (§12-F)
 
 ## 8 · Migration (destructive — pre-launch, no production data)
 
+> **Errata (2026-07-15):** the "no production data" premise below was false — production
+> already held real users with `monitors`/`api_keys` rows from before this migration
+> shipped, and the straight `null: false` add crashed prod with `PG::NotNullViolation`.
+> The shipped migration (`db/migrate/20260714120000_create_projects_and_reparent_ownership.rb`)
+> backfills a **"Default"** project per affected user instead of the no-backfill plan
+> this section describes — i.e. exactly the §13-B1/S1/S2 hazards this section calls
+> "moot" turned out to be live. Left the DECIDED text below as the historical record of
+> what was planned; don't reuse its "no backfill needed" reasoning for a future migration
+> without first confirming prod is actually empty.
+
 **DECIDED (§12-I): the app is unlaunched, so there is no production data to preserve —
 the migration is a single destructive schema change, not a phased backward-compatible
 rollout.** This collapses the phased-rollout hazards the pressure test raised (§13-B1,
