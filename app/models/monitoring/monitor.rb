@@ -77,10 +77,47 @@ module Monitoring
       open_incident&.resolve!(at:)
     end
 
+    # Open a fresh incident + its `down` Notification, only when none is open —
+    # the down-transition bookkeeping shared by MissedPing and FailureReport.
+    # Returns the `down` Notification to dispatch, or nil when an incident was
+    # already open (transition-only alerting: one email in, one out).
+    #
+    # The calling operation's row lock serialises every incident-creating path,
+    # so the exists? guard is decisive; the partial unique index is the
+    # last-resort backstop, and requires_new confines a RecordNotUnique to its
+    # savepoint so rescuing it does NOT poison the caller's outer transaction
+    # (the status="down" flip still commits).
+    def open_incident!(at:, cause:, error: nil)
+      return nil if incidents.open.exists?
+
+      incident =
+        transaction(requires_new: true) do
+          incidents.create!(started_at: at, cause:, error:)
+        end
+      notifications.create!(incident:, channel: "email", event: "down")
+    rescue ActiveRecord::RecordNotUnique
+      nil
+    end
+
     # Record a ping: persist a PingEvent, advance the timestamps, transition, and
-    # (on recovery) resolve the incident + enqueue a `recovered` alert.
-    def check_in!(received_at: Time.current, source_ip: nil, duration_ms: nil)
-      CheckIn.new(self).check_in!(received_at:, source_ip:, duration_ms:)
+    # (on recovery) resolve the incident + enqueue a `recovered` alert. The facade
+    # routes by polarity — a failed ping is still a check-in, of bad news — with
+    # each outcome keeping its own operation, mirroring the CheckIn / MissedPing
+    # split (job-failure-details.md §5).
+    def check_in!(received_at: Time.current, kind: "success", error: nil,
+                  source_ip: nil, duration_ms: nil)
+      # An unknown kind raises rather than falling through to the success arm:
+      # a typo'd or symbol kind silently recorded as a success would transmute a
+      # reported failure into a recovery (CheckIn hardcodes kind: "success", so
+      # PingEvent's inclusion validation could never catch it).
+      case kind.to_s
+      when "failure"
+        FailureReport.new(self).report_failure!(received_at:, error:, source_ip:, duration_ms:)
+      when "success"
+        CheckIn.new(self).check_in!(received_at:, source_ip:, duration_ms:)
+      else
+        raise ArgumentError, "unknown check-in kind: #{kind.inspect}"
+      end
     end
 
     # Flag this monitor down because its ping is overdue (called by the detection

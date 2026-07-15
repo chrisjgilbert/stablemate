@@ -29,41 +29,16 @@ module Monitoring
           return @monitor unless @monitor.up? && @monitor.overdue_now?
 
           @monitor.update!(status: "down")
-          incident = open_incident(now)
-          @notification = build_notification(incident)
+          # Shared down-transition bookkeeping (Monitor#open_incident!): opens the
+          # incident + `down` Notification only when none is open, so a continuing
+          # outage still produces exactly one down email.
+          @notification = @monitor.open_incident!(at: now, cause: "missed_ping")
         end
 
         Notifications::Dispatch.new(@notification).deliver if @notification
         @monitor.broadcast_status_update
         @monitor
       end
-
-      private
-        # Open a fresh incident only when none is currently open. The row lock in
-        # #flag_missed! already serialises every incident-creating path, so the guard above
-        # is decisive; the partial unique index is a last-resort backstop. The
-        # insert runs in its own savepoint (requires_new) so that a RecordNotUnique
-        # rolls back only the savepoint — rescuing it here does NOT poison the outer
-        # with_lock transaction, which still commits the status="down" flip.
-        def open_incident(now)
-          return nil if @monitor.incidents.open.exists?
-
-          @monitor.transaction(requires_new: true) do
-            @monitor.incidents.create!(started_at: now, cause: "missed_ping")
-          end
-        rescue ActiveRecord::RecordNotUnique
-          nil
-        end
-
-        def build_notification(incident)
-          return nil unless incident
-
-          @monitor.notifications.create!(
-            incident:,
-            channel: "email",
-            event: "down"
-          )
-        end
     end
   end
 end

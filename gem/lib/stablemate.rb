@@ -25,12 +25,21 @@ module Stablemate
       @config ||= Configuration.new
     end
 
-    # Reset config + the ping-URL cache (test helper). The cache write takes
-    # MERGE_LOCK like every other writer — a straggler sync thread's merge must
-    # not resurrect the pre-reset snapshot.
+    # The subscriber currently armed for terminal-failure reporting. The
+    # Base-level after_discard hook (registered EARLY, before the host's job
+    # classes load — see the railtie) delegates every discard here; nil (the
+    # default) makes that hook a no-op, so assigning this is what arms failure
+    # reporting. Set via Subscriber#subscribe_discards! behind the railtie's
+    # api_key/enabled_in? gates.
+    attr_accessor :execution_subscriber
+
+    # Reset config + the ping-URL cache + the armed subscriber (test helper).
+    # The cache write takes MERGE_LOCK like every other writer — a straggler
+    # sync thread's merge must not resurrect the pre-reset snapshot.
     def reset!
       MERGE_LOCK.synchronize { @ping_urls = nil }
       @config = Configuration.new
+      @execution_subscriber = nil
     end
 
     # The task key (or fallback job-class name) -> ping URL map. The map is an

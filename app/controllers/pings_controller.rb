@@ -52,8 +52,21 @@ class PingsController < ActionController::Base
     # Opaque 404 on an unknown token — no tenant leakage, no "not found" detail.
     return head :not_found unless monitor
 
+    # Error notices (job-failure-details.md §6): `status` (alias `s`) carries
+    # the job's exit code — blank/absent/"0" is a success, ANY other value a
+    # failure (polarity only; a garbage status can at worst flip the sender's
+    # own monitor down). `status` wins when both spellings are sent. Parsed
+    # once per request into locals — two ternaries reading separate helpers
+    # invited the predicates to drift apart.
+    status  = string_param(:status, :s)
+    failure = status.present? && status != "0"
+
     monitor.check_in!(
       received_at: Time.current,
+      kind: failure ? "failure" : "success",
+      # A failure without a message still records a non-blank error so the
+      # alert is never blank; truncation happens in the model layer.
+      error: failure ? string_param(:message, :m) || "exited with status #{status}" : nil,
       source_ip: request.remote_ip,
       duration_ms: numeric_duration_ms
     )
@@ -67,5 +80,13 @@ class PingsController < ActionController::Base
     # silently corrupt latency data.
     def numeric_duration_ms
       Integer(params[:duration_ms], exception: false)
+    end
+
+    # First present String among aliased params. Only String values count: this
+    # is a public endpoint, and bracket-syntax params (?status[]=1, ?status[a]=b)
+    # arrive as Array/Parameters — those must be ignored, not stored as
+    # stringified garbage. One helper so the rule can't drift between spellings.
+    def string_param(*names)
+      names.map { |name| params[name] }.find { |value| value.is_a?(String) && value.present? }
     end
 end

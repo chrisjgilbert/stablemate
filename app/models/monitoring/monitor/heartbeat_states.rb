@@ -57,6 +57,18 @@ module Monitoring
         last_ping_at.present?
       end
 
+      # Advance the contact timestamps for a ping of either polarity — the job
+      # ran (successfully or not), so the next run is expected one interval out.
+      # first_ping_at is recorded once, as the floor for uptime measurement
+      # (WU-10): days before it are no-data, never phantom-up; never moved
+      # afterward. Assigns only — the calling operation saves inside its lock.
+      def register_contact(received_at)
+        self.last_ping_at = received_at
+        self.next_due_at  =
+          expected_interval_seconds.blank? ? nil : received_at + expected_interval_seconds.seconds
+        self.first_ping_at ||= received_at
+      end
+
       # The moment this monitor is considered overdue (next_due_at + grace),
       # surfaced to the UI ("expected by ...").
       def due_with_grace_at

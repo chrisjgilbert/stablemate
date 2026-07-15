@@ -25,6 +25,10 @@ module Stablemate
     attr_writer :environment
     # Whether a successful job perform fires a ping.
     attr_accessor :ping_on_success
+    # Whether a TERMINAL job failure (discarded — unhandled raise, retry_on
+    # exhausted, or discard_on) reports the error to the monitor. Attempts that
+    # will be retried never report.
+    attr_accessor :ping_on_failure
     # Whether the railtie auto-registers monitors from config/recurring.yml on
     # boot (Layer 2). Default true — zero-config auto-registration is the gem's
     # headline behaviour. Set false when you'd rather manage monitors yourself
@@ -50,6 +54,7 @@ module Stablemate
       @environments = [ "production" ]
       @environment = nil
       @ping_on_success = true
+      @ping_on_failure = true
       @register_on_boot = true
       @recurring_path = "config/recurring.yml"
       @timeout = 2

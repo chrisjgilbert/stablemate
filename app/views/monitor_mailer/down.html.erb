@@ -1,15 +1,25 @@
-<h1 style="font-family: sans-serif; color: #c0282d;"><%= @monitor.name %> is down.</h1>
+<% if @reported_error %>
+  <h1 style="font-family: sans-serif; color: #c0282d;"><%= @monitor.name %> reported an error.</h1>
 
-<% if @expected_by %>
   <p style="font-family: sans-serif; color: #62626c;">
-    No ping arrived by
-    <span style="font-family: monospace;"><%= @expected_by.utc.strftime("%Y-%m-%d %H:%M UTC") %></span>.
-    Check your job logs to see what happened.
+    The job ran and reported a failure:
   </p>
+
+  <pre style="font-family: monospace; font-size: 14px; color: #c0282d; background: #f6f5f4; padding: 12px 16px; border-radius: 6px; white-space: pre-wrap; word-break: break-word;"><%= @error %></pre>
 <% else %>
-  <p style="font-family: sans-serif; color: #62626c;">
-    The job missed its expected check-in. Check your job logs to see what happened.
-  </p>
+  <h1 style="font-family: sans-serif; color: #c0282d;"><%= @monitor.name %> is down.</h1>
+
+  <% if @expected_by %>
+    <p style="font-family: sans-serif; color: #62626c;">
+      No ping arrived by
+      <span style="font-family: monospace;"><%= @expected_by.utc.strftime("%Y-%m-%d %H:%M UTC") %></span>.
+      Check your job logs to see what happened.
+    </p>
+  <% else %>
+    <p style="font-family: sans-serif; color: #62626c;">
+      The job missed its expected check-in. Check your job logs to see what happened.
+    </p>
+  <% end %>
 <% end %>
 
 <p style="font-family: sans-serif;">

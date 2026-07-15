@@ -18,7 +18,7 @@ Several originally-open product questions are decided and binding:
 | # | Question | Decision |
 |---|---|---|
 | 1 | Detection sweep cadence | **30 seconds** (Solid Queue recurring task `every: "30s"`). Down-detection may lag the grace boundary by up to one cycle; acceptable for cron granularity. |
-| 2 | Re-alert reminders | **Transition-only** — one `down` email per incident, one `recovered` email on resolution. No "still down" reminders in V1. |
+| 2 | Re-alert reminders | **Transition-only, and a reported error on a live (`up`/`pending`) monitor IS a transition — to `down`, immediately, with no grace.** One `down`-class email per incident regardless of cause; a repeat reported error while an incident is already open records a `PingEvent` but re-alerts **nothing** (exactly like repeat-missed-ping behaviour); one `recovered` email on resolution. Grace applies only to *absence*. No "still down" reminders in V1. (Amended by [`job-failure-details.md`](job-failure-details.md) §5.1.) |
 | 3 | Email verification | **Non-blocking** — verification email is sent, but unverified users operate fully. No gate on monitor creation. |
 | 4 | Gem ping reliability | **Fire-and-forget** — best-effort single async request, errors swallowed, never blocks the job. A transient outage is absorbed by the grace period. |
 | 5 | Irregular-cron interval | **Largest gap** — `expected_interval_seconds` = the longest gap between consecutive runs; user can tighten via UI override. |
@@ -175,12 +175,15 @@ delegates through the project.
 
 ### `PingEvent`
 `id`, `monitor_id`, `received_at` (not null), `kind` (string, default
-`"success"`), `source_ip` (null), `duration_ms` (null), `created_at`.
-Pruned after `PING_RETENTION`.
+`"success"`; `"success"`/`"failure"`), `source_ip` (null), `duration_ms` (null),
+⊕ `error` (text, null — the reported error on a `"failure"` ping, truncated to
+`ERROR_MESSAGE_LIMIT`), `created_at`. Pruned after `PING_RETENTION`.
 
 ### `Incident`
 `id`, `monitor_id`, `started_at` (not null), `resolved_at` (null), `cause`
-(string, default `"missed_ping"`), timestamps. **At most one open
+(string, default `"missed_ping"`; `"missed_ping"`/`"reported_error"`),
+⊕ `error` (text, null — copied from the failure ping that opened the incident,
+so it outlives ping pruning), timestamps. **At most one open
 (`resolved_at IS NULL`) per monitor** — enforce with a partial unique index.
 
 ### `UptimeDayStat`

@@ -155,6 +155,131 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # --- Error notices (job-failure-details.md §6) ----------------------------
+
+  # A non-zero status flips the monitor down immediately with one down email;
+  # the response is the same 200 as a success ping.
+  test "status=1 records a failure, flips the monitor down, and sends one down email" do
+    up = monitors(:up)
+
+    assert_enqueued_emails 1 do
+      get ping_path(up.ping_token, status: 1, message: "RuntimeError: boom")
+    end
+
+    assert_response :success
+    assert_equal({ "ok" => true }, response.parsed_body)
+    assert up.reload.down?
+    event = up.ping_events.order(:received_at).last
+    assert_equal "failure", event.kind
+    assert_equal "RuntimeError: boom", event.error
+    assert_equal "RuntimeError: boom", up.incidents.open.sole.error
+  end
+
+  test "the s and m aliases behave like status and message" do
+    up = monitors(:up)
+    get ping_path(up.ping_token, s: 1, m: "boom")
+
+    assert_response :success
+    assert up.reload.down?
+    assert_equal "boom", up.ping_events.order(:received_at).last.error
+  end
+
+  # status wins when both spellings are sent.
+  test "status=0 beats s=1 when both are sent" do
+    get ping_path(@monitor.ping_token, status: 0, s: 1)
+
+    assert_response :success
+    assert_equal "success", @monitor.ping_events.order(:received_at).last.kind
+    assert_equal "up", @monitor.reload.status
+  end
+
+  # Blank/absent/"0" status is the success path, exactly as today.
+  test "status=0 and a blank status take the success path unchanged" do
+    get ping_path(@monitor.ping_token, status: 0)
+    assert_equal "success", @monitor.ping_events.order(:received_at).last.kind
+
+    get ping_path(@monitor.ping_token, status: "")
+    assert_equal "success", @monitor.ping_events.order(:received_at).last.kind
+    assert_equal "up", @monitor.reload.status
+  end
+
+  # A message on a success ping is simply ignored in V1 (§12-E).
+  test "a message on a success ping is ignored" do
+    get ping_path(@monitor.ping_token, message: "not an error")
+
+    assert_response :success
+    event = @monitor.ping_events.order(:received_at).last
+    assert_equal "success", event.kind
+    assert_nil event.error
+  end
+
+  test "the message is truncated server-side to ERROR_MESSAGE_LIMIT" do
+    up = monitors(:up)
+    get ping_path(up.ping_token, status: 1, message: "e" * (Stablemate::ERROR_MESSAGE_LIMIT + 50))
+
+    assert_response :success
+    assert_equal Stablemate::ERROR_MESSAGE_LIMIT, up.ping_events.order(:received_at).last.error.length
+  end
+
+  # A failure with no message still records a non-blank error, so the alert is
+  # never blank.
+  test "a non-zero status without a message records 'exited with status <n>'" do
+    up = monitors(:up)
+    get ping_path(up.ping_token, status: 137)
+
+    assert_response :success
+    assert_equal "exited with status 137", up.ping_events.order(:received_at).last.error
+  end
+
+  test "POST with form-encoded status and message behaves like GET" do
+    up = monitors(:up)
+    post ping_path(up.ping_token), params: { status: "1", message: "boom" }
+
+    assert_response :success
+    assert up.reload.down?
+    assert_equal "boom", up.ping_events.order(:received_at).last.error
+  end
+
+  # Bracket-syntax params (?status[]=1, ?status[a]=b) arrive as Array/Parameters,
+  # not String — they must be ignored (success path), never stored as
+  # stringified garbage in a failure report.
+  test "an Array status is ignored and takes the success path" do
+    get ping_path(@monitor.ping_token, status: [ 1 ])
+
+    assert_response :success
+    event = @monitor.ping_events.order(:received_at).last
+    assert_equal "success", event.kind
+    assert_nil event.error
+    assert_equal "up", @monitor.reload.status
+  end
+
+  test "a Hash status is ignored and takes the success path" do
+    get ping_path(@monitor.ping_token, status: { a: 1 })
+
+    assert_response :success
+    event = @monitor.ping_events.order(:received_at).last
+    assert_equal "success", event.kind
+    assert_nil event.error
+  end
+
+  test "a non-String message on a failure falls back to 'exited with status <n>'" do
+    up = monitors(:up)
+    get ping_path(up.ping_token, status: 1, message: [ "x" ])
+
+    assert_response :success
+    assert up.reload.down?
+    assert_equal "exited with status 1", up.ping_events.order(:received_at).last.error
+  end
+
+  # The failure params change nothing about token opacity.
+  test "an unknown token with failure params still returns the opaque 404" do
+    assert_no_difference -> { PingEvent.count } do
+      get ping_path("definitely-not-a-real-token", status: 1, message: "boom")
+    end
+
+    assert_response :not_found
+  end
+
   # CSRF is disabled in the test env by default, which hides a real production
   # bug: a machine POST has no authenticity token. Turn forgery protection on
   # for this one test to prove the endpoint is genuinely CSRF-exempt.

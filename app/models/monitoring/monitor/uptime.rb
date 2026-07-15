@@ -99,28 +99,52 @@ module Monitoring
       end
 
       # The detail "recent events" feed: the most-recent pings interleaved with
-      # incident open/resolve events, newest first. Active incidents (the open
-      # `down` event) naturally lead because they carry the latest timestamp.
-      # Returns lightweight Event structs (kind, at, label, duration_ms).
+      # incident open/resolve events, newest first (kind-ranked at equal
+      # timestamps, so active incidents lead). Returns lightweight Event
+      # structs (kind, at, label, duration_ms).
       def recent_events(limit: 12)
         events = []
 
-        ping_events.order(received_at: :desc).limit(limit).pluck(:received_at, :duration_ms).each do |received_at, duration_ms|
-          events << Event.new(:ping, received_at, "Ping received", duration_ms)
+        ping_events.order(received_at: :desc).limit(limit)
+                   .pluck(:received_at, :duration_ms, :kind, :error).each do |received_at, duration_ms, kind, error|
+          if kind == "failure"
+            # The label stays one line in the feed (the partial truncates);
+            # the full error lives on the incident banner.
+            events << Event.new(:failure, received_at, "Error reported — #{error}", duration_ms)
+          else
+            events << Event.new(:ping, received_at, "Ping received", duration_ms)
+          end
         end
 
         incidents.order(started_at: :desc).limit(limit).each do |incident|
-          events << Event.new(:down, incident.started_at, "Went down — no ping received")
+          events << Event.new(:down, incident.started_at, incident_opened_label(incident))
           events << Event.new(:recovered, incident.resolved_at, "Recovered") if incident.resolved_at
         end
 
-        events.sort_by { |e| -e.at.to_f }.first(limit)
+        # Newest first; ties broken by kind. Equal timestamps are real, not an
+        # edge case: a reported failure's ping OPENS its incident at the same
+        # instant, and a recovery resolves at its ping's instant — Ruby's
+        # sort_by is unstable, so without the tiebreak the feed's row order
+        # (and which row survives the limit) would differ between renders. The
+        # incident narrative (down/recovered) sorts above the raw ping rows.
+        events.sort_by { |e| [ -e.at.to_f, EVENT_TIE_ORDER.fetch(e.kind) ] }.first(limit)
       end
 
       # A single row in the recent-events feed.
       Event = Struct.new(:kind, :at, :label, :duration_ms)
+      EVENT_TIE_ORDER = { down: 0, recovered: 1, failure: 2, ping: 3 }.freeze
 
       private
+        # Cause-aware "went down" copy (job-failure-details.md §9): what took the
+        # monitor down, not just that it went down.
+        def incident_opened_label(incident)
+          if incident.reported_error?
+            "Went down — job reported an error"
+          else
+            "Went down — no ping received"
+          end
+        end
+
         # The rolled-up day stats for the window, loaded once and memoized so the
         # detail panel's uptime_series + uptime_percent share a single query.
         def windowed_day_stats(days)

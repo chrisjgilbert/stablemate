@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_14_120001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_15_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -36,6 +36,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_14_120001) do
   create_table "incidents", force: :cascade do |t|
     t.string "cause", default: "missed_ping", null: false
     t.datetime "created_at", null: false
+    t.text "error"
     t.bigint "monitor_id", null: false
     t.datetime "resolved_at"
     t.datetime "started_at", null: false
@@ -179,6 +180,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_14_120001) do
   create_table "ping_events", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "duration_ms"
+    t.text "error"
     t.string "kind", default: "success", null: false
     t.bigint "monitor_id", null: false
     t.datetime "received_at", null: false

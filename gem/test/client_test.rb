@@ -34,4 +34,59 @@ class ClientTest < StablemateTest
   def test_5xx_is_error
     assert_equal :error, classify(Net::HTTPInternalServerError.new("1.1", "500", "Error"))
   end
+
+  # --- report_failure (spec §7): POST to the SAME ping URL, form-encoded
+  # status=1&message=…, same classification as #ping, never raises. ---
+
+  # Swap the private http_for seam for a recorder so the test can assert on the
+  # actual request the client would put on the wire — no real network.
+  def client_capturing_request(response)
+    captured = {}
+    fake_http = Object.new
+    fake_http.define_singleton_method(:post) do |path, body, headers = nil|
+      captured[:path] = path
+      captured[:body] = body
+      captured[:headers] = headers
+      response
+    end
+    c = client
+    c.define_singleton_method(:http_for) { |_uri| fake_http }
+    [ c, captured ]
+  end
+
+  def test_report_failure_posts_form_encoded_status_and_message_to_the_ping_url
+    c, captured = client_capturing_request(Net::HTTPOK.new("1.1", "200", "OK"))
+
+    result = c.report_failure("https://sm.test/ping/abc", message: "Boom: it broke")
+
+    assert_equal :ok, result
+    # The same ping URL — not a /fail suffix.
+    assert_equal "/ping/abc", captured[:path]
+    assert_equal "status=1&message=Boom%3A+it+broke", captured[:body]
+    assert_equal "application/x-www-form-urlencoded", captured[:headers]["Content-Type"]
+  end
+
+  def test_report_failure_truncates_the_message_client_side
+    c, captured = client_capturing_request(Net::HTTPOK.new("1.1", "200", "OK"))
+    limit = Stablemate::Client::ERROR_MESSAGE_LIMIT
+
+    c.report_failure("https://sm.test/ping/abc", message: "e" * (limit + 500))
+
+    sent = URI.decode_www_form(captured[:body]).to_h
+    assert_equal "1", sent["status"]
+    assert_equal "e" * limit, sent["message"]
+  end
+
+  def test_report_failure_classifies_stale_and_error_like_ping
+    c, = client_capturing_request(Net::HTTPNotFound.new("1.1", "404", "Not Found"))
+    assert_equal :stale, c.report_failure("https://sm.test/ping/abc", message: "m")
+
+    c, = client_capturing_request(Net::HTTPTooManyRequests.new("1.1", "429", "Too Many Requests"))
+    assert_equal :error, c.report_failure("https://sm.test/ping/abc", message: "m")
+  end
+
+  def test_report_failure_swallows_transport_errors
+    # An unroutable URL must not raise — same never-raise contract as #ping.
+    assert_equal :error, client.report_failure("http://127.0.0.1:1/ping/none", message: "m")
+  end
 end

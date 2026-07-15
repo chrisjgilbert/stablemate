@@ -24,13 +24,21 @@ path. `GET` and `POST` behave identically (a bare `curl` works).
 
 | Param | Type | Meaning |
 |---|---|---|
+| `status` (alias `s`) | string | Optional exit code. Blank/absent/`0` = success; **anything else = failure**. `status` wins if both spellings are sent. |
+| `message` (alias `m`) | string | Optional error text. Recorded only on failures; truncated to 1,000 chars. Ignored on success pings. |
 | `duration_ms` | integer | Optional run latency, recorded on the ping. Non-numeric values are ignored. |
+
+A failure ping (`status` non-zero) is an **error notice**: it flips a live
+monitor `down` immediately — no grace wait — and the down email carries the
+`message` (or `exited with status <n>` when no message is sent). A failure
+while the monitor is already down is recorded but never re-alerts. See
+[`integrating.md`](integrating.md) §2 for the cron pattern.
 
 ### Responses
 
 | Status | Body | When |
 |---|---|---|
-| `200` | `{"ok":true}` | Known token. Records the ping; transitions `pending→up` / `down→up`. |
+| `200` | `{"ok":true}` | Known token. Records the ping; transitions `pending→up` / `down→up`, or `→down` on a failure ping. |
 | `404` | — | Unknown token. **Opaque** — never reveals whether a token/monitor exists. |
 | `429` | — | Over the rate limit (see below). |
 

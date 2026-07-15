@@ -1,5 +1,13 @@
+<% if @reported_error %>
+<%= @monitor.name %> reported an error.
+
+The job ran and reported a failure:
+
+    <%= @error %>
+<% else %>
 <%= @monitor.name %> is down.
 
 <%= @monitor.name %> missed its expected check-in.<% if @expected_by %> No ping arrived by <%= @expected_by.utc.strftime("%Y-%m-%d %H:%M UTC") %>.<% end %> Check your job logs to see what happened.
+<% end %>
 
 View monitor: <%= monitor_url(@monitor) %>

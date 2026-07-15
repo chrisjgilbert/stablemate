@@ -26,6 +26,7 @@ Stablemate.configure do |c|
   c.api_key  = Rails.application.credentials.dig(:stablemate, :api_key) # sm_live_…
   c.endpoint = "https://stablemate.dev" # your own domain if self-hosting
   c.ping_on_success = true
+  c.ping_on_failure = true  # report terminal job failures as error notices
 end
 ```
 
@@ -60,17 +61,25 @@ Two layers, both keyed on the Solid Queue **task key**:
   monitor by hand and ping its URL from the command (details and the upgrade
   path in `docs/integrating.md`).
 - **Layer 1 — execution tracking.** A subscriber to `perform.active_job` pings
-  the matching monitor on every **successful** run. A raised job does **not**
-  ping (a missed beat is the signal). Pings are fire-and-forget on a background
-  thread with a short timeout, and every error is swallowed — Stablemate can
-  never break your jobs. Backend-agnostic: works on any ActiveJob adapter, not
-  just Solid Queue.
+  the matching monitor on every **successful** run, and a global
+  `ActiveJob::Base.after_discard` callback (Rails ≥ 7.1) reports **terminal
+  failures** — an unhandled raise, `retry_on` exhausted, or `discard_on` — as
+  an error notice (`status=1` + `ExceptionClass: message`) on the same ping
+  URL, flipping the monitor down immediately with the error in the alert.
+  Attempts that will be retried send nothing at all — no report, and no
+  success ping that would advance the monitor's clock; on hosts older than
+  7.1 (and for a job that never runs at all) the missed beat remains the
+  signal. All
+  requests are fire-and-forget on a background thread with a short timeout,
+  and every error is swallowed — Stablemate can never break your jobs.
+  Backend-agnostic: works on any ActiveJob adapter, not just Solid Queue.
 
 ### Manual fallback (no Layer 2)
 
 An app that skips registration can still use Layer 1 against a **manually
 created** monitor whose `registration_key` equals the job class name (e.g.
-`CleanupJob`). The subscriber pings it on success.
+`CleanupJob`). The subscriber pings it on success and reports its terminal
+failures.
 
 ## Configuration
 
@@ -81,6 +90,7 @@ created** monitor whose `registration_key` equals the job class name (e.g.
 | `environments` | `["production"]` | Environments where the railtie auto-wires (boot sync + subscriber). Array, bare string/symbol, or `nil` (= wherever an `api_key` is set). `rails stablemate:sync` runs regardless — but it still reads the *current* environment's `recurring.yml` section, so run it in the environment you mean to register |
 | `environment` | `Rails.env` (else `RAILS_ENV`/`RACK_ENV`, else `development`) | The environment name used by the gate above and for `recurring.yml` section scoping |
 | `ping_on_success` | `true` | Ping when a monitored job completes cleanly |
+| `ping_on_failure` | `true` | Report a terminal job failure (unhandled raise, `retry_on` exhausted, `discard_on`) as an error notice — the monitor goes down immediately and the alert carries `ExceptionClass: message` (truncated to 1,000 chars). Needs Rails ≥ 7.1; retried attempts never report |
 | `register_on_boot` | `true` | Auto-register monitors from `recurring.yml` on boot (Layer 2). Set `false` to manage monitors yourself (UI, or an explicit `rails stablemate:sync`) and stop every boot from upserting your `recurring.yml`. With it off, boot still attaches Layer 1 and loads your existing monitors' ping URLs read-only (`GET /monitors`), so successful runs still check in — the gem just never creates or edits monitors from `recurring.yml` |
 | `recurring_path` | `config/recurring.yml` | Solid Queue recurring config |
 | `timeout` | `2` | HTTP timeout (seconds) |
