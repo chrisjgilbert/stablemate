@@ -46,6 +46,33 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_equal :no_data, series.first
   end
 
+  # Bug: a resolved-earlier-today incident must still show today as partial, not
+  # a phantom green `up` — the live-today status previously only looked at the
+  # currently-open incident and ignored one already recovered from.
+  test "uptime_series shows today as partial after an incident resolved earlier today" do
+    # Pin "now" to midday so the 06:00-09:00 incident below is unambiguously in
+    # the past, regardless of what time of day this test actually runs.
+    travel_to Date.current.to_time(:utc) + 12.hours
+
+    @monitor.incidents.create!(
+      started_at: Date.current.to_time(:utc) + 6.hours,
+      resolved_at: Date.current.to_time(:utc) + 9.hours,
+      cause: "missed_ping"
+    )
+
+    series = @monitor.uptime_series(days: 90)
+
+    assert_equal :partial, series.last
+  end
+
+  test "uptime_series shows today as down when an open incident has covered all of today so far" do
+    @monitor.incidents.create!(started_at: 1.day.ago, cause: "missed_ping")
+
+    series = @monitor.uptime_series(days: 90)
+
+    assert_equal :down, series.last
+  end
+
   # Scenario 7 — overall % = up / (up + down), no-data excluded; hand fixture.
   test "uptime_percent is up over up-plus-down with no-data excluded" do
     base = Date.current - 10
