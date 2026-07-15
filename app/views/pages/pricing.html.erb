@@ -14,14 +14,18 @@
     * Plan allowances come straight from Stablemate::FREE_PLAN_MONITOR_LIMIT /
       PRO_PLAN_MONITOR_LIMIT — never a bare "5" or "100" in this file.
     * Renders regardless of Stablemate.billing_enabled? — it's marketing, not a
-      billing surface. The Pro CTA adapts: anonymous or self-host visitors go to
-      sign-up (you can't buy Pro without an account); a signed-in Free user on a
-      billing-enabled instance gets a direct Upgrade button straight to Checkout.
+      billing surface. Both CTAs branch on signed-in-ness first (never fall
+      through to a sign-up link for someone already signed in): anonymous
+      visitors go to sign-up (you can't buy Pro without an account); a
+      signed-in Pro user gets "Manage plan"; a signed-in Free user gets a
+      direct Upgrade button when billing is enabled, or "Go to dashboard"
+      otherwise (self-host — there's nothing to buy).
 %>
-<% repo_url = "https://github.com/chrisjgilbert/stablemate" %>
+<% repo_url = stablemate_repo_url %>
+<% install_guide_url = stablemate_docs_url("install.md") %>
 <% free_limit = Stablemate::FREE_PLAN_MONITOR_LIMIT %>
 <% pro_limit = Stablemate::PRO_PLAN_MONITOR_LIMIT %>
-<% pro_upgradeable = authenticated? && billing_enabled? && current_user.free? %>
+<% signed_in = authenticated? %>
 
 <%# ===== NAV ===== %>
 <%= render "nav" %>
@@ -50,7 +54,7 @@
           <li><span class="tick">✓</span><div><%= ping_retention_days %>-day ping history &amp; uptime stats</div></li>
           <li><span class="tick">✓</span><div>API key access</div></li>
         </ul>
-        <% if authenticated? %>
+        <% if signed_in %>
           <%= link_to "Go to dashboard", monitors_path, class: "btn btn--ghost" %>
         <% else %>
           <%= link_to "Start free", sign_up_path, class: "btn btn--ghost" %>
@@ -68,12 +72,16 @@
           <li><span class="tick">✓</span><div>Everything in Free — same engine, more room</div></li>
           <li><span class="tick">✓</span><div>Downgrade any time, no lock-in</div></li>
         </ul>
-        <% if pro_upgradeable %>
-          <%= button_to "Upgrade to Pro", billing_checkout_path, class: "btn btn--primary", form: { style: "margin:0" } %>
-        <% elsif authenticated? && current_user.pro? %>
-          <%= link_to "Manage plan", billing_subscription_path, class: "btn btn--ghost" %>
-        <% else %>
+        <% if !signed_in %>
           <%= link_to "Start free", sign_up_path, class: "btn btn--primary" %>
+        <% elsif current_user.pro? %>
+          <%= link_to "Manage plan", billing_subscription_path, class: "btn btn--ghost" %>
+        <% elsif current_user.can_upgrade_to_pro? %>
+          <%= button_to "Upgrade to Pro", billing_checkout_path, class: "btn btn--primary", form: { style: "margin:0" } %>
+        <% else %>
+          <%# Signed-in Free user on a billing-disabled (self-host) instance — nothing
+              to buy here, so send them where the rest of the app does. %>
+          <%= link_to "Go to dashboard", monitors_path, class: "btn btn--ghost" %>
         <% end %>
       </div>
     </div>
@@ -89,7 +97,7 @@
     <p>Self-hosting has no monitor cap and no signup cap — the plans above are only for the instance we host at stablemate.dev. Clone the repo, point it at your own Postgres, and it's yours.</p>
     <div class="hero__cta">
       <a href="<%= repo_url %>" class="btn btn--cream">View on GitHub</a>
-      <a href="https://github.com/chrisjgilbert/stablemate/blob/main/docs/install.md" class="btn btn--onred">Self-host guide</a>
+      <a href="<%= install_guide_url %>" class="btn btn--onred">Self-host guide</a>
     </div>
   </div>
 </section>
@@ -121,7 +129,7 @@
       </div>
       <div>
         <dt>Can I self-host instead?</dt>
-        <dd>Always. The full app is AGPLv3 on <a href="<%= repo_url %>">GitHub</a> — unlimited monitors, no account with us required. See the <a href="https://github.com/chrisjgilbert/stablemate/blob/main/docs/install.md">self-host guide</a>.</dd>
+        <dd>Always. The full app is AGPLv3 on <a href="<%= repo_url %>">GitHub</a> — unlimited monitors, no account with us required. See the <a href="<%= install_guide_url %>">self-host guide</a>.</dd>
       </div>
       <div>
         <dt>Where does my data live?</dt>

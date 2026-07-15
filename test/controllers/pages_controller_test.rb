@@ -21,7 +21,7 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
   test "the landing page links to pricing without hardcoding a price" do
     get root_path
     assert_select "a[href=?]", pricing_path, text: "Pricing"
-    assert_no_match(/\$\d|£\d|per month|\/mo\b/i, response.body)
+    assert_no_match(/upgrade|\$\d|£\d|per month|\/mo\b/i, response.body)
   end
 
   # GET /pricing (issue #45) — public marketing page, no auth required.
@@ -60,5 +60,30 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
       assert_response :success
       assert_select "form[action=?]", billing_checkout_path
     end
+  end
+
+  # A signed-in Free user on a billing-DISABLED (self-host) instance has
+  # nothing to buy — the Pro CTA must not fall through to the anonymous
+  # "Start free" sign-up link (that would send an existing account back to
+  # registration). It gets sent to their dashboard instead, same as Free.
+  test "a signed-in free user on a billing-disabled instance never sees sign-up CTAs" do
+    with_billing_disabled do
+      sign_in users(:alice)
+      get pricing_path
+      assert_response :success
+      assert_select "a[href=?]", sign_up_path, count: 0
+      assert_select "a[href=?]", monitors_path, minimum: 1
+    end
+  end
+
+  # Signed-in visitors reach /pricing directly (unlike the root, it doesn't
+  # redirect them away) — the shared nav/footer must reflect that instead of
+  # offering "Sign in" / "Start free" to someone already signed in.
+  test "a signed-in visitor's nav on the pricing page offers their dashboard, not sign-up" do
+    sign_in users(:alice)
+    get pricing_path
+    assert_response :success
+    assert_select "a[href=?]", sign_in_path, count: 0
+    assert_select "a[href=?]", monitors_path, minimum: 2 # nav + colophon
   end
 end

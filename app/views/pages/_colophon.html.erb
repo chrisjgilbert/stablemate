@@ -14,9 +14,13 @@
     </div>
     <div>
       <h4>Elsewhere</h4>
-      <a href="https://github.com/chrisjgilbert/stablemate/blob/main/docs/integrating.md">Documentation</a>
-      <a href="https://github.com/chrisjgilbert/stablemate">GitHub</a>
-      <%= link_to "Sign in", sign_in_path %>
+      <a href="<%= stablemate_docs_url("integrating.md") %>">Documentation</a>
+      <a href="<%= stablemate_repo_url %>">GitHub</a>
+      <% if authenticated? %>
+        <%= link_to "Dashboard", monitors_path %>
+      <% else %>
+        <%= link_to "Sign in", sign_in_path %>
+      <% end %>
     </div>
   </div>
 </footer>

@@ -39,6 +39,7 @@ class LandingPageTest < ApplicationSystemTestCase
     assert_link "Pricing", href: pricing_path
     assert_no_text(/\$\d/)
     assert_no_text(/£\d/)
+    assert_no_text(/most popular/i)
   end
 
   test "the Pricing nav link leads to the pricing page" do

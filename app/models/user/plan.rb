@@ -21,6 +21,14 @@ class User
     def free? = plan == FREE
     def pro?  = plan == PRO
 
+    # Whether this user could move to Pro right now — used by every "Upgrade"
+    # CTA (the at-cap nudge, the pricing page) so they can't drift on the
+    # eligibility rule. False on a keyless self-host instance (issue #19):
+    # there's no Pro to buy there, whatever the user's plan.
+    def can_upgrade_to_pro?
+      Stablemate.billing_enabled? && free?
+    end
+
     # The number of monitors this user may own, or nil when there is no cap
     # (unlimited — self-host with the env cap OFF).
     def monitor_limit

@@ -1,6 +1,11 @@
 <%# Shared marketing nav — rendered by both home.html.erb and pricing.html.erb.
     Section anchors are root_path-qualified so they work identically from any
-    marketing page, not just the one that owns the matching id. %>
+    marketing page, not just the one that owns the matching id.
+
+    home.html.erb never renders this while signed in (PagesController#home
+    redirects authenticated visitors to their dashboard before the view runs),
+    but pricing.html.erb stays open to everyone — so the CTA branches on
+    authenticated? rather than assuming every visitor here is anonymous. %>
 <nav class="nav">
   <div class="wrap nav__row">
     <%= link_to root_path, class: "brand" do %>Stablemate<span class="dot">.</span><% end %>
@@ -9,11 +14,15 @@
       <a href="<%= root_path %>#spec">recurring.yml</a>
       <a href="<%= root_path %>#mail">The email</a>
       <%= link_to "Pricing", pricing_path %>
-      <a href="https://github.com/chrisjgilbert/stablemate/blob/main/docs/integrating.md">Docs</a>
+      <a href="<%= stablemate_docs_url("integrating.md") %>">Docs</a>
     </div>
     <div class="nav__cta">
-      <%= link_to "Sign in", sign_in_path, class: "signin" %>
-      <%= link_to sign_up_path, class: "btn btn--primary" do %>Start free <span class="arw">→</span><% end %>
+      <% if authenticated? %>
+        <%= link_to "Go to dashboard", monitors_path, class: "btn btn--primary" %>
+      <% else %>
+        <%= link_to "Sign in", sign_in_path, class: "signin" %>
+        <%= link_to sign_up_path, class: "btn btn--primary" do %>Start free <span class="arw">→</span><% end %>
+      <% end %>
     </div>
   </div>
 </nav>

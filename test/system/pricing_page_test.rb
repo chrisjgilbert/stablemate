@@ -55,4 +55,21 @@ class PricingPageTest < ApplicationSystemTestCase
       assert_text "Pro plan isn't configured"
     end
   end
+
+  # Unlike the root path, /pricing does NOT redirect signed-in visitors away —
+  # so a signed-in Free user browsing it on a self-hosted (billing-disabled)
+  # instance must never land on an anonymous "Start free" CTA (it would send
+  # them straight back to the sign-up form for an account they already have).
+  test "a signed-in free user on a self-hosted instance sees no sign-up CTAs on pricing" do
+    with_billing_disabled do
+      user = users(:alice)
+      sign_in user
+
+      visit pricing_path
+
+      assert_no_link "Sign in"
+      assert_no_link "Start free"
+      assert_link "Go to dashboard", count: 3 # nav + Free card + Pro card fallback
+    end
+  end
 end

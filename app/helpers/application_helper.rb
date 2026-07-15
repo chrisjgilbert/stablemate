@@ -22,4 +22,15 @@ module ApplicationHelper
   def billing_enabled?
     Stablemate.billing_enabled?
   end
+
+  # The GitHub repo, and a doc within it — one source for the marketing pages
+  # (home, pricing, and their shared nav/colophon partials) so a docs move or a
+  # repo rename can't leave one of them pointing at a stale link.
+  def stablemate_repo_url
+    "https://github.com/chrisjgilbert/stablemate"
+  end
+
+  def stablemate_docs_url(path)
+    "#{stablemate_repo_url}/blob/main/docs/#{path}"
+  end
 end
