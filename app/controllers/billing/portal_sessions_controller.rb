@@ -9,9 +9,11 @@ module Billing
         return_url: billing_subscription_url
       )
       redirect_to session.url, allow_other_host: true, status: :see_other
-    rescue ::Stripe::StripeError, Pay::Error
+    rescue ::Stripe::StripeError, Pay::Error => e
       # Catch Pay's wrapped errors too (see CheckoutsController) so a Stripe hiccup
-      # surfaces a retry message instead of an unhandled 500.
+      # surfaces a retry message instead of an unhandled 500 — and log it so the
+      # swallowed failure isn't invisible to us.
+      Rails.logger.error("[billing] portal session failed (user=#{current_user.id}): #{e.class}: #{e.message}")
       redirect_back_or_to billing_subscription_path, alert: "Couldn't open the billing portal. Please try again."
     end
   end

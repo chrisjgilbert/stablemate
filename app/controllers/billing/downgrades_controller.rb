@@ -30,11 +30,13 @@ module Billing
         render_new(status: :unprocessable_entity,
           alert: "Choose exactly #{Stablemate::FREE_PLAN_MONITOR_LIMIT} monitors to keep active.")
       end
-    rescue ::Stripe::StripeError, Pay::Error
+    rescue ::Stripe::StripeError, Pay::Error => e
       # cancel_now! wraps Stripe failures in Pay::Error; a real cancel failure would
       # otherwise escape as a 500. Stripe is cancelled before any monitor is
       # suspended (User::Downgrade#to_free!), so a failure here leaves nothing
-      # half-done. (The choose-N resolve path makes no Stripe call.)
+      # half-done. (The choose-N resolve path makes no Stripe call.) Log it so the
+      # swallowed failure isn't invisible to us.
+      Rails.logger.error("[billing] downgrade failed (user=#{current_user.id}): #{e.class}: #{e.message}")
       render_new(status: :service_unavailable, alert: "Couldn't complete the downgrade. Please try again.")
     end
 
