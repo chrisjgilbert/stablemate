@@ -77,6 +77,28 @@ module Monitoring
       open_incident&.resolve!(at:)
     end
 
+    # Open a fresh incident + its `down` Notification, only when none is open —
+    # the down-transition bookkeeping shared by MissedPing and FailureReport.
+    # Returns the `down` Notification to dispatch, or nil when an incident was
+    # already open (transition-only alerting: one email in, one out).
+    #
+    # The calling operation's row lock serialises every incident-creating path,
+    # so the exists? guard is decisive; the partial unique index is the
+    # last-resort backstop, and requires_new confines a RecordNotUnique to its
+    # savepoint so rescuing it does NOT poison the caller's outer transaction
+    # (the status="down" flip still commits).
+    def open_incident!(at:, cause:, error: nil)
+      return nil if incidents.open.exists?
+
+      incident =
+        transaction(requires_new: true) do
+          incidents.create!(started_at: at, cause:, error:)
+        end
+      notifications.create!(incident:, channel: "email", event: "down")
+    rescue ActiveRecord::RecordNotUnique
+      nil
+    end
+
     # Record a ping: persist a PingEvent, advance the timestamps, transition, and
     # (on recovery) resolve the incident + enqueue a `recovered` alert. The facade
     # routes by polarity — a failed ping is still a check-in, of bad news — with

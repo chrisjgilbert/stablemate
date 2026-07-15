@@ -47,12 +47,10 @@ module Monitoring
             duration_ms:
           )
 
-          @monitor.last_ping_at = received_at
-          @monitor.next_due_at  = next_due_from(received_at)
-          # A failure is still contact: measurement starts (WU-10) — otherwise the
-          # uptime bar shows no-data through a reported outage, which reads as
-          # "not monitored" when it's "down". Never moved afterward.
-          @monitor.first_ping_at ||= received_at
+          # A failure is still contact — timestamps advance exactly as a success:
+          # otherwise the uptime bar shows no-data through a reported outage,
+          # which reads as "not monitored" when it's "down".
+          @monitor.register_contact(received_at)
 
           down_notification = apply_transition(received_at, error)
           @monitor.save!
@@ -77,40 +75,8 @@ module Monitoring
             nil
           else # pending or up
             @monitor.status = "down"
-            incident = open_incident(received_at, error)
-            build_notification(incident)
+            @monitor.open_incident!(at: received_at, cause: "reported_error", error:)
           end
-        end
-
-        # Open a fresh incident only when none is currently open — same guard +
-        # savepoint pattern as MissedPing#open_incident: the row lock serialises
-        # every incident-creating path, the partial unique index is the backstop,
-        # and requires_new keeps a RecordNotUnique from poisoning the outer
-        # transaction (the status="down" flip still commits).
-        def open_incident(now, error)
-          return nil if @monitor.incidents.open.exists?
-
-          @monitor.transaction(requires_new: true) do
-            @monitor.incidents.create!(started_at: now, cause: "reported_error", error:)
-          end
-        rescue ActiveRecord::RecordNotUnique
-          nil
-        end
-
-        def build_notification(incident)
-          return nil unless incident
-
-          @monitor.notifications.create!(
-            incident:,
-            channel: "email",
-            event: "down"
-          )
-        end
-
-        def next_due_from(received_at)
-          return nil if @monitor.expected_interval_seconds.blank?
-
-          received_at + @monitor.expected_interval_seconds.seconds
         end
     end
   end
