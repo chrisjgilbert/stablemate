@@ -162,11 +162,35 @@ class Monitoring::Monitor::FailureReportTest < ActiveSupport::TestCase
     assert_equal "success", pending.ping_events.order(:received_at).last.kind
   end
 
-  test "a nil error is stored as nil, not an empty string" do
+  # The alert is never blank (§6): the model layer owns the guarantee, so a
+  # caller that skips the controller (console, future channels) still opens an
+  # incident whose email has a body.
+  test "a blank error falls back to a stub so the alert is never blank" do
     @monitor.check_in!(kind: "failure", error: nil)
 
-    assert_nil @monitor.ping_events.order(:received_at).last.error
-    assert_nil @monitor.incidents.open.sole.error
+    assert_equal "(no error details reported)", @monitor.ping_events.order(:received_at).last.error
+    assert_equal "(no error details reported)", @monitor.incidents.open.sole.error
+  end
+
+  test "a whitespace-only error also falls back to the stub" do
+    @monitor.check_in!(kind: "failure", error: "   ")
+
+    assert_equal "(no error details reported)", @monitor.incidents.open.sole.error
+  end
+
+  # The facade raises on an unknown kind rather than falling through to the
+  # success arm — a typo'd kind silently recorded as a success would transmute
+  # a reported failure into a recovery.
+  test "check_in! raises on an unknown kind and records nothing" do
+    assert_no_difference "PingEvent.count" do
+      assert_raises(ArgumentError) { @monitor.check_in!(kind: "bogus") }
+    end
+  end
+
+  test "check_in! accepts a symbol kind" do
+    @monitor.check_in!(kind: :failure, error: "boom")
+
+    assert @monitor.reload.down?
   end
 
   # Recovery needs zero new code (§5): the next success resolves the

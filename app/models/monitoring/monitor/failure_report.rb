@@ -28,9 +28,12 @@ module Monitoring
 
       def report_failure!(received_at: Time.current, error: nil, source_ip: nil, duration_ms: nil)
         down_notification = nil
-        # Truncation is server-side and unconditional (§10) — the model layer is
-        # the bound, so the ping endpoint and any future channel share it.
-        error = error&.slice(0, Stablemate::ERROR_MESSAGE_LIMIT)
+        # The model layer owns BOTH text bounds (§6, §10), so every caller —
+        # ping endpoint, console, future channels — shares them: truncation to
+        # ERROR_MESSAGE_LIMIT, and a stub when no error text was supplied, so a
+        # "reported an error" alert can never go out with a blank body.
+        error = error.to_s.strip.slice(0, Stablemate::ERROR_MESSAGE_LIMIT).presence ||
+                "(no error details reported)"
 
         # with_lock reloads under SELECT ... FOR UPDATE so the transition reads
         # fresh status: a failure racing a success (or another failure) serialises,

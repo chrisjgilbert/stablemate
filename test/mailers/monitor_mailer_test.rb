@@ -81,6 +81,36 @@ class MonitorMailerTest < ActionMailer::TestCase
     assert_match(/Check your job logs/i, mail.html_part.body.decoded)
   end
 
+  # Subject and body share ONE discriminator (the incident's cause) — a
+  # reported_error incident renders the error copy even if its error text is
+  # somehow blank, never the self-contradicting "reported an error" subject
+  # over a "missed its check-in" body.
+  test "down with a blank-error reported_error incident keeps the error copy" do
+    incident = @monitor.incidents.create!(
+      started_at: Time.current, cause: "reported_error", error: nil
+    )
+    mail = MonitorMailer.down(@monitor, incident:)
+
+    assert_equal "#{@monitor.name} reported an error", mail.subject
+    assert_no_match(/Check your job logs/i, mail.text_part.body.decoded)
+    assert_no_match(/missed its expected check-in/i, mail.text_part.body.decoded)
+  end
+
+  # Deterministic under deliver_later: the missed-ping copy cites the incident's
+  # start, not the live schedule — a failure ping on an already-down monitor
+  # advances next_due_at, which would otherwise render a FUTURE "no ping
+  # arrived by" time.
+  test "down for a missed ping renders the incident's start, not the live schedule" do
+    started = Time.utc(2026, 7, 15, 9, 0)
+    incident = @monitor.incidents.create!(started_at: started, cause: "missed_ping")
+    @monitor.update!(next_due_at: 2.hours.from_now)
+    mail = MonitorMailer.down(@monitor, incident:)
+
+    body = mail.text_part.body.decoded
+    assert_includes body, "2026-07-15 09:00 UTC"
+    refute_includes body, @monitor.due_with_grace_at.utc.strftime("%Y-%m-%d %H:%M UTC")
+  end
+
   # EmailChannel passes incident: to every event, so recovered must accept (and
   # ignore) it.
   test "recovered accepts and ignores the incident kwarg" do

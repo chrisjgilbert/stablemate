@@ -12,16 +12,24 @@ class MonitorMailer < ApplicationMailer
   # a fast recovery.
   def down(monitor, incident: nil)
     @monitor = monitor
+    # ONE discriminator, cause-derived, shared by subject and templates — the
+    # templates branch on @reported_error too, never on @error presence, so
+    # subject and body can't disagree about which alert this is.
+    @reported_error = incident&.cause == "reported_error"
 
-    if incident&.cause == "reported_error"
+    if @reported_error
       @error = incident.error
-      mail to: monitor.user.email_address,
-           subject: "#{monitor.name} reported an error"
+      subject = "#{monitor.name} reported an error"
     else
-      @expected_by = monitor.due_with_grace_at
-      mail to: monitor.user.email_address,
-           subject: "#{monitor.name} missed its check-in"
+      # The incident's start IS the moment the ping was declared overdue, frozen
+      # at enqueue time. Reading due_with_grace_at off the live monitor here
+      # could cite a FUTURE time: a failure ping on an already-down monitor
+      # advances next_due_at while this email sits in the deliver_later queue.
+      @expected_by = incident&.started_at || monitor.due_with_grace_at
+      subject = "#{monitor.name} missed its check-in"
     end
+
+    mail to: monitor.user.email_address, subject:
   end
 
   # Alert: a previously-down monitor pinged again and has recovered. Accepts the

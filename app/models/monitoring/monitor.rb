@@ -84,10 +84,17 @@ module Monitoring
     # split (job-failure-details.md §5).
     def check_in!(received_at: Time.current, kind: "success", error: nil,
                   source_ip: nil, duration_ms: nil)
-      if kind == "failure"
+      # An unknown kind raises rather than falling through to the success arm:
+      # a typo'd or symbol kind silently recorded as a success would transmute a
+      # reported failure into a recovery (CheckIn hardcodes kind: "success", so
+      # PingEvent's inclusion validation could never catch it).
+      case kind.to_s
+      when "failure"
         FailureReport.new(self).report_failure!(received_at:, error:, source_ip:, duration_ms:)
-      else
+      when "success"
         CheckIn.new(self).check_in!(received_at:, source_ip:, duration_ms:)
+      else
+        raise ArgumentError, "unknown check-in kind: #{kind.inspect}"
       end
     end
 
