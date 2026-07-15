@@ -1,0 +1,31 @@
+<%#
+  Move-between-projects control on the monitor detail (projects.md §6). A MANUAL
+  monitor can be moved into any of the user's OTHER projects; a gem monitor shows a
+  note instead — it belongs to whichever project its API key syncs into (§12-I), so
+  moving it here would just be undone on the next sync. Locals: monitor.
+%>
+<div class="rounded-xl border border-border bg-surface p-6 shadow-sm" data-testid="monitor-project-card">
+  <h2 class="text-[13px] font-semibold text-secondary mb-3">Project</h2>
+  <p class="text-[13px] text-muted mb-3">
+    In <%= link_to monitor.project.name, project_path(monitor.project), class: "font-medium text-ink hover:text-brand" %>.
+  </p>
+
+  <% if monitor.source == "manual" %>
+    <% others = current_user.projects.where.not(id: monitor.project_id).order(:created_at).to_a %>
+    <% if others.any? %>
+      <%= form_with url: monitor_project_path(monitor), method: :patch, class: "flex items-center gap-2" do |f| %>
+        <%= f.collection_select :project_id, others, :id, :name, {},
+              "aria-label": "Move to project",
+              class: "h-9 px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
+        <%= f.submit "Move",
+              class: "h-9 px-3 inline-flex items-center rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline cursor-pointer" %>
+      <% end %>
+    <% else %>
+      <p class="text-[12px] text-muted" data-testid="move-no-targets">Create another project to move this monitor into.</p>
+    <% end %>
+  <% else %>
+    <p class="text-[12px] text-muted" data-testid="move-gem-note">
+      Managed by the gem — re-point its API key to move it to another project.
+    </p>
+  <% end %>
+</div>

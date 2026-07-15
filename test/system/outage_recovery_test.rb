@@ -6,10 +6,10 @@ class OutageRecoveryTest < ApplicationSystemTestCase
   include ActiveJob::TestHelper
 
   # Detection sweeps every monitor, so clear them all and create exactly one.
-  setup { Monitoring::Monitor.delete_all; @alice = users(:alice) }
+  setup { Monitoring::Monitor.delete_all; @alice = users(:alice); @project = @alice.projects.sole }
 
   test "S6: a monitor goes down (live) with a down email, then recovers with a recovery email" do
-    monitor = @alice.monitors.create!(
+    monitor = @project.monitors.create!(
       name: "Heartbeat job",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300
@@ -58,7 +58,7 @@ class OutageRecoveryTest < ApplicationSystemTestCase
   # S6 (detail page) — the monitor-detail header badge flips live too (spec §3.8:
   # the detail header subscribes and updates over Solid Cable, no full reload).
   test "S6 detail: the detail-page badge flips to Down live when detection runs" do
-    monitor = @alice.monitors.create!(
+    monitor = @project.monitors.create!(
       name: "Detail watch",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300

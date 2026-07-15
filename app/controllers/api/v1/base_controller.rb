@@ -1,10 +1,12 @@
 module Api
   module V1
     # Base for the bearer-authed JSON API. Resolves the Authorization: Bearer
-    # token to an ApiKey (and its owner) via ApiKey.authenticating, which compares
-    # in constant time and touches last_used_at. No session/cookie auth here, no
-    # CSRF (token-auth JSON, not a browser form). Every action is tenant-scoped to
-    # current_user.monitors. Invalid/missing/revoked -> opaque 401. (phase-3 §3.2)
+    # token to an ApiKey and its PROJECT (Design B, projects.md §5/§9) via
+    # ApiKey.authenticating, which compares in constant time and touches
+    # last_used_at. The key IS the app's identity, so every action is tenant-scoped
+    # to current_project.monitors — the opaque-404 guarantee is now cross-PROJECT.
+    # No session/cookie auth here, no CSRF (token-auth JSON, not a browser form).
+    # Invalid/missing/revoked/project-less -> opaque 401. (phase-3 §3.2)
     class BaseController < ActionController::API
       include ActionController::RateLimiting
 
@@ -27,12 +29,12 @@ module Api
       before_action :authenticate_api_key!
 
       private
-        attr_reader :current_user
+        attr_reader :current_project
 
         def authenticate_api_key!
           @current_api_key = ApiKey.authenticating(bearer_token)
-          @current_user = @current_api_key&.user
-          render_unauthorized unless @current_user
+          @current_project = @current_api_key&.project
+          render_unauthorized unless @current_project
         end
 
         # Extract the raw token from `Authorization: Bearer <token>`. Returns nil
@@ -46,10 +48,11 @@ module Api
           render json: { error: "unauthorized" }, status: :unauthorized
         end
 
-        # Tenant-scoped monitor lookup: a foreign / unknown id raises RecordNotFound
-        # which we surface as an opaque 404 (no cross-tenant existence leak).
+        # Project-scoped monitor lookup: a monitor in another project (even the same
+        # user's) or an unknown id raises RecordNotFound, surfaced as an opaque 404
+        # (no cross-project existence leak).
         def find_monitor
-          current_user.monitors.find(params[:id])
+          current_project.monitors.find(params[:id])
         end
 
         # Map cross-tenant / unknown ids to a 404 without leaking which it was.

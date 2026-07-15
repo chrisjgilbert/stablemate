@@ -1,0 +1,13 @@
+<%#
+  A card of monitor rows, reused by the grouped dashboard sections, the suspended
+  section, and a project's show page. Locals: monitors (the rows), mini_ticks
+  (the preloaded id => ticks hash), and an optional card_class (e.g. opacity-70
+  for the suspended card).
+%>
+<div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm <%= local_assigns[:card_class] %>">
+  <div class="divide-y divide-hairline">
+    <% monitors.each do |monitor| %>
+      <%= render "monitors/row", monitor: monitor, mini_ticks: mini_ticks[monitor.id] || [] %>
+    <% end %>
+  </div>
+</div>

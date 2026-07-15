@@ -1,0 +1,21 @@
+<%= form_with model: project, class: "space-y-6" do |form| %>
+  <%= render "shared/form_errors", record: project %>
+
+  <%# Carry the "then send me back to new-monitor" intent through creation (§4.4). %>
+  <% if params[:after].present? %>
+    <%= hidden_field_tag :after, params[:after] %>
+  <% end %>
+
+  <div>
+    <%= form.label :name, "Project name", class: "block text-[13px] font-medium text-secondary mb-1" %>
+    <%= form.text_field :name, required: true, autofocus: true,
+          class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
+  </div>
+
+  <div class="flex items-center gap-3">
+    <%= form.submit (project.persisted? ? "Save changes" : "Create project"),
+          class: "h-9 px-4 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
+    <%= link_to "Cancel", (project.persisted? ? project_path(project) : projects_path),
+          class: "h-9 px-4 inline-flex items-center rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+  </div>
+<% end %>

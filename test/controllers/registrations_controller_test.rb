@@ -51,16 +51,22 @@ class RegistrationsControllerTest < ActionDispatch::IntegrationTest
     assert_match "Welcome to Stablemate.", response.body
   end
 
-  # Scenario 2 — an unverified user can immediately create monitors (no gate).
+  # Scenario 2 — an unverified user can immediately create monitors (no verification
+  # gate — locked decision #3). Under Projects a monitor needs a project, so the
+  # fresh user creates one first (the zero-project onboarding UX is Phase 4); the
+  # point being asserted is unchanged: verification never blocks creation.
   test "an unverified user can create a monitor right after signing up" do
     post sign_up_path, params: {
       email_address: "fresh@example.com", password: "password1234", password_confirmation: "password1234"
     }
-    assert User.find_by(email_address: "fresh@example.com").verified_at.nil?
+    user = User.find_by(email_address: "fresh@example.com")
+    assert_nil user.verified_at
+    user.projects.create!(name: "First app")
 
     assert_difference -> { Monitoring::Monitor.count }, 1 do
       post monitors_path, params: { monitor: { name: "First", expected_interval_seconds: 3600, grace_period_seconds: 300 } }
     end
+    assert_nil user.reload.verified_at # still unverified after creating
   end
 
   test "invalid signup re-renders the form" do

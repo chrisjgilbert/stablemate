@@ -5,16 +5,20 @@
 class ApiKey < ApplicationRecord
   include Authentication
 
-  belongs_to :user
+  belongs_to :project
+  # Design B (docs/specs/projects.md §3.4): a key belongs to one project and IS
+  # that app's identity. `user` delegates through the project so owner-scoped
+  # checks keep working; allow_nil mirrors the monitor delegate.
+  delegate :user, to: :project, allow_nil: true
 
   validates :name, presence: true
   validates :token_digest, presence: true, uniqueness: true
   validates :token_last4, presence: true
 
-  # Issue a new key for a user: ApiKey.issue(user:, name:) -> [api_key, raw_token].
-  # The raw token is transient (never re-derivable from what we store).
-  def self.issue(user:, name:)
-    Issuance.new(user:, name:).issue
+  # Issue a new key for a project: ApiKey.issue(project:, name:) -> [api_key,
+  # raw_token]. The raw token is transient (never re-derivable from what we store).
+  def self.issue(project:, name:)
+    Issuance.new(project:, name:).issue
   end
 
   # The masked form shown in the UI: sm_live_••••<last4>. Never reveals the key.

@@ -13,13 +13,14 @@ require "application_system_test_case"
 class ConfigGatedCapsTest < ApplicationSystemTestCase
   setup do
     @alice = users(:alice)
-    @alice.monitors.delete_all # predictable count
+    @project = @alice.projects.sole
+    @project.monitors.delete_all # predictable count
   end
 
   # Caps OFF — a user creates a monitor past the old 5-limit with no at-limit UI.
   test "caps OFF: a sixth monitor creates successfully with no at-limit UI" do
     stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
-      6.times { |i| @alice.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
+      6.times { |i| @project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
       sign_in @alice
 
       # No at-limit treatment, and the "New monitor" affordance is present.
@@ -62,7 +63,7 @@ class ConfigGatedCapsTest < ApplicationSystemTestCase
   # Caps ON — the at-limit monitor UI still works (managed instance).
   test "caps ON: the dashboard shows the at-limit state at the configured cap" do
     stub_const(Stablemate, :MAX_MONITORS_PER_USER, 5) do
-      5.times { |i| @alice.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
+      5.times { |i| @project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
       sign_in @alice
 
       assert_text "5 / 5"

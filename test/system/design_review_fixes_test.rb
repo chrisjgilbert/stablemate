@@ -8,7 +8,7 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
   ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze
   FREE  = Stablemate::FREE_PLAN_MONITOR_LIMIT
 
-  setup { @alice = users(:alice) }
+  setup { @alice = users(:alice); @project = @alice.projects.sole }
 
   def give_active_pro_subscription!(sub_id)
     customer = @alice.set_payment_processor(:stripe)
@@ -23,7 +23,7 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
   # ping + resume the badge returns to Up with no lingering "down" banner. This is
   # the flow that previously stranded an open incident behind an "up" badge.
   test "S-DR1: pausing a down monitor clears the incident and resume returns it to up" do
-    monitor = @alice.monitors.create!(
+    monitor = @project.monitors.create!(
       name: "Flaky job", expected_interval_seconds: 3600, grace_period_seconds: 300,
       status: "up", last_ping_at: 2.hours.ago, next_due_at: 90.minutes.ago
     )
@@ -52,8 +52,8 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
   test "S-DR2: a small Pro account downgrades via a confirm, not the picker" do
     with_billing_enabled do
       @alice.update!(plan: "pro")
-      @alice.monitors.delete_all
-      (FREE - 2).times { |i| @alice.monitors.create!(name: "Small#{i}", **ATTRS) }
+      @project.monitors.delete_all
+      (FREE - 2).times { |i| @project.monitors.create!(name: "Small#{i}", **ATTRS) }
       sub_id = "sub_sys_#{SecureRandom.hex(4)}"
       give_active_pro_subscription!(sub_id)
       stub_stripe_subscription_cancel(sub_id)
@@ -77,8 +77,8 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
   test "S-DR3: the involuntary choose-N lock lets the user re-pick which to keep" do
     with_billing_enabled do
       @alice.update!(plan: "pro")
-      @alice.monitors.delete_all
-      monitors = (FREE + 2).times.map { |i| @alice.monitors.create!(name: "Job#{i}", **ATTRS) }
+      @project.monitors.delete_all
+      monitors = (FREE + 2).times.map { |i| @project.monitors.create!(name: "Job#{i}", **ATTRS) }
       # No active Pro subscription mirror ⇒ the sync drops to Free involuntarily.
       @alice.sync_plan_from_subscription!
       assert @alice.reload.must_choose_downgrade?

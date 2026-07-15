@@ -7,14 +7,15 @@ class User::DowngradeTest < ActiveSupport::TestCase
 
   setup do
     @user = users(:bob)
-    @user.monitors.delete_all
+    @project = @user.projects.sole
+    @project.monitors.delete_all
   end
 
   # Build n active monitors with the env cap OFF (so creation isn't blocked),
   # mirroring a Pro user who is dropping to Free.
   def build_monitors(n)
     stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
-      n.times.map { |i| @user.monitors.create!(name: "M#{i}", **ATTRS) }
+      n.times.map { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
     end
   end
 

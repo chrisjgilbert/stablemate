@@ -1,0 +1,28 @@
+<%#
+  Involuntary-downgrade grace banner (projects.md §6/§7/§12-J). Shown while the
+  account owes a choose-N decision after a card failure / cancel dropped it to Free
+  over the cap. The point: NOTHING was suspended — every monitor keeps running —
+  but the user must pick which FREE_PLAN_MONITOR_LIMIT to keep by the deadline, or
+  the daily backstop keeps the oldest N for them. Only rendered when billing is
+  enabled and current_user.must_choose_downgrade? (the layout gates both).
+%>
+<% deadline = current_user.downgrade_choice_deadline_at %>
+<div class="mb-6 rounded-xl border border-pending-dot bg-pending-bg px-5 py-4 shadow-sm"
+     role="alert" data-testid="downgrade-grace-banner">
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <p class="text-[14px] font-semibold text-pending-text">
+        Your plan dropped to Free — choose which monitors to keep
+      </p>
+      <p class="mt-1 text-[13px] text-pending-text/90">
+        Nothing was suspended: all your monitors are still running.
+        Pick the <%= Stablemate::FREE_PLAN_MONITOR_LIMIT %> to keep active
+        <% if deadline %>by <strong><%= deadline.strftime("%b %-d, %Y") %></strong><% end %>,
+        or we'll keep your oldest <%= Stablemate::FREE_PLAN_MONITOR_LIMIT %> for you.
+      </p>
+    </div>
+    <%= link_to "Choose monitors", new_billing_downgrade_path,
+          class: "shrink-0 inline-flex items-center h-9 px-4 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover whitespace-nowrap",
+          data: { testid: "grace-choose-link" } %>
+  </div>
+</div>

@@ -1,7 +1,7 @@
 require "test_helper"
 
 class User::PlanTest < ActiveSupport::TestCase
-  setup { @user = users(:bob); @user.monitors.delete_all }
+  setup { @user = users(:bob); @project = @user.projects.sole; @project.monitors.delete_all }
 
   ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze
 
@@ -12,13 +12,13 @@ class User::PlanTest < ActiveSupport::TestCase
   test "remaining_monitor_slots counts down, paused included, never negative" do
     assert_equal @user.monitor_limit, @user.remaining_monitor_slots
 
-    @user.monitors.create!(name: "A", **ATTRS).pause!
+    @project.monitors.create!(name: "A", **ATTRS).pause!
     assert_equal @user.monitor_limit - 1, @user.reload.remaining_monitor_slots
   end
 
   test "at_monitor_cap? becomes true at the limit (paused count)" do
     refute @user.at_monitor_cap?
-    Stablemate::MAX_MONITORS_PER_USER.times { |i| @user.monitors.create!(name: "M#{i}", **ATTRS) }
+    Stablemate::MAX_MONITORS_PER_USER.times { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
     @user.monitors.first.pause!
     assert @user.reload.at_monitor_cap?
   end
@@ -29,7 +29,7 @@ class User::PlanTest < ActiveSupport::TestCase
       assert_nil @user.monitor_limit
       assert_equal Float::INFINITY, @user.remaining_monitor_slots
 
-      (Stablemate::MAX_MONITORS_PER_USER.to_i + 6).times { |i| @user.monitors.create!(name: "M#{i}", **ATTRS) }
+      (Stablemate::MAX_MONITORS_PER_USER.to_i + 6).times { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
       refute @user.reload.at_monitor_cap?
       assert_equal Float::INFINITY, @user.reload.remaining_monitor_slots
     end
@@ -38,8 +38,8 @@ class User::PlanTest < ActiveSupport::TestCase
   # Suspended monitors don't occupy a cap slot (PRD §3.3) — distinct from paused.
   test "suspended monitors are excluded from the cap count" do
     stub_const(Stablemate, :MAX_MONITORS_PER_USER, 2) do
-      a = @user.monitors.create!(name: "A", **ATTRS)
-      @user.monitors.create!(name: "B", **ATTRS)
+      a = @project.monitors.create!(name: "A", **ATTRS)
+      @project.monitors.create!(name: "B", **ATTRS)
       assert @user.reload.at_monitor_cap?
 
       a.suspend!
@@ -73,7 +73,7 @@ class User::PlanTest < ActiveSupport::TestCase
   # the env cap OFF so creation isn't blocked — mirrors a Pro user dropping to Free.)
   test "over_free_cap_by counts active monitors past the Free cap" do
     stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
-      (Stablemate::FREE_PLAN_MONITOR_LIMIT + 3).times { |i| @user.monitors.create!(name: "M#{i}", **ATTRS) }
+      (Stablemate::FREE_PLAN_MONITOR_LIMIT + 3).times { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
       assert_equal 3, @user.over_free_cap_by
 
       @user.monitors.first.suspend!

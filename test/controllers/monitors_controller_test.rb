@@ -6,6 +6,8 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
   setup do
     @alice = users(:alice)
     @bob = users(:bob)
+    @alices_project = @alice.projects.sole
+    @bobs_project = @bob.projects.sole
     @alices = monitors(:up)
     @bobs = monitors(:bobs)
   end
@@ -31,9 +33,9 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
   # one per row).
   test "index loads sparkline ticks without an N+1 (constant queries as rows grow)" do
     sign_in @alice
-    @alice.monitors.destroy_all # start clean within the per-user cap
+    @alices_project.monitors.destroy_all # start clean within the per-user cap
     2.times do |i|
-      @alice.monitors.create!(name: "extra-#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
+      @alices_project.monitors.create!(name: "extra-#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
     end
 
     counts = lambda do
@@ -44,7 +46,7 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     end
 
     baseline = counts.call
-    @alice.monitors.create!(name: "another", expected_interval_seconds: 3600, grace_period_seconds: 300)
+    @alices_project.monitors.create!(name: "another", expected_interval_seconds: 3600, grace_period_seconds: 300)
     assert_equal baseline, counts.call, "adding a monitor must not add a ping_events query"
   end
 
@@ -79,7 +81,7 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
   # Scenario 7 — create stores seconds, generates token, manual + pending.
   test "create makes a manual, pending monitor with a token" do
     sign_in @bob
-    @bob.monitors.delete_all
+    @bobs_project.monitors.delete_all
 
     assert_difference -> { @bob.monitors.count }, 1 do
       post monitors_path, params: { monitor: { name: "API health", expected_interval_seconds: 300, grace_period_seconds: 60 } }
@@ -93,11 +95,42 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert monitor.ping_token.present?
   end
 
+  # projects.md §6 — create honours a chosen project_id, but only within the
+  # user's own projects.
+  test "create builds the monitor into the chosen project" do
+    sign_in @alice
+    other = @alice.projects.create!(name: "Second app")
+
+    post monitors_path, params: { monitor: {
+      name: "Into second", project_id: other.id,
+      expected_interval_seconds: 3600, grace_period_seconds: 300
+    } }
+
+    monitor = Monitoring::Monitor.find_by(name: "Into second")
+    assert_equal other, monitor.project
+    assert_redirected_to monitor_path(monitor)
+  end
+
+  # Tenant safety — a project_id the user doesn't own is rejected (404), never a
+  # cross-tenant assignment into someone else's project.
+  test "create rejects a foreign project_id (404, no monitor created)" do
+    sign_in @alice
+    foreign = @bobs_project
+
+    assert_no_difference -> { Monitoring::Monitor.count } do
+      post monitors_path, params: { monitor: {
+        name: "Sneaky", project_id: foreign.id,
+        expected_interval_seconds: 3600, grace_period_seconds: 300
+      } }
+    end
+    assert_response :not_found
+  end
+
   # Scenario 8 (request) — creating past the cap re-renders with an error.
   test "creating a monitor at the cap is rejected" do
     sign_in @bob
-    @bob.monitors.delete_all
-    Stablemate::MAX_MONITORS_PER_USER.times { |i| @bob.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
+    @bobs_project.monitors.delete_all
+    Stablemate::MAX_MONITORS_PER_USER.times { |i| @bobs_project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
 
     assert_no_difference -> { @bob.monitors.count } do
       post monitors_path, params: { monitor: { name: "Over", expected_interval_seconds: 3600, grace_period_seconds: 300 } }
@@ -110,8 +143,8 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
   test "with the cap OFF, creating past the old limit is allowed" do
     stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
       sign_in @bob
-      @bob.monitors.delete_all
-      6.times { |i| @bob.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
+      @bobs_project.monitors.delete_all
+      6.times { |i| @bobs_project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
 
       assert_difference -> { @bob.monitors.count }, 1 do
         post monitors_path, params: { monitor: { name: "Seventh", expected_interval_seconds: 3600, grace_period_seconds: 300 } }
@@ -162,7 +195,7 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
 
   test "index and show omit next-check for down, paused, and suspended monitors" do
     sign_in @alice
-    @alice.monitors.delete_all # stay within the per-user cap
+    @alices_project.monitors.delete_all # stay within the per-user cap
 
     %w[down paused suspended].each do |status|
       assert_no_next_check create_monitor(status:, next_due_at: 50.minutes.from_now)
@@ -188,9 +221,74 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_match "never seen", response.body
   end
 
+  # projects.md §4.4/§13-S6 — a zero-project user hitting "add a monitor" is
+  # routed into project creation first (and returned here afterward).
+  test "new redirects to project creation when the user has no project" do
+    sign_in @alice
+    @alice.projects.destroy_all
+    get new_monitor_path
+    assert_redirected_to new_project_path(after: "new_monitor")
+  end
+
+  # projects.md §6/§7 — the selector pre-selects the most-recent project by default.
+  test "new pre-selects the most-recent project by default" do
+    sign_in @alice
+    newer = @alice.projects.create!(name: "Newer app")
+    get new_monitor_path
+    assert_response :success
+    assert_select "select[name='monitor[project_id]'] option[selected][value='#{newer.id}']"
+  end
+
+  # projects.md §6 — a project's "New monitor" button pre-fills that project.
+  test "new pre-selects the project passed in the query" do
+    sign_in @alice
+    other = @alice.projects.create!(name: "Second app")
+    get new_monitor_path(monitor: { project_id: other.id })
+    assert_response :success
+    assert_select "select[name='monitor[project_id]'] option[selected][value='#{other.id}']"
+  end
+
+  # Tenant safety on the GET too — a foreign project_id never pre-fills, it 404s.
+  test "new rejects a foreign project_id (404)" do
+    sign_in @alice
+    get new_monitor_path(monitor: { project_id: @bobs_project.id })
+    assert_response :not_found
+  end
+
+  # projects.md §6 — the dashboard groups monitor rows into per-project sections.
+  test "index groups monitors into per-project sections" do
+    sign_in @alice
+    other = @alice.projects.create!(name: "Second app")
+    other.monitors.create!(name: "In second", expected_interval_seconds: 3600, grace_period_seconds: 300)
+    get monitors_path
+    assert_response :success
+    assert_select "[data-testid='project-group']", minimum: 2
+    assert_select "[data-testid='project-group']", text: /Second app/
+  end
+
+  # projects.md §6/§13-S5 — at the per-user cap, each project section carries a
+  # derived cap-skip advisory (the limit_reached signal surfaced in the UI).
+  test "index shows a per-project cap-skip banner when at the monitor limit" do
+    sign_in @bob
+    @bobs_project.monitors.delete_all
+    Stablemate::MAX_MONITORS_PER_USER.times { |i| @bobs_project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
+    get monitors_path
+    assert_response :success
+    assert_select "[data-testid='cap-skip-banner']"
+  end
+
+  test "index shows no cap-skip banner below the cap" do
+    sign_in @bob
+    @bobs_project.monitors.delete_all
+    @bobs_project.monitors.create!(name: "Solo", expected_interval_seconds: 3600, grace_period_seconds: 300)
+    get monitors_path
+    assert_response :success
+    assert_select "[data-testid='cap-skip-banner']", false
+  end
+
   private
     def create_monitor(status:, next_due_at:, grace_period_seconds: 300, last_ping_at: 10.minutes.ago)
-      @alice.monitors.create!(name: "#{status.capitalize} monitor", expected_interval_seconds: 3600,
+      @alices_project.monitors.create!(name: "#{status.capitalize} monitor", expected_interval_seconds: 3600,
                                grace_period_seconds:, status:, last_ping_at:, next_due_at:)
     end
 

@@ -4,7 +4,8 @@ require "application_system_test_case"
 class MonitorsTest < ApplicationSystemTestCase
   setup do
     @alice = users(:alice)
-    @alice.monitors.delete_all # start clean so the count is predictable
+    @project = @alice.projects.sole
+    @project.monitors.delete_all # start clean so the count is predictable
   end
 
   # S3 — create a monitor (using a preset) and see the ping-URL card + curl snippet.
@@ -30,7 +31,7 @@ class MonitorsTest < ApplicationSystemTestCase
 
   # S4 — pause then resume; the badge tracks the status.
   test "S4: pause and resume a monitor" do
-    monitor = @alice.monitors.create!(name: "Pausable", expected_interval_seconds: 3600, grace_period_seconds: 300, status: "pending")
+    monitor = @project.monitors.create!(name: "Pausable", expected_interval_seconds: 3600, grace_period_seconds: 300, status: "pending")
     sign_in @alice
     visit monitor_path(monitor)
 
@@ -43,7 +44,7 @@ class MonitorsTest < ApplicationSystemTestCase
 
   # S5 — rotate the token on the detail page; the displayed ping URL changes.
   test "S5: rotate the ping token changes the displayed ping URL" do
-    monitor = @alice.monitors.create!(name: "Rotatable", expected_interval_seconds: 3600, grace_period_seconds: 300)
+    monitor = @project.monitors.create!(name: "Rotatable", expected_interval_seconds: 3600, grace_period_seconds: 300)
     sign_in @alice
     visit monitor_path(monitor)
 
@@ -57,7 +58,7 @@ class MonitorsTest < ApplicationSystemTestCase
   # S8 — the dashboard rows link into the monitor's detail page (the only way to
   # reach it from the index). The link is stretched across the whole row.
   test "S8: clicking a monitor row opens its detail page" do
-    monitor = @alice.monitors.create!(name: "Clickable", expected_interval_seconds: 3600, grace_period_seconds: 300)
+    monitor = @project.monitors.create!(name: "Clickable", expected_interval_seconds: 3600, grace_period_seconds: 300)
     sign_in @alice
     assert_text "Clickable" # on the index/dashboard
 
@@ -75,7 +76,7 @@ class MonitorsTest < ApplicationSystemTestCase
   # S7 — at the cap, the New-monitor action shows the at-limit state and "5 / 5".
   test "S7: at the cap the dashboard shows the count and the at-limit state" do
     Stablemate::MAX_MONITORS_PER_USER.times do |i|
-      @alice.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
+      @project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
     end
     sign_in @alice
 

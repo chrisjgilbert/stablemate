@@ -15,7 +15,8 @@ class BillingTest < ApplicationSystemTestCase
 
   setup do
     @user = users(:alice)
-    @user.monitors.delete_all
+    @project = @user.projects.sole
+    @project.monitors.delete_all
   end
 
   # Give the user an active Pro Pay subscription mirror (no Stripe API), then run
@@ -35,7 +36,7 @@ class BillingTest < ApplicationSystemTestCase
   test "free user hits the limit, upgrades, and the cap rises to Pro" do
     with_billing_enabled do
       @user.update!(plan: "free")
-      FREE.times { |i| @user.monitors.create!(name: "M#{i}", **ATTRS) }
+      FREE.times { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
 
       sign_in @user
       assert_text "#{FREE} / #{FREE}"
@@ -56,7 +57,7 @@ class BillingTest < ApplicationSystemTestCase
   test "pro downgrade with too many monitors forces choosing five" do
     with_billing_enabled do
       @user.update!(plan: "pro")
-      monitors = (FREE + 2).times.map { |i| @user.monitors.create!(name: "Keep#{i}", **ATTRS) }
+      monitors = (FREE + 2).times.map { |i| @project.monitors.create!(name: "Keep#{i}", **ATTRS) }
       # A real active subscription mirror so the downgrade reaches Stripe to cancel.
       sub_id = "sub_sys_#{SecureRandom.hex(4)}"
       customer = @user.set_payment_processor(:stripe)
@@ -99,7 +100,7 @@ class BillingTest < ApplicationSystemTestCase
   test "a suspended monitor has no pause control and a stray ping cannot resurrect it" do
     with_billing_enabled do
       @user.update!(plan: "free")
-      suspended = @user.monitors.create!(name: "Old cron job", **ATTRS)
+      suspended = @project.monitors.create!(name: "Old cron job", **ATTRS)
       suspended.check_in!  # give it a ping history (status: up) before suspending
       suspended.suspend!
 
@@ -134,7 +135,7 @@ class BillingTest < ApplicationSystemTestCase
   test "keyless instance shows no billing UI" do
     with_billing_disabled do
       @user.update!(plan: "free")
-      @user.monitors.create!(name: "Solo", **ATTRS)
+      @project.monitors.create!(name: "Solo", **ATTRS)
 
       sign_in @user
       assert_no_selector "[data-testid='nav-billing']"

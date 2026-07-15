@@ -1,7 +1,8 @@
 # Projects — first-class grouping for monitors
 
-Status: **pressure-tested; findings resolved — ready to build (see §13 resolution
-note)**. Author: Claude (session), 2026-07-14. Owner: @chrisjgilbert. Supersedes nothing; extends the
+Status: **IMPLEMENTED** on `claude/projects-first-class-dmuyon` (2026-07-15) — all
+five phases shipped, `bin/ci` green; see the "Implementation notes" below for the
+material deviations. Author: Claude (session), 2026-07-14. Owner: @chrisjgilbert. Supersedes nothing; extends the
 V1 data model in [`README.md`](README.md) and **amends locked decision #6** (see §3.3).
 Follow the architecture rulebook in [`../../CLAUDE.md`](../../CLAUDE.md).
 
@@ -10,6 +11,19 @@ Follow the architecture rulebook in [`../../CLAUDE.md`](../../CLAUDE.md).
 > cases and assumptions. The §12 decisions are now **resolved** — the spec reflects
 > those choices (project-scoped API keys, drop `monitors.user_id`, no default
 > project, per-project key management).
+
+> **Implementation notes (2026-07-15).** Shipped in five reviewed deliveries on
+> `claude/projects-first-class-dmuyon`, `bin/ci` green at each. Material deviations
+> from the design, all flagged at the time:
+> - The destructive schema + ownership cutover landed as **one atomic commit** — no
+>   file-wise split has a green intermediate, and CLAUDE.md requires each commit pass
+>   `bin/ci`; the later phases split into review-sized commits.
+> - `last_synced_app` divergence is **detected and stored** on sync, but the durable
+>   dashboard "flag" surfacing (§13-B3) is **deferred** — no extra column was added.
+> - The per-project cap-skip banner (§13-S5) ships as a **derived at-cap advisory**,
+>   not an exact "N skipped" count (the skip count isn't persisted).
+> - `bin/ci` was hardened to run rubocop/brakeman/bundle-audit via the `bin/`
+>   binstubs (a sandbox `bundle exec` quirk had been silently skipping them).
 
 ---
 

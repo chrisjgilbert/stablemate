@@ -5,7 +5,8 @@ require "test_helper"
 # idempotently upserts the UptimeDayStat. Time is frozen everywhere it matters.
 class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
   setup do
-    @monitor = users(:alice).monitors.create!(
+    @project = users(:alice).projects.sole
+    @monitor = @project.monitors.create!(
       name: "Rollup target",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300,
@@ -101,7 +102,7 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
   # Spec §3.1 — a pending (created, never pinged) monitor's evidence-free day is
   # no-data, not a false 100%-up day, and is excluded from uptime_percent.
   test "a pending never-pinged monitor's day is no-data, not a full up-day" do
-    pending = users(:alice).monitors.create!(
+    pending = @project.monitors.create!(
       name: "Never pinged",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300,
@@ -166,7 +167,7 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
   # WU-10 (M8) — days entirely before the first ping are no-data, not phantom 100%
   # up, even when a late backfill rolls them while the monitor is already `up`.
   test "days before the first ping are no-data, even on a late backfill" do
-    m = users(:alice).monitors.create!(
+    m = @project.monitors.create!(
       name: "Late first ping", expected_interval_seconds: 3600, grace_period_seconds: 300, status: "up"
     )
     m.update_column(:created_at, (@day - 2.days).to_time(:utc)) # existed 2 days before @day
@@ -186,7 +187,7 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
 
   # WU-10 — a never-pinged monitor has no measured time at all (nil first_ping_at).
   test "a never-pinged monitor's day is no-data regardless of current status" do
-    m = users(:alice).monitors.create!(
+    m = @project.monitors.create!(
       name: "Silent", expected_interval_seconds: 3600, grace_period_seconds: 300, status: "up"
     )
     m.update_column(:created_at, (@day - 1.day).to_time(:utc)) # first_ping_at stays nil

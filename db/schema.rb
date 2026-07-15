@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_04_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_14_120001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -18,12 +18,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_04_140000) do
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
     t.string "name", null: false
+    t.bigint "project_id", null: false
     t.string "token_digest", null: false
     t.string "token_last4", null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
+    t.index ["project_id"], name: "index_api_keys_on_project_id"
     t.index ["token_digest"], name: "index_api_keys_on_token_digest", unique: true
-    t.index ["user_id"], name: "index_api_keys_on_user_id"
   end
 
   create_table "billing_processed_events", force: :cascade do |t|
@@ -50,20 +50,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_04_140000) do
     t.datetime "first_ping_at"
     t.integer "grace_period_seconds"
     t.datetime "last_ping_at"
+    t.string "last_synced_app"
     t.string "monitor_type", default: "heartbeat", null: false
     t.string "name", null: false
     t.datetime "next_due_at"
     t.string "ping_token", null: false
+    t.bigint "project_id", null: false
     t.string "registration_key"
     t.string "source", default: "manual", null: false
     t.string "status", default: "pending", null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
     t.index ["next_due_at"], name: "index_monitors_on_next_due_at"
     t.index ["ping_token"], name: "index_monitors_on_ping_token", unique: true
+    t.index ["project_id", "registration_key"], name: "index_monitors_on_project_and_registration_key", unique: true, where: "(registration_key IS NOT NULL)"
+    t.index ["project_id"], name: "index_monitors_on_project_id"
     t.index ["status", "next_due_at"], name: "index_monitors_on_status_and_next_due_at"
-    t.index ["user_id", "registration_key"], name: "index_monitors_on_user_and_registration_key", unique: true, where: "(registration_key IS NOT NULL)"
-    t.index ["user_id"], name: "index_monitors_on_user_id"
   end
 
   create_table "notifications", force: :cascade do |t|
@@ -185,6 +186,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_04_140000) do
     t.index ["monitor_id"], name: "index_ping_events_on_monitor_id"
   end
 
+  create_table "projects", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["user_id", "name"], name: "index_projects_on_user_id_and_name", unique: true
+    t.index ["user_id"], name: "index_projects_on_user_id"
+  end
+
   create_table "sessions", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "ip_address"
@@ -209,6 +219,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_04_140000) do
   create_table "users", force: :cascade do |t|
     t.boolean "awaiting_downgrade_choice", default: false, null: false
     t.datetime "created_at", null: false
+    t.datetime "downgrade_choice_deadline_at"
     t.string "email_address", null: false
     t.string "password_digest", null: false
     t.string "plan", default: "free", null: false
@@ -223,9 +234,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_04_140000) do
     t.index ["email_address"], name: "index_waitlist_signups_on_email_address", unique: true
   end
 
-  add_foreign_key "api_keys", "users"
+  add_foreign_key "api_keys", "projects"
   add_foreign_key "incidents", "monitors"
-  add_foreign_key "monitors", "users"
+  add_foreign_key "monitors", "projects"
   add_foreign_key "notifications", "incidents"
   add_foreign_key "notifications", "monitors"
   add_foreign_key "pay_charges", "pay_customers", column: "customer_id"
@@ -233,6 +244,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_04_140000) do
   add_foreign_key "pay_payment_methods", "pay_customers", column: "customer_id"
   add_foreign_key "pay_subscriptions", "pay_customers", column: "customer_id"
   add_foreign_key "ping_events", "monitors"
+  add_foreign_key "projects", "users"
   add_foreign_key "sessions", "users"
   add_foreign_key "uptime_day_stats", "monitors"
 end

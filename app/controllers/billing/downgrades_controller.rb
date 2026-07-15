@@ -3,8 +3,8 @@ module Billing
   #   * a VOLUNTARY downgrade from Pro — over the Free cap it's the "choose which N
   #     to keep" picker (PRD §5.6), at/under the cap it's a plain confirm (WU-5);
   #   * resolving an INVOLUNTARY choose-N lock (WU-6) — the account already dropped
-  #     to Free and its over-cap monitors were auto-suspended, so #create only
-  #     re-picks which N stay active (no Stripe).
+  #     to Free but nothing was suspended (the grace window, §12-J), so #create picks
+  #     which N stay active and suspends the rest (no Stripe).
   # #new renders the picker or the confirm; #create commits. The plan flip itself
   # lands via the verified webhook (the only writer of plan).
   class DowngradesController < BaseController
@@ -55,7 +55,9 @@ module Billing
       # chooses among the currently-active ones.
       def picker_monitors
         scope = current_user.must_choose_downgrade? ? current_user.monitors : current_user.monitors.counting_toward_cap
-        scope.order(:created_at).to_a
+        # Preload :project — the picker groups by it (projects.md §7), so without
+        # this the group_by would fire one SELECT per monitor.
+        scope.includes(:project).order(:created_at).to_a
       end
 
       def success_notice(choosing)

@@ -31,6 +31,12 @@ default: &default
   prune_ping_events:
     class: PrunePingEventsJob
     schedule: every day at 00:40
+  # Daily backstop for the involuntary-downgrade grace period: settles any account
+  # whose choose-N window expired unanswered, keeping the oldest FREE_PLAN cap and
+  # clearing the lock. Nothing is suspended before the deadline. (projects.md §7, §12-J)
+  enforce_overdue_downgrades:
+    class: EnforceOverdueDowngradesJob
+    schedule: every day at 01:00
   clear_solid_queue_finished_jobs:
     command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
     schedule: every hour at minute 12

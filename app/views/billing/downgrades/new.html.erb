@@ -28,18 +28,28 @@
 <% else %>
   <%= form_with url: billing_downgrade_path, method: :post,
         data: { controller: "choose-five", choose_five_limit_value: @keep_limit } do %>
-    <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm">
-      <div class="divide-y divide-hairline">
-        <% @monitors.each do |monitor| %>
-          <label class="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-hairline/40">
-            <%= check_box_tag "keep_ids[]", monitor.id, false,
-                  data: { choose_five_target: "checkbox", action: "choose-five#toggle" },
-                  class: "h-4 w-4" %>
-            <span class="text-[14px] font-medium"><%= monitor.name %></span>
-            <span class="ml-auto font-mono text-[12px] text-muted"><%= monitor.status %></span>
-          </label>
-        <% end %>
-      </div>
+    <%# Group candidates by project (projects.md §7) so the user sees which app each
+        monitor belongs to. Controller preloads :project (no N+1). All checkboxes
+        stay inside the one form, so the choose-five Stimulus targets still resolve. %>
+    <div class="space-y-4">
+      <% @monitors.group_by(&:project).each do |project, monitors| %>
+        <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm" data-testid="downgrade-project-group">
+          <div class="px-4 py-2.5 border-b border-hairline bg-surface-subtle">
+            <h2 class="text-[13px] font-semibold text-secondary"><%= project.name %></h2>
+          </div>
+          <div class="divide-y divide-hairline">
+            <% monitors.each do |monitor| %>
+              <label class="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-hairline/40">
+                <%= check_box_tag "keep_ids[]", monitor.id, false,
+                      data: { choose_five_target: "checkbox", action: "choose-five#toggle" },
+                      class: "h-4 w-4" %>
+                <span class="text-[14px] font-medium"><%= monitor.name %></span>
+                <span class="ml-auto font-mono text-[12px] text-muted"><%= monitor.status %></span>
+              </label>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
     </div>
 
     <div class="mt-4 flex items-center gap-3">

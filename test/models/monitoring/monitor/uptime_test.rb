@@ -6,7 +6,8 @@ require "test_helper"
 class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
   setup do
     freeze_time
-    @monitor = users(:alice).monitors.create!(
+    @project = users(:alice).projects.sole
+    @monitor = @project.monitors.create!(
       name: "Uptime read",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300,

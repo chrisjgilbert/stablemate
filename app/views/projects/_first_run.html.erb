@@ -1,0 +1,32 @@
+<%#
+  First-run / zero-project empty state (projects.md §6, §13-S6). Under Design B a
+  monitor and an API key both live inside a project, so before anything else the
+  user creates their first project. Shown on the dashboard (no projects yet) and
+  on an empty projects index (e.g. after deleting the last project). The gem copy
+  is honest: a project's API key is required before the gem registers anything —
+  not the old "zero setup, your jobs register themselves" pitch.
+%>
+<div class="rounded-xl border border-border bg-surface p-10 shadow-sm text-center max-w-xl mx-auto"
+     data-testid="first-project-empty-state">
+  <div class="flex justify-center mb-4"><%= render "shared/logo", size: 44 %></div>
+  <h2 class="font-display text-lg font-bold tracking-tight">Create your first project</h2>
+  <p class="mt-1 text-[13px] text-muted">
+    A project groups the monitors for one app. Create one, then add monitors or
+    connect the gem with the project's API key.
+  </p>
+
+  <div class="mt-5 flex items-center justify-center gap-3">
+    <%= link_to "Create your first project", new_project_path,
+          class: "inline-flex items-center h-9 px-4 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover" %>
+  </div>
+
+  <div class="mt-8 text-left">
+    <p class="text-[11px] font-semibold uppercase tracking-wide text-gem mb-2">Connect the gem</p>
+    <%= render "shared/recurring_yml_snippet" %>
+    <p class="mt-2 text-[12px] text-muted">
+      Create a project, then copy its API key into your app — the gem uses that
+      key to register the project's jobs. A key is required before the gem does
+      anything. <%= link_to "Read the gem guide →", "#", class: "text-brand font-medium" %>
+    </p>
+  </div>
+</div>

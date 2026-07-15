@@ -29,6 +29,13 @@ module Stablemate
 
   SIGNUP_ACCOUNT_CAP = ENV.fetch("STABLEMATE_SIGNUP_ACCOUNT_CAP", 0).to_i
 
+  # How long an involuntarily-downgraded (card failure / cancel) over-cap user has
+  # to pick which monitors to keep before the backstop job enforces the fallback.
+  # Nothing is suspended during the window — a payment blip must never silently
+  # stop monitoring. Sits inside Stripe's dunning window; tunable. (projects.md
+  # §7/§12-J.)
+  DOWNGRADE_GRACE_PERIOD = 7.days
+
   DETECTION_INTERVAL = 30.seconds
 
   PING_RETENTION = 90.days

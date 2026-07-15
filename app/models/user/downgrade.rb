@@ -6,10 +6,11 @@ class User
   # (retained, uncounted) — never deleted. Only after the choice do we cancel the
   # Stripe subscription, after which the verified webhook flips plan → free.
   #
-  # An over-cap account is also driven here involuntarily (card failure / Portal
-  # cancel): #enforce_free_cap! suspends the over-cap monitors immediately so there
-  # is never silent free monitoring, leaving the account in the locked choose-5
-  # state until the user confirms which 5 to keep.
+  # An over-cap account also reaches #enforce_free_cap! involuntarily, but NOT
+  # immediately: an involuntary drop to Free opens a grace window and suspends
+  # nothing (User::Subscription#sync_plan_from_subscription!, §12-J). Only if that
+  # window expires unanswered does the daily backstop
+  # (User#enforce_downgrade_fallback!) call #enforce_free_cap! to keep the oldest N.
   class Downgrade
     def initialize(user)
       @user = user
@@ -44,11 +45,12 @@ class User
     end
 
     # Resolve the involuntary choose-N lock (WU-6). The account already dropped to
-    # Free and its over-cap monitors were auto-suspended (oldest kept); the user now
-    # re-picks exactly the Free cap's worth to keep active from among ALL their
-    # monitors (active AND the auto-suspended ones). The chosen are reactivated, the
-    # rest suspended, and the lock is cleared. No Stripe here — the subscription is
-    # already cancelled. Atomic so the account never sits half-repicked.
+    # Free but — during the grace window (§12-J) — nothing was suspended yet; the
+    # user now picks exactly the Free cap's worth to keep active from among ALL their
+    # monitors. The chosen stay (or return) active, the rest are suspended, and the
+    # lock is cleared. No Stripe here — the subscription is already cancelled. Atomic
+    # so the account never sits half-repicked. (Any monitors already suspended from a
+    # prior downgrade are still reactivated if chosen.)
     def resolve_choice!(keep_ids: [])
       keep_ids = Array(keep_ids).map(&:to_i)
       keep = @user.monitors.where(id: keep_ids)

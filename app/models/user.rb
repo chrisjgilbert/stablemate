@@ -1,11 +1,16 @@
 class User < ApplicationRecord
   include EmailNormalization
-  include Plan, Verification, MonitorSync, Subscription
+  include Plan, Verification, Subscription
 
   has_secure_password
   has_many :sessions, dependent: :destroy
-  has_many :api_keys, dependent: :destroy
-  has_many :monitors, class_name: "Monitoring::Monitor", dependent: :destroy
+  # Ownership flows monitor → project → user (docs/specs/projects.md §4.5). Reads
+  # (cap counts, dashboard, downgrade) keep working through these `through`
+  # associations; every build/create moves to project scope (a `through` can't
+  # build). The gem-sync operation moved to Project::MonitorSync accordingly.
+  has_many :projects, dependent: :destroy
+  has_many :monitors, through: :projects, source: :monitors
+  has_many :api_keys, through: :projects
 
   validates :email_address, presence: true, uniqueness: { case_sensitive: false }
   validates :password, length: { minimum: 8 }, allow_nil: true

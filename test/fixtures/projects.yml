@@ -1,0 +1,11 @@
+# One project per fixture user (projects.md §10). Monitors and API keys hang off
+# a project now, so every fixture monitor references one of these. Rails resolves
+# these label cross-references (project: alices_default) regardless of file load
+# order.
+alices_default:
+  user: alice
+  name: Alice's app
+
+bobs_default:
+  user: bob
+  name: Bob's app
