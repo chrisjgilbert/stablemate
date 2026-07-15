@@ -17,16 +17,22 @@
       </div>
     </div>
 
+    <%# The checkout & portal buttons POST to us, then 303-redirect to Stripe's
+        cross-origin hosted pages. Turbo would follow that redirect via fetch() and
+        hit CORS ("Failed to fetch"), so we opt these forms out of Turbo and let the
+        browser do a real full-page navigation. (allow_other_host: is set server-side.) %>
     <div class="flex items-center gap-2">
       <% if @user.pro? %>
         <%= button_to "Manage card & invoices", billing_portal_session_path,
-              class: "h-8 px-3 inline-flex items-center rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline border border-border" %>
+              class: "h-8 px-3 inline-flex items-center rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline border border-border",
+              form: { data: { turbo: false } } %>
         <%= link_to "Downgrade to Free", new_billing_downgrade_path,
               class: "h-8 px-3 inline-flex items-center rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline border border-border",
               data: { testid: "downgrade-link" } %>
       <% else %>
         <%= button_to "Upgrade to Pro", billing_checkout_path,
               class: "h-8 px-3 inline-flex items-center rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover",
+              form: { data: { turbo: false } },
               data: { testid: "upgrade-button" } %>
       <% end %>
     </div>
