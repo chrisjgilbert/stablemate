@@ -1,6 +1,7 @@
 # Error notices — show *what error* took a monitor down, not just lateness
 
-Status: **design spec — exploration + proposal, not yet pressure-tested**.
+Status: **decisions resolved — ready to build** (§12 ratified by the owner,
+2026-07-15; build in the §14 chunks, not one mega PR).
 Author: Claude (session), 2026-07-15; **merges @chrisjgilbert's Dead-Man's-Snitch-style
 "Error Notices" draft** (same date — the ping-param contract, the single `error`
 column, the single-entrypoint behaviour, and the demand that the locked-decision-#2
@@ -13,7 +14,8 @@ the `PingEvent.kind "failure"` + nullable `error` reservation in
 
 > This is a **design spec, not a build spec.** It proposes the shape, names the
 > reuse boundaries, walks every surface the change touches, and enumerates the
-> edge cases. §12 holds the open decisions, each with a recommendation.
+> edge cases. The §12 decisions are **resolved** — the spec reflects those
+> choices; §14 gives the build order and hand-off notes for implementation.
 
 ---
 
@@ -505,38 +507,41 @@ columns/values in the data-model section).
 
 ---
 
-## 12 · Open decisions (each with a recommendation)
+## 12 · Decisions (RESOLVED — ratified by @chrisjgilbert, 2026-07-15)
 
-- **A · Backtraces?** Ship the free-text `error` only. **Recommend: yes, defer
+Every recommendation below was ratified as written; each entry keeps its
+reasoning as the record of *why*.
+
+- **A · Backtraces?** Ship the free-text `error` only. **DECIDED: defer
   backtraces.** They answer the *next* question (where), not this spec's
   question (what); they balloon payload/storage; they're the highest-risk text
   for secret leakage (§10); and the user's error tracker already owns "where".
   A future `error_backtrace` text column (first N app frames, PingEvent-only,
   shown in a `<details>`) is additive and non-breaking if demand shows up.
 - **B · Repeated failures while down — update the incident's error?**
-  **Recommend: keep the first error** (it's what the email said; an incident is
+  **DECIDED: keep the first error** (it's what the email said; an incident is
   "what took it down"). Later failures are visible in recent events. Updating
   in place would make the banner disagree with the email in the user's inbox.
   (Whether repeats *re-alert* is not open — decided **no** in §5.1.)
 - **C · Should a failure ping while `pending` alert?** Spec says yes (§5): the
   first-ever signal being "I failed" is exactly when a new user most needs the
   loop to work. The alternative (stay pending, wait for a success first) hides
-  a real failure behind onboarding state. **Recommend: alert.**
-- **D · Error in the email subject?** **Recommend: no** — subject stays
+  a real failure behind onboarding state. **DECIDED: alert.**
+- **D · Error in the email subject?** **DECIDED: no** — subject stays
   `"<name> reported an error"`. Keeps headers injection-proof and lock-screen
   previews clean; the body carries the detail.
 - **E · Store `message` on success pings too?** DMS captures output on every
-  check-in. **Recommend: not in V1** — success messages have no surface to
+  check-in. **DECIDED: not in V1** — success messages have no surface to
   render on (no incident, no email) and would 10× the text volume of the
   hottest table for nothing. Additive later if a "last run output" panel is
   wanted; the param is simply ignored on success meanwhile.
 - **F · Also support a `/fail` URL alias (Healthchecks convention)?**
-  **Recommend: defer.** Two public contracts means double documentation and
+  **DECIDED: defer.** Two public contracts means double documentation and
   tests for zero new capability — `status=$?` covers the trap-based shell case
   a `/fail` URL serves. Trivially additive later (a route that forces
   `kind: "failure"` into the same controller).
 - **G · Per-attempt failure reporting (a `ping_on_retry`-style option)?**
-  **Recommend: not in V1.** Terminal-only (`after_discard`) is the correct
+  **DECIDED: not in V1.** Terminal-only (`after_discard`) is the correct
   default signal (§3.2); per-attempt reporting reintroduces the down/recovered
   noise this design avoids. Revisit only if users ask to see flappy retries.
 
@@ -554,3 +559,47 @@ columns/values in the data-model section).
   (e.g. `Net::ReadTimeout`, `HTTP 503`) through these same columns — this spec
   deliberately builds the columns it reserved, so the probe lands on prepared
   ground.
+
+---
+
+## 14 · Build order & hand-off notes
+
+Three PRs, each independently green (`bin/ci`) and shippable, per the
+commit-hygiene rules — deliberately **not** one mega PR:
+
+1. **PR 1 — server: error notices end to end (manual path).** The migration
+   (§4), `FailureReport` + the `check_in!` facade routing (§5), the
+   `status`/`message`/`s`/`m` params (§6), the cause-aware `down` email (§8),
+   and the docs that must move with behaviour: the amended locked decision #2
+   in `specs/README.md` (§5.1), `api.md`, and `integrating.md` §2's
+   curl-with-`$?` pattern. Tests: the [unit]/[request]/[mailer] items of §11
+   plus the browser system test (fail ping → badge flips down live → down
+   email carries the error → success ping → recovered). After this PR the
+   alert loop is correct for curl users. Known interim gap: the detail-page
+   incident banner still shows the generic missed-ping copy for a
+   `reported_error` incident until PR 2 lands — acceptable between PRs, not a
+   stopping point.
+2. **PR 2 — UI surfacing (§9).** Cause-aware incident banner with the error
+   block (`data-testid="incident-error"`), cause-aware recent-events labels,
+   the `recent_events` pluck extension; extend PR 1's system test to assert
+   the banner shows the error.
+3. **PR 3 — gem (§3.2, §7).** The `after_discard` wiring, `Client#report_failure`,
+   `ping_on_failure` config, the [gem] test items of §11, `integrating.md`
+   §1.3. **Stop-and-report condition:** if implementation-time verification
+   shows `after_discard` does *not* fire exactly once per terminal failure as
+   §3.2 assumes (e.g. ordering against a `retry_on` custom block differs),
+   stop and report back rather than substituting a different hook —
+   terminal-only reporting is the load-bearing design decision.
+
+Small implementation notes, so the implementer doesn't rediscover them:
+
+- The `MonitorMailer.send(event, monitor, incident:)` call in §8 reaches
+  `recovered` too — `recovered` must accept and ignore the `incident:` kwarg.
+- The 1 000-char `error` truncation bound lives with the other product
+  constants in `config/initializers/stablemate.rb` (e.g.
+  `Stablemate::ERROR_MESSAGE_LIMIT`), not inline in `FailureReport`; tests
+  assert relative to the constant, never a hard-coded number (specs README
+  rule).
+- CLAUDE.md workflow checkpoints apply to every PR: TDD, `/code-review` before
+  push, `/security-review` on PRs 1 and 3 (public ping surface / token
+  handling), `/verify` the live flow before shipping PR 1.
