@@ -11,7 +11,7 @@ class ErrorNoticesTest < ApplicationSystemTestCase
   setup { Monitoring::Monitor.delete_all; @alice = users(:alice) }
 
   test "a failure ping flips the monitor down live, emails the error, then a success recovers it" do
-    monitor = @alice.monitors.create!(
+    monitor = @alice.projects.sole.monitors.create!(
       name: "Nightly backup",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300
