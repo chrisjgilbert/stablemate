@@ -21,7 +21,7 @@ module Monitoring
         @monitor = monitor
       end
 
-      def call(received_at: Time.current, source_ip: nil, duration_ms: nil)
+      def check_in!(received_at: Time.current, source_ip: nil, duration_ms: nil)
         recovered_notification = nil
 
         # with_lock reloads under SELECT ... FOR UPDATE so the transition reads

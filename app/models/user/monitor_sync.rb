@@ -16,7 +16,7 @@ class User
     extend ActiveSupport::Concern
 
     def sync_monitors(app: nil, entries: [])
-      Operation.new(self).call(entries:)
+      Operation.new(self).sync_monitors(entries:)
     end
 
     # The operation proper. Nested so user.sync_monitors stays the public seam.
@@ -41,7 +41,7 @@ class User
         @user = user
       end
 
-      def call(entries:)
+      def sync_monitors(entries:)
         registered = []
         skipped = []
 
@@ -135,7 +135,7 @@ class User
           # partial unique index on (user, registration_key) lets the first create
           # win; the losers raise RecordNotUnique. Treat that as the idempotent
           # upsert it is — re-find the now-existing row and update it, so it lands
-          # in `registered` and the request never 500s. (Now that `call` holds the
+          # in `registered` and the request never 500s. (Now that `sync_monitors` holds the
           # user row lock, same-user syncs serialise and this is nearly unreachable,
           # but it stays as a backstop.)
           existing = @user.monitors.find_by(registration_key: entry.registration_key)

@@ -14,7 +14,7 @@ class ApiKey < ApplicationRecord
   # Issue a new key for a user: ApiKey.issue(user:, name:) -> [api_key, raw_token].
   # The raw token is transient (never re-derivable from what we store).
   def self.issue(user:, name:)
-    Issuance.new(user:, name:).call
+    Issuance.new(user:, name:).issue
   end
 
   # The masked form shown in the UI: sm_live_••••<last4>. Never reveals the key.

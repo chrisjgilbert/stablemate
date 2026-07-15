@@ -30,7 +30,7 @@ module Monitoring
         @monitor = monitor
       end
 
-      def call(day)
+      def roll_up_uptime(day)
         day = day.to_date
         day_start = day.to_time(:utc)
         day_end   = day_start + 1.day

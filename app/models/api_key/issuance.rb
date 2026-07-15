@@ -14,7 +14,7 @@ class ApiKey
       @name = name
     end
 
-    def call
+    def issue
       raw_token = self.class.generate_raw_token
       api_key = @user.api_keys.create!(
         name: @name,

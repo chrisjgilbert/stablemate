@@ -75,19 +75,19 @@ module Monitoring
     # Record a ping: persist a PingEvent, advance the timestamps, transition, and
     # (on recovery) resolve the incident + enqueue a `recovered` alert.
     def check_in!(received_at: Time.current, source_ip: nil, duration_ms: nil)
-      CheckIn.new(self).call(received_at:, source_ip:, duration_ms:)
+      CheckIn.new(self).check_in!(received_at:, source_ip:, duration_ms:)
     end
 
     # Flag this monitor down because its ping is overdue (called by the detection
     # job for every monitor in the `overdue` scope).
     def flag_missed!
-      MissedPing.new(self).call
+      MissedPing.new(self).flag_missed!
     end
 
     # Aggregate one day's up/down seconds + ping count into a UptimeDayStat
     # (idempotent upsert). Called by RollupUptimeJob for each day not yet rolled.
     def roll_up_uptime(day)
-      UptimeRollup.new(self).call(day)
+      UptimeRollup.new(self).roll_up_uptime(day)
     end
 
     # Plan-downgrade (de)activation (hosted tier only — issue #19). A suspended
