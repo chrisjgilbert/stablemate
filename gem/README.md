@@ -29,7 +29,11 @@ Stablemate.configure do |c|
 end
 ```
 
-Get the API key from **Settings → API keys → Generate key** (shown once).
+Get the API key from your project in Stablemate — **open the project → Generate
+key** (shown once). **Generate one API key per project:** the key *is* how
+Stablemate knows which project an app's monitors belong to, so give each app its
+own project and its own key (two apps sharing one key land in the same project and
+can collide on task keys).
 
 **Store the key where only production can see it** — per-environment
 credentials (`rails credentials:edit --environment production`) or an env var

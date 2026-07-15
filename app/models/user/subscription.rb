@@ -19,6 +19,16 @@ class User
       # Pay reads the Stripe customer email from `owner.email`; Rails 8 auth stores it
       # as email_address.
       alias_attribute :email, :email_address
+
+      # Accounts owing a choose-N decision after an involuntary drop to Free.
+      scope :awaiting_downgrade_choice, -> { where(awaiting_downgrade_choice: true) }
+
+      # Those whose grace window has elapsed — the daily EnforceOverdueDowngradesJob's
+      # work set. Mirrors Monitoring::Monitor.overdue (a base scope + a temporal
+      # predicate) so the job stays pure iteration.
+      scope :downgrade_grace_expired, lambda {
+        awaiting_downgrade_choice.where("downgrade_choice_deadline_at < ?", Time.current)
+      }
     end
 
     # Find or create the user's default Stripe customer, ready for Checkout/Portal.
@@ -39,8 +49,11 @@ class User
     #
     # Side effects keep monitors consistent with the new cap:
     #   * dropping to Free over the cap (involuntary downgrade — card failure or
-    #     Portal cancel) immediately suspends the over-cap monitors so there's
-    #     never silent free monitoring;
+    #     Portal cancel) starts a GRACE window and suspends NOTHING — every monitor
+    #     keeps running while the user is asked to pick their N (§7 / §12-J). A
+    #     payment blip must never silently stop monitoring; the daily backstop
+    #     (EnforceOverdueDowngradesJob → #enforce_downgrade_fallback!) settles the
+    #     account only if the window expires unanswered.
     #   * returning to Pro restores previously plan-suspended monitors (PRD §5.6:
     #     "if they re-upgrade later, suspended monitors can be reactivated"), up to
     #     the Pro cap.
@@ -51,14 +64,14 @@ class User
 
       if target == Plan::FREE
         # Dropping to Free while over the cap is an INVOLUNTARY downgrade (card
-        # failure / Portal cancel). Lock the account into a choose-N decision
-        # (WU-6) AND auto-suspend the over-cap monitors (oldest kept) so there is
-        # never silent free monitoring while the user decides. The flag is cleared
-        # only by resolve_downgrade_choice! or a re-upgrade — not by a repeat
-        # webhook (which, post-enforce, would see over_free_cap_by == 0).
-        if over_free_cap_by.positive?
-          update!(awaiting_downgrade_choice: true) unless awaiting_downgrade_choice?
-          Downgrade.new(self).enforce_free_cap!
+        # failure / Portal cancel). Open a fixed grace window and lock the account
+        # into a choose-N decision (WU-6) — but suspend nothing. Guard on the flag
+        # so a repeat webhook never pushes the deadline out (one window, not a
+        # rolling one); the flag is cleared by resolve_downgrade_choice!, a
+        # re-upgrade, or the backstop once the deadline passes.
+        if over_free_cap_by.positive? && !awaiting_downgrade_choice?
+          update!(awaiting_downgrade_choice: true,
+            downgrade_choice_deadline_at: Stablemate::DOWNGRADE_GRACE_PERIOD.from_now)
         end
       else
         restore_suspended_monitors!
@@ -80,10 +93,26 @@ class User
       Downgrade.new(self).resolve_choice!(keep_ids: keep_ids)
     end
 
-    # Clear the choose-N lock. Called on re-upgrade and after the user commits a
-    # choice; idempotent so a repeat webhook is a no-op.
+    # Clear the choose-N lock AND its grace deadline. The single place the window
+    # is closed — reached on re-upgrade, after the user commits a choice
+    # (resolve_choice!), from release_downgrade_lock_if_within_cap!, and from the
+    # backstop (enforce_downgrade_fallback!). Idempotent so a repeat webhook is a
+    # no-op.
     def clear_downgrade_choice!
-      update!(awaiting_downgrade_choice: false) if awaiting_downgrade_choice?
+      return unless awaiting_downgrade_choice?
+
+      update!(awaiting_downgrade_choice: false, downgrade_choice_deadline_at: nil)
+    end
+
+    # The backstop the daily EnforceOverdueDowngradesJob runs per overdue record
+    # once the grace window has expired unanswered. Settles the account against the
+    # Free cap: suspend the over-cap monitors (oldest FREE_PLAN_MONITOR_LIMIT kept),
+    # then clear the choose-N flags. enforce_free_cap! is itself a no-op when the
+    # account is already within the cap, so this is safe either way — after it runs
+    # the account is settled, nothing left awaiting.
+    def enforce_downgrade_fallback!
+      Downgrade.new(self).enforce_free_cap!
+      clear_downgrade_choice!
     end
 
     # Lift the choose-N lock when the account is back within the Free cap — e.g. the
@@ -120,8 +149,8 @@ class User
 
     # True when the account owes a choose-N decision after an involuntary drop to
     # Free — driven by the explicit flag (WU-6), not derived from over_free_cap_by
-    # (which the auto-suspend already zeroed), so the lock actually persists until
-    # the user re-picks or re-upgrades.
+    # (which stays positive during grace, since nothing is suspended yet), so the
+    # lock persists until the user re-picks, re-upgrades, or the backstop fires.
     def must_choose_downgrade?
       free? && awaiting_downgrade_choice?
     end

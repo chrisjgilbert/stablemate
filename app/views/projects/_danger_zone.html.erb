@@ -1,0 +1,31 @@
+<%#
+  Irreversible delete (projects.md §6, §13-S4): deleting cascades this project's
+  monitors and all their ping/uptime history. So we require typing the exact
+  project name — the confirm_name Stimulus controller enables the button only on
+  an exact client-side match, and ProjectsController#destroy re-checks the typed
+  name server-side (belt-and-braces). A bare data-confirm dialog is not enough.
+%>
+<div class="rounded-xl border border-down-bg bg-down-bg/40 p-5"
+     data-testid="danger-zone"
+     data-controller="confirm-name"
+     data-confirm-name-name-value="<%= project.name %>">
+  <h2 class="text-[14px] font-bold text-down-text">Delete this project</h2>
+  <p class="text-[13px] text-muted mt-1 mb-3">
+    This permanently deletes <span class="font-mono font-semibold"><%= project.name %></span>
+    and all its monitors and history. This cannot be undone.
+  </p>
+
+  <%= form_with url: project_path(project), method: :delete, class: "space-y-3" do |form| %>
+    <div>
+      <label for="confirm_name" class="block text-[12px] text-secondary mb-1">
+        Type <span class="font-mono font-semibold"><%= project.name %></span> to confirm
+      </label>
+      <%= text_field_tag :confirm_name, nil, id: "confirm_name", autocomplete: "off",
+            data: { confirm_name_target: "input", action: "input->confirm-name#check" },
+            class: "w-full h-[38px] px-3 rounded-lg border border-border font-mono text-[13px] focus:outline-brand" %>
+    </div>
+    <%= form.submit "Delete project", disabled: true,
+          data: { confirm_name_target: "button", testid: "delete-project" },
+          class: "h-9 px-4 rounded-lg bg-down-text text-white text-[13px] font-semibold hover:opacity-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed" %>
+  <% end %>
+</div>

@@ -9,13 +9,14 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
 
   setup do
     @user = users(:bob)
-    @user.monitors.delete_all
+    @project = @user.projects.sole
+    @project.monitors.delete_all
   end
 
   # A Pro user (cap 100) with n monitors — the realistic pre-downgrade state.
   def build_monitors(n)
     @user.update!(plan: "pro")
-    n.times.map { |i| @user.monitors.create!(name: "M#{i}", **ATTRS) }
+    n.times.map { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
   end
 
   # Give the user a real active Pro subscription mirror so the downgrade actually
@@ -157,6 +158,27 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
       assert_equal FREE, @user.monitors.counting_toward_cap.count
       assert_equal keep.sort, @user.monitors.counting_toward_cap.ids.sort
       assert_not_requested :delete, %r{https://api\.stripe\.com/v1/subscriptions}
+    end
+  end
+
+  # The picker groups candidates by project (projects.md §7) so the user sees which
+  # app each monitor belongs to.
+  test "the picker groups candidate monitors by project" do
+    with_billing_enabled do
+      @user.update!(plan: "pro")
+      second = @user.projects.create!(name: "Second app")
+      3.times { |i| @project.monitors.create!(name: "A#{i}", **ATTRS) }
+      FREE.times { |i| second.monitors.create!(name: "B#{i}", **ATTRS) }
+      @user.sync_plan_from_subscription! # ⇒ free + awaiting (8 > FREE)
+      assert @user.reload.must_choose_downgrade?
+      sign_in @user
+
+      get new_billing_downgrade_path
+
+      assert_response :ok
+      assert_select "[data-testid='downgrade-project-group']", 2
+      assert_select "h2", text: @project.name
+      assert_select "h2", text: "Second app"
     end
   end
 

@@ -1,9 +1,15 @@
 <%= form_with model: monitor, class: "space-y-6" do |form| %>
-  <% if monitor.errors.any? %>
-    <div class="rounded-lg border border-down-bg bg-down-bg/60 px-3 py-2 text-[12px] text-down-text">
-      <ul class="list-disc list-inside">
-        <% monitor.errors.full_messages.each do |msg| %><li><%= msg %></li><% end %>
-      </ul>
+  <%= render "shared/form_errors", record: monitor %>
+
+  <%# Minimal project selector (projects.md §6): a new monitor is created into a
+      project (the most-recent is pre-selected). Only shown on create — moving an
+      existing monitor between projects is the Phase-4 sub-resource, not this form.
+      Options are scoped to the current user's projects (no cross-tenant ids). %>
+  <% if !monitor.persisted? && @projects.present? %>
+    <div>
+      <%= form.label :project_id, "Project", class: "block text-[13px] font-medium text-secondary mb-1" %>
+      <%= form.collection_select :project_id, @projects, :id, :name, {},
+            class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
     </div>
   <% end %>
 

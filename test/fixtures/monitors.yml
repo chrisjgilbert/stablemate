@@ -1,8 +1,10 @@
 # Fixtures are inserted via raw SQL (callbacks/validations are skipped), so every
 # NOT NULL column — including ping_token, which the model normally auto-fills —
-# must be set explicitly here.
+# must be set explicitly here. Monitors belong to a project now (projects.md §10):
+# each references a fixture project (project: alices_default) and no longer sets
+# `user:` — the column is gone.
 pending:
-  user: alice
+  project: alices_default
   monitor_type: heartbeat
   name: Nightly backup
   ping_token: fixture_pending_token_aaaaaaaaaaaaaaaa
@@ -12,7 +14,7 @@ pending:
   source: manual
 
 up:
-  user: alice
+  project: alices_default
   monitor_type: heartbeat
   name: Hourly sync
   ping_token: fixture_up_token_bbbbbbbbbbbbbbbbbbbb
@@ -25,7 +27,7 @@ up:
 
 # Registered from the gem (source: gem) — drives the gem-chip system test (S14).
 gem_synced:
-  user: alice
+  project: alices_default
   monitor_type: heartbeat
   name: daily_digest
   ping_token: fixture_gem_token_dddddddddddddddddd
@@ -37,7 +39,7 @@ gem_synced:
 
 # Owned by bob — used to prove tenant isolation (alice must get a 404).
 bobs:
-  user: bob
+  project: bobs_default
   monitor_type: heartbeat
   name: Bobs job
   ping_token: fixture_bobs_token_cccccccccccccccc

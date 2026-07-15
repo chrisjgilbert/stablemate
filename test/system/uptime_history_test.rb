@@ -9,12 +9,13 @@ class UptimeHistoryTest < ApplicationSystemTestCase
   setup do
     Monitoring::Monitor.delete_all
     @alice = users(:alice)
+    @project = @alice.projects.sole
   end
 
   # S8 — Detail uptime panel: 90-bar UptimeBar, overall % matching a fixture, and
   # the recent-events list with mono timestamps + duration_ms where present.
   test "S8: detail page renders the 90-day uptime bar, overall percent, and recent events" do
-    monitor = @alice.monitors.create!(
+    monitor = @project.monitors.create!(
       name: "History job",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300,
@@ -48,7 +49,7 @@ class UptimeHistoryTest < ApplicationSystemTestCase
 
   # S9 — Dashboard sparkline: a row renders MiniTicks (16 ticks) + uptime %.
   test "S9: dashboard row renders the mini-ticks sparkline and an uptime percent" do
-    monitor = @alice.monitors.create!(
+    monitor = @project.monitors.create!(
       name: "Sparkline job",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300,
@@ -70,7 +71,7 @@ class UptimeHistoryTest < ApplicationSystemTestCase
   # S10 — Active-incident banner: red banner with expected-by, grace elapsed,
   # "down for …", NO Acknowledge button; clears + badge returns to Up on recovery.
   test "S10: a down monitor shows the incident banner with no Acknowledge, clearing on recovery" do
-    monitor = @alice.monitors.create!(
+    monitor = @project.monitors.create!(
       name: "Down watch",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300

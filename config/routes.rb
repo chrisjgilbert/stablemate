@@ -12,21 +12,34 @@ Rails.application.routes.draw do
   # Non-blocking email verification link.
   get "verify/:token", to: "email_verifications#show", as: :email_verification
 
+  # First-class projects: the grouping entity that owns monitors and the
+  # per-project API keys. Standard REST, tenant-scoped to current_user.projects.
+  # Keys are managed from a project's show page (Design B — a key is one app's
+  # identity), so issuance/revoke are a nested sub-resource. (docs/specs/projects.md §6)
+  resources :projects do
+    resources :api_keys, only: %i[create destroy], module: :projects
+  end
+
   # Authenticated monitor UI. CRUD plus the sub-resource controllers that replace
   # custom verbs: pause/resume and rotate-token (architecture.md §7).
   resources :monitors do
     resource :pause, only: %i[create destroy], module: :monitors
     resource :ping_token, only: :update, module: :monitors
+    # Move a monitor between projects — a sub-resource, not a custom verb
+    # (CLAUDE.md rule 4). Manual monitors only (projects.md §6, §12-I).
+    resource :project, only: :update, module: :monitors
   end
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", as: :rails_health_check
 
-  # API-key management UI (session-authed, owner-only). Generate-once modal +
-  # masked list + revoke. (architecture.md §7)
+  # API keys are per-project now (Design B, projects.md §12-E/§13-S9): they're
+  # generated and revoked from a project's show page. The old standalone
+  # settings/api_keys screen is gone — keep a redirect so any bookmark lands on the
+  # projects list, where the keys now live.
   namespace :settings do
-    resources :api_keys, only: %i[index create destroy]
+    get "api_keys", to: redirect("/projects"), as: :api_keys
   end
 
   # Hosted-tier billing (issue #19). The routes exist, but every billing

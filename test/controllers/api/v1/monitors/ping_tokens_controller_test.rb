@@ -3,8 +3,9 @@ require "test_helper"
 class Api::V1::Monitors::PingTokensControllerTest < ActionDispatch::IntegrationTest
   setup do
     @user = users(:alice)
-    _key, @raw = ApiKey.issue(user: @user, name: "CI")
-    @monitor = monitors(:up)
+    @project = @user.projects.sole
+    _key, @raw = ApiKey.issue(project: @project, name: "CI")
+    @monitor = monitors(:up) # in @project
   end
 
   def auth = { "Authorization" => "Bearer #{@raw}" }

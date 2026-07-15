@@ -1,0 +1,27 @@
+<% content_for :title, "Projects" %>
+
+<div class="flex items-center justify-between mb-6">
+  <h1 class="font-display text-xl font-bold tracking-tight">Projects</h1>
+  <% if @projects.any? %>
+    <%= link_to "New project", new_project_path,
+          class: "inline-flex items-center h-8 px-3 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover" %>
+  <% end %>
+</div>
+
+<% if @projects.any? %>
+  <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm">
+    <div class="divide-y divide-hairline">
+      <% @projects.each do |project| %>
+        <div class="relative flex items-center justify-between px-[18px] py-[13px] hover:bg-surface-subtle">
+          <%= link_to project.name, project_path(project),
+                class: "font-mono text-[13px] text-ink truncate hover:text-brand before:absolute before:inset-0" %>
+          <span class="font-mono text-[12px] text-muted shrink-0">
+            <%= pluralize(@monitor_counts[project.id] || 0, "monitor") %>
+          </span>
+        </div>
+      <% end %>
+    </div>
+  </div>
+<% else %>
+  <%= render "projects/first_run" %>
+<% end %>

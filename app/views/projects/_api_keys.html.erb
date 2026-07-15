@@ -1,17 +1,24 @@
-<% content_for :title, "API keys" %>
-
-<div class="max-w-3xl mx-auto space-y-6">
-  <div class="flex items-center justify-between">
+<%#
+  This project's API keys (Design B, projects.md §6): masked list + a "Generate
+  key" action (shown-once modal) + revoke. A key is this app's gem identity — drop
+  it into the app's Stablemate initializer to sync monitors into THIS project.
+  Locals: project, api_keys.
+%>
+<section class="mt-10" data-testid="project-api-keys">
+  <div class="flex items-center justify-between mb-3">
     <div>
-      <h1 class="font-display text-xl font-bold tracking-tight">API keys</h1>
-      <p class="text-[13px] text-muted mt-1">
-        Use these tokens with the Stablemate gem, or to call the API from your own code.
+      <h2 class="font-display text-base font-bold tracking-tight">API keys</h2>
+      <p class="text-[13px] text-muted mt-0.5">
+        Drop a key into this app's Stablemate gem to sync its monitors here, or to call the API.
       </p>
     </div>
-    <%= render "settings/api_keys/generate_form", label: "Generate key", height: "h-8" %>
+    <%= form_with url: project_api_keys_path(project), method: :post do |f| %>
+      <%= f.submit "Generate key",
+            class: "inline-flex items-center h-8 px-3 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
+    <% end %>
   </div>
 
-  <% if @api_keys.any? %>
+  <% if api_keys.any? %>
     <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm">
       <table class="w-full text-[13px]" data-testid="api-keys-table">
         <thead class="text-left text-muted border-b border-hairline">
@@ -24,14 +31,14 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-hairline">
-          <% @api_keys.each do |key| %>
+          <% api_keys.each do |key| %>
             <tr id="<%= dom_id(key) %>">
               <td class="px-4 py-3"><%= key.name %></td>
               <td class="px-4 py-3 font-mono text-muted"><%= key.masked %></td>
               <td class="px-4 py-3 font-mono text-muted"><%= mono_timestamp(key.created_at) %></td>
               <td class="px-4 py-3 font-mono text-muted"><%= mono_timestamp(key.last_used_at, blank: "never") %></td>
               <td class="px-4 py-3 text-right">
-                <%= button_to "Revoke", settings_api_key_path(key), method: :delete,
+                <%= button_to "Revoke", project_api_key_path(project, key), method: :delete,
                       form: { data: { turbo_confirm: "Revoke this key? Anything using it stops working immediately." } },
                       class: "h-7 px-2.5 rounded-lg text-[12px] font-semibold text-down-text hover:bg-down-bg/60" %>
               </td>
@@ -41,16 +48,10 @@
       </table>
     </div>
   <% else %>
-    <div class="rounded-xl border border-border bg-surface p-10 text-center shadow-sm" data-testid="api-keys-empty">
-      <p class="text-[14px] font-semibold text-ink">No API keys yet</p>
-      <p class="text-[13px] text-muted mt-1 mb-4">
-        Generate a key to register monitors from the Stablemate gem or call the API.
+    <div class="rounded-xl border border-border bg-surface p-8 text-center shadow-sm" data-testid="api-keys-empty">
+      <p class="text-[13px] text-muted">
+        No API keys yet. Generate one to connect this app's gem or call the API.
       </p>
-      <%= render "settings/api_keys/generate_form", label: "Generate your first key", height: "h-9" %>
     </div>
   <% end %>
-</div>
-
-<% if @raw_token.present? %>
-  <%= render "settings/api_keys/generated_modal", raw_token: @raw_token %>
-<% end %>
+</section>

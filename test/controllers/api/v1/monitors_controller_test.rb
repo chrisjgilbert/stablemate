@@ -3,7 +3,8 @@ require "test_helper"
 class Api::V1::MonitorsControllerTest < ActionDispatch::IntegrationTest
   setup do
     @user = users(:alice)
-    @api_key, @raw = ApiKey.issue(user: @user, name: "CI")
+    @project = @user.projects.sole
+    @api_key, @raw = ApiKey.issue(project: @project, name: "CI")
   end
 
   def auth(token = @raw)
@@ -78,5 +79,24 @@ class Api::V1::MonitorsControllerTest < ActionDispatch::IntegrationTest
   test "show of a foreign monitor is 404 (opaque)" do
     get api_v1_monitor_url(monitors(:bobs)), headers: auth
     assert_response :not_found
+  end
+
+  # projects.md §9 (Design B) — a key scopes to ONE project. A monitor in ANOTHER
+  # project of the SAME user is invisible: excluded from the index and an opaque
+  # 404 on show. This proves the collision fix isolates the READ path, not just
+  # writes (the read-cache collision §5 warns about).
+  test "a key cannot see another project of the same user" do
+    other = @user.projects.create!(name: "Other app")
+    other_monitor = other.monitors.create!(
+      name: "OtherProjectMonitor", expected_interval_seconds: 3600, grace_period_seconds: 300
+    )
+
+    get api_v1_monitor_url(other_monitor), headers: auth
+    assert_response :not_found
+
+    get api_v1_monitors_url, headers: auth
+    names = JSON.parse(response.body)["monitors"].map { |m| m["name"] }
+    refute_includes names, "OtherProjectMonitor"
+    assert_includes names, monitors(:up).name
   end
 end

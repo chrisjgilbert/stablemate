@@ -6,7 +6,8 @@ class DetectMissedPingsJobTest < ActiveJob::TestCase
   setup do
     # Isolate detection to a single known monitor so the assertions count only it.
     Monitoring::Monitor.delete_all
-    @monitor = users(:alice).monitors.create!(
+    @project = users(:alice).projects.sole
+    @monitor = @project.monitors.create!(
       name: "Sweep target",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300,

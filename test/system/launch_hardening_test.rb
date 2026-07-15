@@ -34,9 +34,10 @@ class LaunchHardeningTest < ApplicationSystemTestCase
   # monitor action and "5 / 5" on the dashboard, with no upgrade/pricing UI.
   test "S16: at the monitor limit, the dashboard and New action show the at-limit state with no pricing UI" do
     alice = users(:alice)
-    alice.monitors.delete_all
+    project = alice.projects.sole
+    project.monitors.delete_all
     Stablemate::MAX_MONITORS_PER_USER.times do |i|
-      alice.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
+      project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
     end
 
     sign_in alice

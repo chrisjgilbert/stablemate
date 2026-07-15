@@ -88,6 +88,9 @@
     </dl>
   </div>
 
+  <%# Which project this monitor lives in + the move control (manual monitors only). %>
+  <%= render "monitors/move", monitor: @monitor %>
+
   <%# 90-day uptime history (real rollup data) + the recent-events feed. %>
   <%= render "monitors/uptime_panel", monitor: @monitor %>
   <%= render "monitors/recent_events", monitor: @monitor %>

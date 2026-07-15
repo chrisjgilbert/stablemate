@@ -1,0 +1,12 @@
+<%#
+  Per-project cap-skip advisory (projects.md §6, §13-S5). The account is at its
+  per-user monitor limit, so any *new* gem jobs syncing into this project come
+  back skipped (limit_reached) until a slot frees up — a signal that otherwise
+  lives only in the gem log. The exact skipped count isn't persisted (§13-S5
+  note), so this is a derived advisory, not a precise "N skipped" tally.
+%>
+<div class="mb-2 flex items-start gap-2 rounded-lg border border-pending-dot bg-pending-bg px-3 py-2 text-[12px] text-pending-text"
+     data-testid="cap-skip-banner">
+  <span aria-hidden="true" class="mt-px">▲</span>
+  <span>Account at the monitor limit — new gem jobs in this project won't register until you free up slots.</span>
+</div>

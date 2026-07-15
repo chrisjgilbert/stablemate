@@ -28,7 +28,12 @@ module Monitoring
     include Pausing
     include Uptime
 
-    belongs_to :user
+    belongs_to :project
+    # Ownership flows monitor → project → user (docs/specs/projects.md §4.2).
+    # `monitor.user` is delegated so within_monitor_cap, mailers, and broadcasts
+    # keep working; allow_nil avoids a NoMethodError on a monitor built before its
+    # project is set.
+    delegate :user, to: :project, allow_nil: true
     has_many :ping_events, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
     has_many :incidents, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
     has_many :notifications, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
@@ -94,6 +99,13 @@ module Monitoring
     # monitor is retained but not monitored/alerted and excluded from the cap.
     def suspend!    = Suspension.new(self).suspend!
     def reactivate! = Suspension.new(self).reactivate!
+
+    # Move a manual monitor into another of the user's projects (projects.md §6).
+    # Returns a Transfer::Result — a gem monitor or a target collision is a clean
+    # `ok? == false`, not an exception.
+    def transfer_to(project)
+      Transfer.new(self).transfer_to(project)
+    end
 
     private
       # A user may own at most MAX_MONITORS_PER_USER monitors — paused ones still

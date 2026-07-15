@@ -6,7 +6,8 @@ require "test_helper"
 class PrunePingEventsJobTest < ActiveJob::TestCase
   setup do
     Monitoring::Monitor.delete_all
-    @monitor = users(:alice).monitors.create!(
+    @project = users(:alice).projects.sole
+    @monitor = @project.monitors.create!(
       name: "Prune target",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300,

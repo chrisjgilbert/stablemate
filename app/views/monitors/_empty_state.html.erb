@@ -15,10 +15,7 @@
 
   <div class="mt-8 text-left">
     <p class="text-[11px] font-semibold uppercase tracking-wide text-gem mb-2">Install the gem</p>
-    <pre class="rounded-lg bg-warmdark text-surface-subtle p-4 font-mono text-[12px] overflow-x-auto"><code># config/recurring.yml
-daily_digest:
-  class: DailyDigestJob
-  schedule: every day at 9am</code></pre>
+    <%= render "shared/recurring_yml_snippet" %>
     <p class="mt-2 text-[12px] text-muted">
       Add the gem and your recurring jobs register themselves — no per-job code.
       <%= link_to "Install the gem →", "#", class: "text-brand font-medium" %>

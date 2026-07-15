@@ -1,12 +1,12 @@
 require "test_helper"
 
 class ApiKeyTest < ActiveSupport::TestCase
-  setup { @user = users(:alice) }
+  setup { @user = users(:alice); @project = @user.projects.sole }
 
   # Scenario 1 — issuance stores a digest + last4, returns the raw key once,
   # never persists plaintext.
   test "issue stores a SHA-256 digest and last4 and returns the raw key once" do
-    api_key, raw = ApiKey.issue(user: @user, name: "CI")
+    api_key, raw = ApiKey.issue(project: @project, name: "CI")
 
     assert_match(/\Asm_live_[A-Za-z0-9]{32}\z/, raw)
     assert_equal "CI", api_key.name
@@ -19,13 +19,13 @@ class ApiKeyTest < ActiveSupport::TestCase
   end
 
   test "masked form reveals only the last 4 characters" do
-    api_key, raw = ApiKey.issue(user: @user, name: "CI")
+    api_key, raw = ApiKey.issue(project: @project, name: "CI")
     assert_equal "sm_live_••••#{raw.last(4)}", api_key.masked
   end
 
   # Scenario 2 — lookup by raw token matches via digest; a wrong token does not.
   test "authenticating resolves the right key and touches last_used_at" do
-    api_key, raw = ApiKey.issue(user: @user, name: "CI")
+    api_key, raw = ApiKey.issue(project: @project, name: "CI")
     assert_nil api_key.last_used_at
 
     found = freeze_time { ApiKey.authenticating(raw) }
@@ -34,7 +34,7 @@ class ApiKeyTest < ActiveSupport::TestCase
   end
 
   test "authenticating returns nil for a wrong, blank, or nil token" do
-    ApiKey.issue(user: @user, name: "CI")
+    ApiKey.issue(project: @project, name: "CI")
 
     assert_nil ApiKey.authenticating("sm_live_wrongwrongwrongwrongwrongwrong00")
     assert_nil ApiKey.authenticating("")
@@ -42,8 +42,8 @@ class ApiKeyTest < ActiveSupport::TestCase
   end
 
   test "digests are unique across keys" do
-    ApiKey.issue(user: @user, name: "one")
-    second, = ApiKey.issue(user: @user, name: "two")
+    ApiKey.issue(project: @project, name: "one")
+    second, = ApiKey.issue(project: @project, name: "two")
     assert second.persisted?
   end
 end

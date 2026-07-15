@@ -3,7 +3,8 @@ require "test_helper"
 class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
   setup do
     @user = users(:bob) # owns one fixture monitor
-    _key, @raw = ApiKey.issue(user: @user, name: "CI")
+    @project = @user.projects.sole
+    _key, @raw = ApiKey.issue(project: @project, name: "CI")
   end
 
   def auth = { "Authorization" => "Bearer #{@raw}" }
@@ -101,5 +102,24 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
   test "sync requires a bearer token" do
     post sync_api_v1_monitors_url, params: { monitors: [] }, as: :json
     assert_response :unauthorized
+  end
+
+  # projects.md §9 (Design B) — sync upserts into the KEY's project. The same
+  # registration_key already existing in ANOTHER project of the same user does not
+  # collide (the collision fix) and is left untouched.
+  test "sync upserts into the key's project and does not touch a same-key monitor in another project" do
+    other = @user.projects.create!(name: "Other app")
+    other_monitor = other.monitors.create!(
+      name: "Other daily_digest", registration_key: "daily_digest", source: "gem", status: "pending",
+      expected_interval_seconds: 3600, grace_period_seconds: 300
+    )
+
+    sync([ entry("daily_digest", name: "Mine") ])
+    assert_response :success
+
+    mine = @project.monitors.find_by(registration_key: "daily_digest")
+    assert_equal "Mine", mine.name
+    refute_equal other_monitor.id, mine.id
+    assert_equal "Other daily_digest", other_monitor.reload.name # untouched
   end
 end

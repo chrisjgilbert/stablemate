@@ -43,17 +43,28 @@ if [ -f bin/rails ]; then
 fi
 
 # --- Lint ------------------------------------------------------------------
-if bundle exec rubocop --version >/dev/null 2>&1; then
+# Prefer the committed bin/ binstub over `bundle exec`: in some sandboxes a
+# Bundler binstub quirk makes `bundle exec <tool>` exit non-zero, which silently
+# skipped these steps (a false-green gate). The binstubs work everywhere (and are
+# tracked, so CI has them); `bundle exec` stays as a fallback. Mirrors the direct
+# invocation already used for the gem suite below.
+if [ -x bin/rubocop ]; then
+  step "rubocop"
+  bin/rubocop || note_fail "rubocop"
+elif bundle exec rubocop --version >/dev/null 2>&1; then
   step "rubocop"
   bundle exec rubocop || note_fail "rubocop"
 fi
 
 # --- Security --------------------------------------------------------------
-if bundle exec brakeman --version >/dev/null 2>&1; then
+if [ -x bin/brakeman ]; then
+  step "brakeman"
+  bin/brakeman --quiet --no-pager -w2 || note_fail "brakeman"
+elif bundle exec brakeman --version >/dev/null 2>&1; then
   step "brakeman"
   bundle exec brakeman --quiet --no-pager -w2 || note_fail "brakeman"
 fi
-if bundle exec bundle-audit version >/dev/null 2>&1; then
+if [ -x bin/bundler-audit ] || bundle exec bundle-audit version >/dev/null 2>&1; then
   step "bundle-audit"
   # Ignore GHSA-mjgf-xj26-9qf9: a non-constant-time HMAC compare in Pay's PADDLE
   # webhook signature verifier. Stablemate is Stripe-only — no Paddle backend is
@@ -61,7 +72,11 @@ if bundle exec bundle-audit version >/dev/null 2>&1; then
   # never loaded and there is no exposure. Revisit when we bump pay to the patched
   # 9.x+ line (a major upgrade, tracked separately), or if a Paddle processor is
   # ever added. Every other advisory still fails the build.
-  bundle exec bundle-audit check --update --ignore GHSA-mjgf-xj26-9qf9 || note_fail "bundle-audit"
+  if [ -x bin/bundler-audit ]; then
+    bin/bundler-audit check --update --ignore GHSA-mjgf-xj26-9qf9 || note_fail "bundle-audit"
+  else
+    bundle exec bundle-audit check --update --ignore GHSA-mjgf-xj26-9qf9 || note_fail "bundle-audit"
+  fi
 fi
 
 # --- Tests -----------------------------------------------------------------

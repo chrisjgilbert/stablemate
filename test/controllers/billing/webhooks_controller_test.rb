@@ -10,6 +10,7 @@ require "test_helper"
 class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
   setup do
     @user = users(:bob)
+    @project = @user.projects.sole
   end
 
   # Build a Stripe-signed request body for an event whose object carries a
@@ -88,8 +89,8 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
       without_pay_stripe_network do
         # A user with two suspended monitors from an earlier downgrade.
         @user.update!(plan: "free")
-        a = @user.monitors.create!(name: "A", **{ expected_interval_seconds: 3600, grace_period_seconds: 300 })
-        b = @user.monitors.create!(name: "B", **{ expected_interval_seconds: 3600, grace_period_seconds: 300 })
+        a = @project.monitors.create!(name: "A", **{ expected_interval_seconds: 3600, grace_period_seconds: 300 })
+        b = @project.monitors.create!(name: "B", **{ expected_interval_seconds: 3600, grace_period_seconds: 300 })
         [ a, b ].each(&:suspend!)
         cus = make_pro!
 
