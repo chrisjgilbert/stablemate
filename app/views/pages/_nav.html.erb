@@ -9,6 +9,11 @@
 <nav class="nav">
   <div class="wrap nav__row">
     <%= link_to root_path, class: "brand" do %>Stablemate<span class="dot">.</span><% end %>
+    <% if authenticated? %>
+      <span class="badge-soon">Coming soon</span>
+    <% else %>
+      <%= link_to "Coming soon", sign_up_path, class: "badge-soon" %>
+    <% end %>
     <div class="nav__links">
       <a href="<%= root_path %>#how">How it works</a>
       <a href="<%= root_path %>#spec">recurring.yml</a>

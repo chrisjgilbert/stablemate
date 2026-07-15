@@ -23,6 +23,9 @@ class PricingPageTest < ApplicationSystemTestCase
     # A handful of real FAQ objections.
     assert_text "self-host"
 
+    # Pre-launch badge rides along in the shared marketing nav.
+    assert_link "Coming soon", href: sign_up_path
+
     # Neither plan card can buy Pro without an account — both CTAs go to sign-up.
     within all(".plan")[0] do
       click_on "Start free"

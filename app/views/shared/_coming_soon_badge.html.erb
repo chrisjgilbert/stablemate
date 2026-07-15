@@ -1,0 +1,22 @@
+<%#
+  ComingSoonBadge: pre-launch pill shown next to the wordmark on every page while
+  Stablemate is in early access. For anonymous visitors it links to sign-up,
+  which already branches to the waitlist form once Signup.at_capacity? (see
+  RegistrationsController#new). Signed-in visitors get the same pill as plain
+  text, never a sign_up_path link — an existing account never gets a sign-up
+  CTA (see PagesControllerTest's "never sees sign-up CTAs" coverage).
+
+  Tailwind-styled, for the authenticated app + signed-out auth screens (they
+  share `layouts/application`'s tokens). The marketing landing/pricing nav has
+  its own `.lp`-scoped equivalent (`.badge-soon` in landing.css, `pages/_nav`)
+  so Tailwind classes don't leak into that deliberately isolated design system.
+%>
+<% badge_classes = "inline-flex items-center h-[20px] px-2 rounded-full bg-brand-tint text-brand-hover " \
+                    "text-[10px] font-mono font-semibold uppercase tracking-wide" %>
+<% if authenticated? %>
+  <span class="<%= badge_classes %>" data-testid="coming-soon-badge">Coming soon</span>
+<% else %>
+  <%= link_to "Coming soon", sign_up_path,
+        class: "#{badge_classes} hover:bg-brand/15",
+        data: { testid: "coming-soon-badge" } %>
+<% end %>

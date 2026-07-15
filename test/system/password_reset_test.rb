@@ -14,6 +14,7 @@ class PasswordResetTest < ApplicationSystemTestCase
     # Step 1: request a reset via the forgot-password form.
     visit new_password_path
     assert_text "Forgot your password?"
+    assert_link "Coming soon", href: sign_up_path
 
     # No label on this field — the form uses a placeholder only; match by id.
     fill_in "email_address", with: user.email_address

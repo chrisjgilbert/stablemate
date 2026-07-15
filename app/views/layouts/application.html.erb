@@ -15,9 +15,12 @@
                     (active ? "text-ink border-brand" : "text-secondary border-transparent hover:text-ink") } %>
       <header class="border-b border-border bg-surface">
         <div class="max-w-5xl mx-auto px-5 h-14 flex items-center justify-between">
-          <%= link_to root_path, class: "font-display text-lg font-bold tracking-tight text-ink" do %>
-            Stablemate<span class="text-brand">.</span>
-          <% end %>
+          <div class="flex items-center gap-2.5">
+            <%= link_to root_path, class: "font-display text-lg font-bold tracking-tight text-ink" do %>
+              Stablemate<span class="text-brand">.</span>
+            <% end %>
+            <%= render "shared/coming_soon_badge" %>
+          </div>
           <nav class="flex items-center gap-5">
             <%= nav_link.call("Monitors", monitors_path, section == "monitors") %>
             <%= nav_link.call("API keys", settings_api_keys_path, section == "settings/api_keys") %>

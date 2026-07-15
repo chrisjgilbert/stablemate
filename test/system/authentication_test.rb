@@ -6,6 +6,7 @@ class AuthenticationTest < ApplicationSystemTestCase
   test "S1: sign up lands on the dashboard empty state" do
     visit sign_up_path
     assert_text "Free — up to #{Stablemate::MAX_MONITORS_PER_USER} monitors"
+    assert_link "Coming soon", href: sign_up_path
 
     fill_in "Email", with: "newdev@example.com"
     fill_in "Password", with: "password1234"
@@ -17,6 +18,12 @@ class AuthenticationTest < ApplicationSystemTestCase
     assert_text "Monitor your first cron job"
     assert_text "config/recurring.yml"
     assert_text "New monitor"
+
+    # Pre-launch badge rides along in the authenticated header too, but as
+    # plain text — a signed-in user never gets a sign-up CTA. (The pill is
+    # styled uppercase via CSS, which the browser reflects in rendered text.)
+    assert_text(/coming soon/i)
+    assert_no_link "Coming soon"
   end
 
   # S2 — sign in returns to dashboard; sign out returns to sign in and protects routes.
@@ -26,6 +33,7 @@ class AuthenticationTest < ApplicationSystemTestCase
 
     click_on "Sign out"
     assert_text "Sign in to Stablemate"
+    assert_link "Coming soon", href: sign_up_path
 
     # Protected routes are unreachable once signed out.
     visit monitors_path

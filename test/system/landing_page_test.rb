@@ -20,9 +20,10 @@ class LandingPageTest < ApplicationSystemTestCase
     assert_text "shouldn't be a"
     assert_text "9 a.m. surprise"
 
-    # Nav offers both entry points into the app.
+    # Nav offers both entry points into the app, plus the pre-launch badge.
     assert_link "Sign in"
     assert_link "Start free"
+    assert_link "Coming soon", href: sign_up_path
   end
 
   test "the Start monitoring free CTA leads to sign up" do
