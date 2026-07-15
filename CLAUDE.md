@@ -32,6 +32,16 @@ below; the locked product/architecture decisions are in
    Operation objects are the **default** for any operation meaning more than a bare
    `create!`, not a last resort. An entity may have a fat *facade* of methods as
    long as each delegates to a tidy operation underneath.
+   **The operation object's own public method carries the same verb as the facade
+   — never a generic `#call`.** `Monitor::CheckIn` exposes `#check_in!`, not
+   `#call`; the facade line is then a plain one-liner:
+   `def check_in! = CheckIn.new(self).check_in!`. A bare `#call` is the exact
+   shape of the `FooService.call` convention rule 1 is banning — dressing it in a
+   noun-named, namespaced class doesn't fix that if the method you actually read
+   at the call site is still an unlabelled `#call`. (Reserve a uniform `#call`/
+   `#deliver` interface for genuine **Command pattern** classes — row 6 of the
+   table above — where a caller dispatches over *interchangeable* implementations
+   through one shared contract, e.g. `Notifications::Channel#deliver`.)
 3. **Slice fat models with concerns, don't extract satellites.** Group one aspect of
    an entity into a namespaced concern (`app/models/user/plan.rb`) that *is* the
    entity. The top-level model file stays a thin manifest of `include`s. Never move

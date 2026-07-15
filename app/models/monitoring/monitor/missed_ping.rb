@@ -19,7 +19,7 @@ module Monitoring
         @monitor = monitor
       end
 
-      def call(now: Time.current)
+      def flag_missed!(now: Time.current)
         # Re-validate under a row lock: the detection sweep holds a record loaded by
         # the `overdue` query, which a legitimate late ping may have moved on since.
         # with_lock reloads via SELECT ... FOR UPDATE, so we re-check the monitor is
@@ -40,7 +40,7 @@ module Monitoring
 
       private
         # Open a fresh incident only when none is currently open. The row lock in
-        # #call already serialises every incident-creating path, so the guard above
+        # #flag_missed! already serialises every incident-creating path, so the guard above
         # is decisive; the partial unique index is a last-resort backstop. The
         # insert runs in its own savepoint (requires_new) so that a RecordNotUnique
         # rolls back only the savepoint — rescuing it here does NOT poison the outer
