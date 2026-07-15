@@ -182,9 +182,18 @@ propagate into the host).
   note ActiveJob **re-raises** callback exceptions into the host worker, so
   the gem's swallow-everything rescue in `handle_discard` is load-bearing.)
 - Client truncates `message` to 1 000 chars before sending (§10).
-- **The existing success subscriber is unchanged** — it already ignores raising
-  performs, which is correct: attempt-level exceptions are not successes and
-  (if non-terminal) not failures either.
+- **The success subscriber needs one guard, discovered at implementation
+  time: the `perform.active_job` payload records only *unhandled* exceptions.**
+  A failure swallowed by `discard_on`/`retry_on` closes its perform event with
+  a clean payload, so an unguarded success subscriber would ping it as a
+  success — double-firing against the failure report on a discard (down→up
+  flap with a spurious `recovered` email) and resetting the monitor's overdue
+  clock on every will-be-retried attempt. Since `after_discard` and the
+  `enqueue_retry.active_job` notification both fire on the job's own thread
+  *before* its perform event closes, the gem keeps a thread-local set of
+  job_ids whose current attempt did not succeed — marked by `handle_discard`
+  and an `enqueue_retry` subscription, consumed (and thereby cleaned up) by
+  the perform handler — and skips the success ping for marked attempts.
 
 ---
 

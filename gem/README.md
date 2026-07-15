@@ -66,8 +66,10 @@ Two layers, both keyed on the Solid Queue **task key**:
   failures** — an unhandled raise, `retry_on` exhausted, or `discard_on` — as
   an error notice (`status=1` + `ExceptionClass: message`) on the same ping
   URL, flipping the monitor down immediately with the error in the alert.
-  Attempts that will be retried report nothing; on hosts older than 7.1 (and
-  for a job that never runs at all) the missed beat remains the signal. All
+  Attempts that will be retried send nothing at all — no report, and no
+  success ping that would advance the monitor's clock; on hosts older than
+  7.1 (and for a job that never runs at all) the missed beat remains the
+  signal. All
   requests are fire-and-forget on a background thread with a short timeout,
   and every error is swallowed — Stablemate can never break your jobs.
   Backend-agnostic: works on any ActiveJob adapter, not just Solid Queue.

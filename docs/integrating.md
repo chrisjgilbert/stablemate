@@ -153,8 +153,9 @@ the background. A job that fails **for good** — an unhandled raise, `retry_on`
 with its attempts exhausted, or a `discard_on` match — now reports too: the gem
 sends the error (`ExceptionClass: message`) to the same monitor, which goes
 **down immediately** and the alert email says what raised. Attempts that will
-be retried stay silent — a job that fails once and succeeds on retry never
-alerts. Terminal-failure reporting needs Rails ≥ 7.1 (Active Job's
+be retried stay completely silent — no error report, and no success ping
+either, so a failed attempt never advances the monitor's clock — and a job
+that fails once and succeeds on retry never alerts. Terminal-failure reporting needs Rails ≥ 7.1 (Active Job's
 `after_discard` hook); on older hosts, and for a job that never runs at all, the
 **missed beat remains the backstop** — the monitor still goes down when the
 ping is overdue past the grace period.

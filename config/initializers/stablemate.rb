@@ -45,6 +45,9 @@ module Stablemate
   # A reported failure's error text is truncated server-side to this many
   # characters (job-failure-details.md §10) — the model layer applies it
   # unconditionally, so the ping endpoint and any future channel share the bound.
+  # Deliberately duplicated in the companion gem as
+  # Stablemate::Client::ERROR_MESSAGE_LIMIT (gem/lib/stablemate/client.rb),
+  # which truncates client-side as defence in depth — keep the two in sync.
   ERROR_MESSAGE_LIMIT = 1_000
 
   def self.monitor_cap_enabled?

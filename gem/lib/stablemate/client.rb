@@ -13,7 +13,10 @@ module Stablemate
     Error = Class.new(StandardError)
 
     # Client-side bound on a reported error message (defence in depth — the
-    # server truncates authoritatively to the same limit).
+    # server truncates authoritatively to the same limit). Deliberately
+    # duplicated from the server's Stablemate::ERROR_MESSAGE_LIMIT
+    # (config/initializers/stablemate.rb in the server repo) — the gem is
+    # standalone, so it can't share the constant; keep the two in sync.
     ERROR_MESSAGE_LIMIT = 1_000
 
     def initialize(config = Stablemate.config)
