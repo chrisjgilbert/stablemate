@@ -7,7 +7,11 @@ module Monitors
 
     def update
       @monitor.rotate_ping_token!
-      redirect_to @monitor, notice: "Ping URL rotated. The old URL no longer works."
+      # Reopen the (collapsed, once-live) ping-setup disclosure so the freshly
+      # rotated URL is immediately visible — the old one just died.
+      flash[:reveal_ping_setup] = true
+      redirect_to monitor_path(@monitor, anchor: "ping-url-card"),
+        notice: "Ping URL rotated. The old URL no longer works."
     end
 
     private

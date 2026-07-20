@@ -1,5 +1,10 @@
 <% content_for :title, @monitor.name %>
 <% open_incident = @monitor.open_incident %>
+<%# Setup is a one-time concern: collapse it to the bottom once the monitor is
+    live, or immediately for a gem-registered one (the gem gets its ping URL
+    from the API sync, never from this card, so there's nothing to wire up by
+    hand even before the first ping). %>
+<% ping_setup_collapsed = @monitor.ever_pinged? || @monitor.source == "gem" %>
 
 <%# Live status: subscribe to the monitor's stream so broadcast_status_update's
     :badge replace lands on the header badge without a reload (mirrors _row.html.erb). %>
@@ -70,20 +75,11 @@
     </div>
   <% end %>
 
-  <%# Ping URL card + curl snippet (post-create state lives here too) %>
-  <div class="rounded-xl border border-border bg-surface p-6 shadow-sm space-y-4" data-testid="ping-url-card">
-    <div class="flex items-center justify-between">
-      <h2 class="text-[13px] font-semibold text-secondary">Ping URL</h2>
-      <%= button_to "Rotate token", monitor_ping_token_path(@monitor), method: :patch,
-            form: { data: { turbo_confirm: "Rotate the token? The current ping URL stops working immediately." } },
-            class: "h-7 px-2.5 rounded-lg border border-border text-[12px] font-semibold text-secondary hover:bg-hairline" %>
-    </div>
-    <%= render "shared/copyable", value: ping_url_for(@monitor), label: "Ping URL" %>
-    <div>
-      <p class="text-[12px] text-muted mb-1">Wire it into your job:</p>
-      <%= render "shared/copyable", value: curl_snippet_for(@monitor), dark: true, label: "curl snippet" %>
-    </div>
-  </div>
+  <%# Ping URL card + curl snippet — full and visible here only while the
+      monitor still needs wiring up; see ping_setup_collapsed above. %>
+  <% unless ping_setup_collapsed %>
+    <%= render "monitors/ping_setup", monitor: @monitor %>
+  <% end %>
 
   <%# Settings summary %>
   <div class="rounded-xl border border-border bg-surface p-6 shadow-sm">
@@ -106,4 +102,12 @@
   <%# 90-day uptime history (real rollup data) + the recent-events feed. %>
   <%= render "monitors/uptime_panel", monitor: @monitor %>
   <%= render "monitors/recent_events", monitor: @monitor %>
+
+  <%# Collapsed setup, once live — opened back up right after a token rotation
+      (see Monitors::PingTokensController#update), since the old URL just died
+      and the new one needs to be seen immediately. %>
+  <% if ping_setup_collapsed %>
+    <%= render "monitors/ping_setup", monitor: @monitor, collapsed: true,
+          open: flash[:reveal_ping_setup].present? %>
+  <% end %>
 </div>
