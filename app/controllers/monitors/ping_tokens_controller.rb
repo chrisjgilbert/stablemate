@@ -7,11 +7,13 @@ module Monitors
 
     def update
       @monitor.rotate_ping_token!
-      # Reopen the (collapsed, once-live) ping-setup disclosure so the freshly
-      # rotated URL is immediately visible — the old one just died.
+      # One-shot signal to show.html.erb: render the (normally collapsed) ping
+      # setup as the full top card so the freshly rotated URL is immediately
+      # visible — the old one just died. Server-rendered on purpose: an anchored
+      # redirect doesn't work here, because Turbo follows form redirects via
+      # fetch, which drops the URL fragment before the browser ever sees it.
       flash[:reveal_ping_setup] = true
-      redirect_to monitor_path(@monitor, anchor: "ping-url-card"),
-        notice: "Ping URL rotated. The old URL no longer works."
+      redirect_to @monitor, notice: "Ping URL rotated. The old URL no longer works."
     end
 
     private

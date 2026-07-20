@@ -1,10 +1,17 @@
 <% content_for :title, @monitor.name %>
 <% open_incident = @monitor.open_incident %>
 <%# Setup is a one-time concern: collapse it to the bottom once the monitor is
-    live, or immediately for a gem-registered one (the gem gets its ping URL
-    from the API sync, never from this card, so there's nothing to wire up by
-    hand even before the first ping). %>
-<% ping_setup_collapsed = @monitor.ever_pinged? || @monitor.source == "gem" %>
+    live, immediately for a gem-registered one (the gem gets its ping URL from
+    the API sync, never from this card), and for a suspended one (a swallowed
+    ping can't reactivate it, so "wire it into your job" would be a false
+    promise). Exception: right after a token rotation the controller sets
+    flash[:reveal_ping_setup], and the full card comes back to the top for that
+    one render — the old URL just died and the new one must be seen. (An
+    anchored redirect can't do this job: Turbo follows form redirects via
+    fetch, which drops the URL fragment, so the browser never scrolls.) %>
+<% ping_setup_collapsed =
+     (@monitor.ever_pinged? || @monitor.from_gem? || @monitor.suspended?) &&
+     !flash[:reveal_ping_setup] %>
 
 <%# Live status: subscribe to the monitor's stream so broadcast_status_update's
     :badge replace lands on the header badge without a reload (mirrors _row.html.erb). %>
@@ -103,11 +110,8 @@
   <%= render "monitors/uptime_panel", monitor: @monitor %>
   <%= render "monitors/recent_events", monitor: @monitor %>
 
-  <%# Collapsed setup, once live — opened back up right after a token rotation
-      (see Monitors::PingTokensController#update), since the old URL just died
-      and the new one needs to be seen immediately. %>
+  <%# Collapsed setup, once live. %>
   <% if ping_setup_collapsed %>
-    <%= render "monitors/ping_setup", monitor: @monitor, collapsed: true,
-          open: flash[:reveal_ping_setup].present? %>
+    <%= render "monitors/ping_setup", monitor: @monitor, collapsed: true %>
   <% end %>
 </div>

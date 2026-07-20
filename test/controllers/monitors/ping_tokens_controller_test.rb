@@ -12,9 +12,10 @@ class Monitors::PingTokensControllerTest < ActionDispatch::IntegrationTest
     @monitor.reload
 
     assert_not_equal old_token, @monitor.ping_token
-    # Anchored so the (collapsed-by-default, once-pinged) ping-URL disclosure
-    # opens back up with the freshly-rotated URL in view.
-    assert_redirected_to monitor_path(@monitor, anchor: "ping-url-card")
+    assert_redirected_to monitor_path(@monitor)
+    # One-shot reveal flag: the show page renders the (normally collapsed) ping
+    # setup as the full top card for this one redirect, new URL in view.
+    assert flash[:reveal_ping_setup]
 
     # The old ping URL is dead immediately.
     get ping_path(old_token)

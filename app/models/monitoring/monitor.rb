@@ -60,6 +60,13 @@ module Monitoring
       end
     end
 
+    # Registration source: created by hand in the UI vs synced from the gem.
+    # Plain predicates over the string column, mirroring HeartbeatStates' status
+    # vocabulary (an enum's raising setter and Kernel#gem-shadowing scope aren't
+    # worth it for a set-once column).
+    def from_gem? = source == "gem"
+    def manual?   = source == "manual"
+
     # The monitor's currently-open incident, if any. The open-incident invariant
     # (the partial unique index on monitor_id WHERE resolved_at IS NULL) guarantees
     # at most one, so callers rely on this single accessor rather than each

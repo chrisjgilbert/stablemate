@@ -1,23 +1,16 @@
+<%# locals: (monitor:, collapsed: false) %>
 <%#
   Ping URL card: copyable ping URL + curl snippet + rotate. Setup is a one-time
   concern, so show.html.erb renders this two ways:
-  - unwrapped (collapsed: false — the default) for a monitor still waiting on
-    its first ping: full and visible, since wiring it up is exactly what the
-    user is here to do.
-  - a closed <details> disclosure (collapsed: true) once the monitor is live —
-    it stops crowding the triage view on every later visit. `open` controls
-    whether the disclosure starts open (set true right after a token rotation,
-    since the old URL just died and the new one needs to be seen immediately).
-  Locals: monitor, collapsed (bool, default false), open (bool, default false).
+  - unwrapped (collapsed: false) near the top while wiring up is the user's
+    next step: a never-pinged manual monitor, or the one render right after a
+    token rotation (the old URL just died; the new one must be seen).
+  - a closed <details> disclosure (collapsed: true) at the bottom otherwise,
+    so it stops crowding the triage view.
 %>
-<% collapsed = local_assigns.fetch(:collapsed, false) %>
-<% open = local_assigns.fetch(:open, false) %>
-
-<% rotate_button = capture do %>
-  <%= button_to "Rotate token", monitor_ping_token_path(monitor), method: :patch,
-        form: { data: { turbo_confirm: "Rotate the token? The current ping URL stops working immediately." } },
-        class: "h-7 px-2.5 rounded-lg border border-border text-[12px] font-semibold text-secondary hover:bg-hairline" %>
-<% end %>
+<% rotate_button = button_to("Rotate token", monitor_ping_token_path(monitor), method: :patch,
+     form: { data: { turbo_confirm: "Rotate the token? The current ping URL stops working immediately." } },
+     class: "h-7 px-2.5 rounded-lg border border-border text-[12px] font-semibold text-secondary hover:bg-hairline") %>
 
 <% fields = capture do %>
   <%= render "shared/copyable", value: ping_url_for(monitor), label: "Ping URL" %>
@@ -28,8 +21,7 @@
 <% end %>
 
 <% if collapsed %>
-  <details id="ping-url-card" data-testid="ping-url-card" <%= "open" if open %>
-           class="rounded-xl border border-border bg-surface shadow-sm">
+  <details data-testid="ping-url-card" class="rounded-xl border border-border bg-surface shadow-sm">
     <summary class="cursor-pointer select-none px-6 py-4 text-[13px] font-semibold text-secondary">
       Ping URL &amp; setup
     </summary>

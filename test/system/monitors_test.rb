@@ -75,10 +75,10 @@ class MonitorsTest < ApplicationSystemTestCase
 
   # S9 — once a monitor has pinged, the ping-URL setup collapses into a closed
   # disclosure at the bottom of the page: it's a one-time wiring concern and
-  # shouldn't crowd the triage view on every visit. Rotating the token from
-  # inside opens it back up so the freshly-rotated URL is immediately visible
-  # (the old URL just died — that's the moment the user most needs to see it).
-  test "S9: a live monitor collapses the ping-URL setup, rotating reopens it" do
+  # shouldn't crowd the triage view on every visit. Rotating the token brings
+  # the full card back to the top for one render (the old URL just died — that's
+  # the moment the user most needs the new one), then it collapses again.
+  test "S9: a live monitor collapses the ping-URL setup, rotating reveals it once" do
     monitor = @project.monitors.create!(name: "Live job", expected_interval_seconds: 3600,
       grace_period_seconds: 300, status: "up", last_ping_at: 5.minutes.ago)
     sign_in @alice
@@ -96,12 +96,18 @@ class MonitorsTest < ApplicationSystemTestCase
     original = find("input[aria-label='Ping URL']").value
     accept_confirm { click_on "Rotate token" }
 
-    # After rotating, the disclosure comes back open with the new URL in view —
-    # not re-collapsed, since the old URL just died and the user needs the new
-    # one now.
-    assert_selector "details[data-testid='ping-url-card'][open]"
-    assert_no_selector "input[aria-label='Ping URL'][value='#{original}']"
-    assert_selector "input[aria-label='Ping URL'][value*='/ping/']"
+    # After rotating, setup renders as the full top card (not the disclosure) —
+    # an anchored scroll to the bottom can't work, Turbo drops URL fragments on
+    # form redirects — with the fresh URL in view. (Rotation changing the URL
+    # value is S5's job; here we pin the reveal.)
+    assert_text "Ping URL rotated"
+    assert_no_selector "details[data-testid='ping-url-card']"
+    assert_selector "div[data-testid='ping-url-card'] input[aria-label='Ping URL'][value*='/ping/']"
+
+    # The reveal is one-shot: an ordinary next visit collapses setup again.
+    visit monitor_path(monitor)
+    assert_selector "details[data-testid='ping-url-card']"
+    assert_no_selector "details[data-testid='ping-url-card'][open]"
   end
 
   # S7 — at the cap, the New-monitor action shows the at-limit state and "5 / 5".

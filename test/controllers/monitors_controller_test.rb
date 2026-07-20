@@ -286,6 +286,26 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_select "[data-testid='cap-skip-banner']", false
   end
 
+  # The ping-setup card renders full-size only while wiring up is genuinely the
+  # next step. A suspended monitor can't be revived by a ping (CheckIn swallows
+  # it), so even never-pinged it gets the collapsed disclosure — "wire it into
+  # your job" would be a false promise. Gem-registered monitors likewise (the
+  # gem gets its URL from the API sync, not this card).
+  test "show collapses ping setup for suspended and gem monitors even before any ping" do
+    sign_in @alice
+
+    suspended = create_monitor(status: "suspended", next_due_at: nil, last_ping_at: nil)
+    get monitor_path(suspended)
+    assert_response :success
+    assert_select "details[data-testid='ping-url-card']"
+    assert_select "div[data-testid='ping-url-card']", false
+
+    get monitor_path(monitors(:gem_synced))
+    assert_response :success
+    assert_select "details[data-testid='ping-url-card']"
+    assert_select "div[data-testid='ping-url-card']", false
+  end
+
   private
     def create_monitor(status:, next_due_at:, grace_period_seconds: 300, last_ping_at: 10.minutes.ago)
       @alices_project.monitors.create!(name: "#{status.capitalize} monitor", expected_interval_seconds: 3600,
