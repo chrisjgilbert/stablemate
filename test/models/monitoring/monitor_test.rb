@@ -67,6 +67,23 @@ class Monitoring::MonitorTest < ActiveSupport::TestCase
     assert monitor.ping_token.present?
   end
 
+  # awaiting_setup? gates the detail page's full ping-setup card: only a manual,
+  # never-pinged, not-suspended monitor still needs hand-wiring.
+  test "awaiting_setup? is true only for a manual, never-pinged, unsuspended monitor" do
+    monitor = @project.monitors.create!(name: "Fresh", **ATTRS)
+    assert monitor.awaiting_setup?
+
+    monitor.last_ping_at = Time.current
+    assert_not monitor.awaiting_setup?, "pinged monitors are wired up"
+
+    monitor.last_ping_at = nil
+    monitor.status = "suspended"
+    assert_not monitor.awaiting_setup?, "a ping can't reactivate a suspended monitor"
+
+    assert_not @project.monitors.create!(name: "Synced", source: "gem", **ATTRS).awaiting_setup?,
+      "gem monitors get their URL from the API sync"
+  end
+
   # Scenario 8 — a user at the cap cannot create another monitor.
   test "a user at the monitor cap cannot create another monitor" do
     Stablemate::MAX_MONITORS_PER_USER.times { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }

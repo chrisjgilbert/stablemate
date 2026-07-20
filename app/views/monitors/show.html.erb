@@ -1,17 +1,10 @@
 <% content_for :title, @monitor.name %>
 <% open_incident = @monitor.open_incident %>
-<%# Setup is a one-time concern: collapse it to the bottom once the monitor is
-    live, immediately for a gem-registered one (the gem gets its ping URL from
-    the API sync, never from this card), and for a suspended one (a swallowed
-    ping can't reactivate it, so "wire it into your job" would be a false
-    promise). Exception: right after a token rotation the controller sets
-    flash[:reveal_ping_setup], and the full card comes back to the top for that
-    one render — the old URL just died and the new one must be seen. (An
-    anchored redirect can't do this job: Turbo follows form redirects via
-    fetch, which drops the URL fragment, so the browser never scrolls.) %>
-<% ping_setup_collapsed =
-     (@monitor.ever_pinged? || @monitor.from_gem? || @monitor.suspended?) &&
-     !flash[:reveal_ping_setup] %>
+<%# Setup is a one-time concern: the full card renders only while wiring up is
+    genuinely the next step, or for the one render right after a token rotation
+    (the one-shot flash reveal — see Monitors::PingTokensController#update for
+    why it's a flash, not an anchor). Collapsed to a bottom disclosure otherwise. %>
+<% ping_setup_collapsed = !@monitor.awaiting_setup? && !flash[:reveal_ping_setup] %>
 
 <%# Live status: subscribe to the monitor's stream so broadcast_status_update's
     :badge replace lands on the header badge without a reload (mirrors _row.html.erb). %>

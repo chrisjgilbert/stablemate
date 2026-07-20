@@ -93,13 +93,12 @@ class MonitorsTest < ApplicationSystemTestCase
     assert_selector "details[data-testid='ping-url-card'][open] input[aria-label='Ping URL'][value*='/ping/']"
     assert_selector "details[data-testid='ping-url-card'][open] input[aria-label='curl snippet'][value*='curl -fsS']"
 
-    original = find("input[aria-label='Ping URL']").value
     accept_confirm { click_on "Rotate token" }
 
-    # After rotating, setup renders as the full top card (not the disclosure) —
-    # an anchored scroll to the bottom can't work, Turbo drops URL fragments on
-    # form redirects — with the fresh URL in view. (Rotation changing the URL
-    # value is S5's job; here we pin the reveal.)
+    # After rotating, setup renders as the full top card (not the disclosure)
+    # with the fresh URL in view — see PingTokensController#update for why a
+    # flash reveal, not an anchor. (Rotation changing the URL value is S5's
+    # job; here we pin the reveal.)
     assert_text "Ping URL rotated"
     assert_no_selector "details[data-testid='ping-url-card']"
     assert_selector "div[data-testid='ping-url-card'] input[aria-label='Ping URL'][value*='/ping/']"

@@ -67,6 +67,14 @@ module Monitoring
     def from_gem? = source == "gem"
     def manual?   = source == "manual"
 
+    # Is a hand-wired first ping still the user's next step? Only for a manual
+    # monitor that has never pinged and isn't plan-suspended: a gem monitor gets
+    # its ping URL from the API sync (never from the UI card), and a ping to a
+    # suspended monitor is recorded but swallowed by CheckIn — it can't
+    # reactivate it, so prompting "wire it into your job" would be a false
+    # promise. Drives which shape of the ping-setup card the detail page shows.
+    def awaiting_setup? = manual? && !ever_pinged? && !suspended?
+
     # The monitor's currently-open incident, if any. The open-incident invariant
     # (the partial unique index on monitor_id WHERE resolved_at IS NULL) guarantees
     # at most one, so callers rely on this single accessor rather than each
