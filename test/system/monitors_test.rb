@@ -73,6 +73,42 @@ class MonitorsTest < ApplicationSystemTestCase
     assert_selector "[data-testid='ping-url-card']"
   end
 
+  # S9 — once a monitor has pinged, the ping-URL setup collapses into a closed
+  # disclosure at the bottom of the page: it's a one-time wiring concern and
+  # shouldn't crowd the triage view on every visit. Rotating the token brings
+  # the full card back to the top for one render (the old URL just died — that's
+  # the moment the user most needs the new one), then it collapses again.
+  test "S9: a live monitor collapses the ping-URL setup, rotating reveals it once" do
+    monitor = @project.monitors.create!(name: "Live job", expected_interval_seconds: 3600,
+      grace_period_seconds: 300, status: "up", last_ping_at: 5.minutes.ago)
+    sign_in @alice
+    visit monitor_path(monitor)
+
+    # Collapsed by default — present, but not open (visibility inside <details>
+    # isn't reliably reported by the driver, so assert on the `open` attribute).
+    assert_selector "details[data-testid='ping-url-card']"
+    assert_no_selector "details[data-testid='ping-url-card'][open]"
+
+    find("summary", text: "Ping URL & setup").click
+    assert_selector "details[data-testid='ping-url-card'][open] input[aria-label='Ping URL'][value*='/ping/']"
+    assert_selector "details[data-testid='ping-url-card'][open] input[aria-label='curl snippet'][value*='curl -fsS']"
+
+    accept_confirm { click_on "Rotate token" }
+
+    # After rotating, setup renders as the full top card (not the disclosure)
+    # with the fresh URL in view — see PingTokensController#update for why a
+    # flash reveal, not an anchor. (Rotation changing the URL value is S5's
+    # job; here we pin the reveal.)
+    assert_text "Ping URL rotated"
+    assert_no_selector "details[data-testid='ping-url-card']"
+    assert_selector "div[data-testid='ping-url-card'] input[aria-label='Ping URL'][value*='/ping/']"
+
+    # The reveal is one-shot: an ordinary next visit collapses setup again.
+    visit monitor_path(monitor)
+    assert_selector "details[data-testid='ping-url-card']"
+    assert_no_selector "details[data-testid='ping-url-card'][open]"
+  end
+
   # S7 — at the cap, the New-monitor action shows the at-limit state and "5 / 5".
   test "S7: at the cap the dashboard shows the count and the at-limit state" do
     Stablemate::MAX_MONITORS_PER_USER.times do |i|

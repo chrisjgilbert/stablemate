@@ -170,8 +170,9 @@ ping is overdue past the grace period.
 ## 2 · The manual path (any language, any scheduler)
 
 Every monitor has a **ping URL** containing a secret token. Hit it from the end of
-your job. Find the URL on the monitor's detail page (it includes a ready-to-paste
-`curl` snippet).
+your job. Find the URL on the monitor's detail page — shown up top while the
+monitor awaits its first ping, and inside the **"Ping URL & setup"** section at
+the bottom once it's live (it includes a ready-to-paste `curl` snippet).
 
 ### curl (cron, shell)
 
@@ -219,8 +220,8 @@ end
 ### Notes
 
 - The **ping token is the only credential** on this path — no API key, no headers.
-  Treat the URL as a secret. Rotate it from the monitor's detail page if it leaks
-  (the old URL stops working immediately).
+  Treat the URL as a secret. Rotate it from the **"Ping URL & setup"** section of
+  the monitor's detail page if it leaks (the old URL stops working immediately).
 - The endpoint always returns `{"ok":true}` on a known token and an opaque `404`
   on an unknown one. It is rate-limited (see [`api.md`](api.md)) generously enough
   for any real cron cadence.

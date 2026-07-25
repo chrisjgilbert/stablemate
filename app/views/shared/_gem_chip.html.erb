@@ -5,7 +5,7 @@
   Locals: monitor, variant (default :compact).
 %>
 <% variant ||= :compact %>
-<% if monitor.source == "gem" %>
+<% if monitor.from_gem? %>
   <% if variant == :full %>
     <span class="inline-flex items-center gap-1 px-2 h-[22px] rounded-md bg-brand-tint text-gem text-[11px] font-medium"
           title="Registered from config/recurring.yml">

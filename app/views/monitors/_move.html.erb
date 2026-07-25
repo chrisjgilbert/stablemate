@@ -10,7 +10,7 @@
     In <%= link_to monitor.project.name, project_path(monitor.project), class: "font-medium text-ink hover:text-brand" %>.
   </p>
 
-  <% if monitor.source == "manual" %>
+  <% if monitor.manual? %>
     <% others = current_user.projects.where.not(id: monitor.project_id).order(:created_at).to_a %>
     <% if others.any? %>
       <%= form_with url: monitor_project_path(monitor), method: :patch, class: "flex items-center gap-2" do |f| %>

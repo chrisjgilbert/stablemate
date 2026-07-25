@@ -17,7 +17,7 @@ module Monitoring
       end
 
       def transfer_to(project)
-        return Result.new(false, :not_manual) unless @monitor.source == "manual"
+        return Result.new(false, :not_manual) unless @monitor.manual?
         return Result.new(true, nil) if @monitor.project_id == project.id
 
         @monitor.update!(project: project)
