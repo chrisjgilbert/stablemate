@@ -45,7 +45,7 @@ gem "image_processing", "~> 1.2"
 # Hosted-tier billing (issue #19, hosted-only / config-gated). Pay wraps Stripe
 # subscription state via the pay_* tables — we don't hand-roll it. Dormant unless
 # Stripe keys are configured. [https://github.com/pay-rails/pay]
-gem "pay", "~> 8.3"
+gem "pay", "~> 11.6"
 gem "stripe", "~> 13.0"
 
 group :development, :test do
