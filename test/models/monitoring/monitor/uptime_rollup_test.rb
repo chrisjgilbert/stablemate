@@ -198,6 +198,22 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
     assert_equal :no_data, stat.status
   end
 
+  # M12 — a day that hasn't finished must not be rolled. An open incident gets
+  # clamped to end-of-day, so hours that haven't elapsed are scored as down; and
+  # because uptime_days_to_roll resumes AFTER the last rolled day, that wrong row
+  # is never re-rolled — it becomes permanent history and, being "already rolled",
+  # keeps the real day from ever being rolled properly.
+  test "rolling up today or a future day is refused, not written" do
+    @monitor.incidents.create!(started_at: Date.current.to_time(:utc), cause: "missed_ping")
+
+    assert_raises(ArgumentError) { @monitor.roll_up_uptime(Date.current) }
+    assert_raises(ArgumentError) { @monitor.roll_up_uptime(Date.current + 1) }
+
+    assert_empty @monitor.uptime_day_stats.where(day: Date.current..)
+    # Yesterday, a completed day, still rolls fine.
+    assert @monitor.roll_up_uptime(Date.current - 1)
+  end
+
   # The monitor's creation day is only measured from creation onward (partial day).
   test "the creation day measures only the seconds after the monitor existed" do
     created_at = @day.to_time(:utc) + 6.hours

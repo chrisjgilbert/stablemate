@@ -32,6 +32,16 @@ module Monitoring
 
       def roll_up_uptime(day)
         day = day.to_date
+        # Only COMPLETED days can be rolled. Rolling today (or later) would clamp
+        # an open incident to end-of-day, scoring hours that haven't elapsed yet as
+        # down, and uptime_days_to_roll resumes after the last rolled day — so the
+        # bad row would never be re-rolled and would also block the real day from
+        # ever being rolled. Raising rather than no-op'ing because no caller has a
+        # reason to ask: RollupUptimeJob only ever passes uptime_days_to_roll,
+        # which stops at yesterday, and the current day is served live by the
+        # Uptime concern (live_today_stat).
+        raise ArgumentError, "cannot roll up #{day}: only completed days can be rolled up" if day >= Date.current
+
         day_start = day.to_time(:utc)
         day_end   = day_start + 1.day
 
