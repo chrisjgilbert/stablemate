@@ -39,7 +39,7 @@ class Api::V1::MonitorsControllerTest < ActionDispatch::IntegrationTest
   # WU-9 (M7) — the bearer API is rate-limited so a compromised/buggy key can't
   # hammer it; over-limit returns an opaque 429, and a healthy cadence is untouched.
   test "the API rate-limits a token over the ceiling with an opaque 429" do
-    limit = 120
+    limit = Api::V1::BaseController::PER_KEY_LIMIT
     limit.times do
       get api_v1_monitors_url, headers: auth
       assert_response :success
@@ -48,6 +48,30 @@ class Api::V1::MonitorsControllerTest < ActionDispatch::IntegrationTest
     get api_v1_monitors_url, headers: auth
     assert_response :too_many_requests
     assert_equal "rate_limited", response.parsed_body["error"]
+  end
+
+  # M10 — the per-key layer is keyed on the caller-supplied Authorization header,
+  # so an enumerating scanner mints a fresh bucket with every made-up token and
+  # that layer alone never bounds it. The per-IP layer bounds the client whatever
+  # it presents; it sits ahead of authentication, so unauthenticated traffic is
+  # throttled without a database lookup.
+  test "the API rate-limits one IP enumerating many made-up tokens" do
+    limit = Api::V1::BaseController::PER_IP_LIMIT
+
+    limit.times do |i|
+      get api_v1_monitors_url, headers: auth("sm_live_madeup#{i}")
+      assert_response :unauthorized
+    end
+
+    get api_v1_monitors_url, headers: auth("sm_live_madeup_over_the_limit")
+    assert_response :too_many_requests
+    assert_equal "rate_limited", response.parsed_body["error"]
+
+    # One bucket for the whole client, not one per presented token: a request
+    # with a perfectly valid key (its own per-key bucket untouched) is throttled
+    # by the same IP bound.
+    get api_v1_monitors_url, headers: auth
+    assert_response :too_many_requests
   end
 
   # Scenario 5 — index returns only the authenticated user's monitors.
