@@ -9,7 +9,9 @@ class Project
   # Rules (§3.3 / §4.3):
   # - Upsert by (project, registration_key) — the collision fix: the same key in
   #   two projects of one user no longer collides.
-  # - Existing monitor -> update name/interval/grace. ALWAYS allowed, even at cap.
+  # - Existing monitor -> update name/interval/grace. ALWAYS allowed, even at cap
+  #   — but never over a value the USER has since changed in the UI, unless
+  #   recurring.yml genuinely changed it too (see #gem_may_write?).
   # - New monitor -> create with source: "gem", status: "pending", fresh ping_token.
   # - Cap is a graceful PARTIAL and stays PER-USER: register new monitors up to the
   #   user's remaining slots (across all their projects); the rest come back under
@@ -142,13 +144,64 @@ class Project
       def persist_update(monitor, entry)
         @conflicts << monitor.registration_key if diverging_app?(monitor)
 
-        attrs = { name: entry.name, expected_interval_seconds: entry.expected_interval_seconds,
-                  grace_period_seconds: entry.grace_period_seconds, last_synced_app: @app }.compact
+        attrs = gem_settings(monitor, entry).merge({ last_synced_app: @app }.compact)
         if monitor.update(attrs)
           @registered << monitor
         else
           @skipped << skip(entry, "invalid")
         end
+      end
+
+      # The three settings the gem derives from recurring.yml, paired with the
+      # column remembering what it last SENT for each.
+      GEM_SETTINGS = { name: :last_synced_name,
+                       expected_interval_seconds: :last_synced_expected_interval_seconds,
+                       grace_period_seconds: :last_synced_grace_period_seconds }.freeze
+
+      # The settings this sync may write, plus the record of what it sent.
+      #
+      # The gem re-syncs on EVERY production boot, so writing these three
+      # unconditionally meant a user who tightened a monitor in the UI (locked
+      # decision #5 and docs/integrating.md invite exactly that) had it silently
+      # reverted at the next deploy (F2). An absent value is still left alone —
+      # old gems don't send everything.
+      def gem_settings(monitor, entry)
+        GEM_SETTINGS.each_with_object({}) do |(setting, remembered), attrs|
+          incoming = entry[setting]
+          next if incoming.nil?
+
+          attrs[setting] = incoming if gem_may_write?(monitor, setting, remembered, incoming)
+          attrs[remembered] = incoming
+        end
+      end
+
+      # May this sync write `setting`, or is the stored value the user's?
+      #
+      # We can tell the two apart by what the gem last sent: while the stored
+      # value still equals that, nobody has overridden it and the gem owns it.
+      #
+      # PRECEDENCE when BOTH have moved — the user overrode the value AND
+      # recurring.yml genuinely changed it — is the gem's. The interval and
+      # grace describe how often the job ACTUALLY runs; once that changes, an
+      # override derived from the old schedule is stale and would false-alarm,
+      # which is the failure this product exists to prevent. So the override is
+      # protected from being undone by a re-sync that says nothing new, not from
+      # real news about the schedule. (The user can override again; a false
+      # `down` at 3am they cannot undo.)
+      #
+      # Nil remembered = a monitor registered before we started remembering. We
+      # can't tell an override from an untouched value, so we don't touch it —
+      # the first sync after the deploy is precisely when the clobber used to
+      # happen — and we start remembering, so genuine changes land from then on.
+      def gem_may_write?(monitor, setting, remembered, incoming)
+        last_sent = monitor.public_send(remembered)
+        return false if last_sent.nil?
+
+        # Compare through the column's own type: the payload is JSON, so the
+        # numbers arrive as strings, and "3600" != 3600 would read every boot as
+        # a schedule change and hand the clobber straight back.
+        monitor.public_send(setting) == last_sent ||
+          monitor.class.type_for_attribute(setting).cast(incoming) != last_sent
       end
 
       # A shared-key collision: the monitor was last synced by a different app than
@@ -159,14 +212,23 @@ class Project
       end
 
       def persist_create(entry)
+        # The gem sends no name for most tasks, so the monitor is named after its
+        # registration key — and the REMEMBERED name has to be that same
+        # defaulted value, or the next sync would read our own default as a user
+        # rename and freeze the name forever.
+        name = entry.name.presence || entry.registration_key
+
         monitor = @project.monitors.new(
           registration_key: entry.registration_key,
-          name: entry.name.presence || entry.registration_key,
+          name: name,
           expected_interval_seconds: entry.expected_interval_seconds,
           grace_period_seconds: entry.grace_period_seconds,
           source: "gem",
           status: "pending",
-          last_synced_app: @app
+          last_synced_app: @app,
+          last_synced_name: name,
+          last_synced_expected_interval_seconds: entry.expected_interval_seconds,
+          last_synced_grace_period_seconds: entry.grace_period_seconds
         )
 
         if save_isolated(monitor)
