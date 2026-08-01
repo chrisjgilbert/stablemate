@@ -11,12 +11,12 @@ class User::SubscriptionTest < ActiveSupport::TestCase
     @project.monitors.delete_all
   end
 
-  def give_active_pro!
+  def give_active_pro!(status: "active")
     customer = @user.set_payment_processor(:stripe)
     customer.update!(processor_id: "cus_#{SecureRandom.hex(4)}")
     customer.subscriptions.create!(
       name: "pro", processor_id: "sub_#{SecureRandom.hex(4)}",
-      processor_plan: "price_pro", status: "active", quantity: 1
+      processor_plan: "price_pro", status: status, quantity: 1
     )
   end
 
@@ -25,6 +25,34 @@ class User::SubscriptionTest < ActiveSupport::TestCase
       refute @user.subscribed_to_pro?
       give_active_pro!
       assert @user.reload.subscribed_to_pro?
+    end
+  end
+
+  # F5 — the two questions must stay separate. "Does Stripe still consider this
+  # billable?" (live_pro_subscription?) is true for every non-terminal status;
+  # "should the plan be Pro?" (subscribed_to_pro?) is deliberately narrower, so a
+  # past_due account still drops to Free while its subscription stays cancellable
+  # and blocks a second checkout.
+  test "live_pro_subscription? covers non-terminal statuses subscribed_to_pro? does not" do
+    with_billing_enabled do
+      refute @user.live_pro_subscription?
+
+      give_active_pro!(status: "past_due")
+      @user.reload
+
+      assert @user.live_pro_subscription?
+      refute @user.subscribed_to_pro?
+      assert_equal "free", @user.tap(&:sync_plan_from_subscription!).plan
+    end
+  end
+
+  test "live_pro_subscription? ignores terminal subscriptions" do
+    with_billing_enabled do
+      give_active_pro!(status: "canceled")
+      refute @user.reload.live_pro_subscription?
+
+      @user.subscriptions.update_all(status: "incomplete_expired")
+      refute @user.reload.live_pro_subscription?
     end
   end
 

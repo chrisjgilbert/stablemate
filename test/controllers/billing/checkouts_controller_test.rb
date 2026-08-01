@@ -9,16 +9,18 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
 
   setup { @user = users(:bob) }
 
-  # Give the user an active Pro subscription in Pay's mirror so subscribed_to_pro?
-  # is true (mirrors the downgrades test helper).
-  def give_active_pro_subscription!
+  # Give the user a Pro subscription in Pay's mirror (mirrors the downgrades test
+  # helper). Default `active` ⇒ subscribed_to_pro? is true.
+  def give_pro_subscription!(status: "active")
     customer = @user.set_payment_processor(:stripe)
     customer.update!(processor_id: "cus_test_123")
     customer.subscriptions.create!(
       name: "pro", processor_id: "sub_test_123",
-      processor_plan: "price_pro", status: "active", quantity: 1
+      processor_plan: "price_pro", status: status, quantity: 1
     )
   end
+
+  def give_active_pro_subscription! = give_pro_subscription!
 
   # WU-4 (H4) — an already-Pro user must not be able to open a second Checkout
   # (which Stripe would happily turn into a second subscription + double charge).
@@ -33,6 +35,41 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
         assert_redirected_to billing_subscription_path
         assert_equal "You're already on Pro.", flash[:alert]
         assert_not_requested :post, "https://api.stripe.com/v1/checkout/sessions"
+      end
+    end
+  end
+
+  # F5 — a `past_due` subscription is NOT active (Pay's active scope skips it) and
+  # the plan has already dropped to Free by design, so the old guard let the user
+  # subscribe a second time. Stripe's dunning retry on the first subscription can
+  # still succeed later ⇒ two live Pro subscriptions, double billing.
+  test "a past_due Pro subscription still blocks a second checkout" do
+    with_billing_enabled do
+      Stablemate.stub_price_id_pro("price_pro_123") do
+        give_pro_subscription!(status: "past_due")
+        sign_in @user
+
+        post billing_checkout_path
+
+        assert_redirected_to billing_subscription_path
+        assert_equal "You're already on Pro.", flash[:alert]
+        assert_not_requested :post, "https://api.stripe.com/v1/checkout/sessions"
+      end
+    end
+  end
+
+  # The flip side: a genuinely finished subscription must not block a fresh one, or
+  # a churned customer could never come back.
+  test "a canceled Pro subscription does not block a new checkout" do
+    with_billing_enabled do
+      Stablemate.stub_price_id_pro("price_pro_123") do
+        give_pro_subscription!(status: "canceled")
+        sign_in @user
+
+        url = stub_stripe_checkout_session
+        post billing_checkout_path
+
+        assert_redirected_to url
       end
     end
   end
