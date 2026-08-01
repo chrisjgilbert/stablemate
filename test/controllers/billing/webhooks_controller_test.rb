@@ -17,13 +17,13 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
   # customer id, then POST it to the webhook endpoint.
   # Default livemode: false — the test secret key (sk_test_…) puts the app in test
   # mode, so test-mode events are the ones it should act on.
-  def post_event(type:, customer:, id: "evt_#{SecureRandom.hex(8)}", livemode: false)
+  def post_event(type:, customer:, id: "evt_#{SecureRandom.hex(8)}", livemode: false, object: {})
     payload = {
       id: id, type: type, livemode: livemode,
       data: { object: {
         id: "obj_#{SecureRandom.hex(4)}", customer: customer,
         client_reference_id: nil, subscription: nil, payment_intent: nil
-      } }
+      }.merge(object) }
     }.to_json
 
     timestamp = Time.now
@@ -117,6 +117,33 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
 
         assert_response :ok
         assert_equal "pro", @user.reload.plan
+      end
+    end
+  end
+
+  # M5 / launch-readiness D9 — Pay's stock customer emails are off. Two reasons:
+  # the payment_failed one is `deliver_now` from inside the ProcessedEvent
+  # idempotency transaction (an SMTP failure would 500 the webhook, roll the claim
+  # back, and have Stripe retry the whole event — now that production raises
+  # delivery errors, that path is live), and the copy is Pay's unbranded default,
+  # never reviewed. Our own alerting is deliberate and queued.
+  test "a payment_failed event sends no Pay email" do
+    with_billing_enabled do
+      without_pay_stripe_network do
+        cus = make_pro!
+        subscription = @user.subscriptions.sole
+        # Pay's handler skips `incomplete` subscriptions; past_due is the real
+        # dunning state, where it would mail the customer.
+        subscription.update!(status: "past_due")
+
+        assert_no_emails do
+          assert_no_enqueued_emails do
+            post_event(type: "invoice.payment_failed", customer: cus,
+              object: { subscription: subscription.processor_id })
+          end
+        end
+
+        assert_response :ok
       end
     end
   end
