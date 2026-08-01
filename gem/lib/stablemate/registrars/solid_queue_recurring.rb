@@ -23,10 +23,27 @@ module Stablemate
 
       DEFAULT_GRACE_FRACTION = 0.15
       MIN_GRACE_SECONDS = 5 * 60
-      # How many consecutive occurrences to sample when measuring the largest gap
-      # of an irregular cron. A day's worth of slots is plenty for sub-daily crons;
-      # daily+ crons are regular so two samples already settle them.
-      OCCURRENCE_SAMPLES = 50
+      # The window we measure the largest gap over is a HORIZON, not a fixed
+      # number of occurrences: a cron's longest hole is only visible if the
+      # window is wide enough to contain it, and the widest hole a weekly
+      # schedule can have is the weekend. Sampling a fixed 50 occurrences of
+      # "*/15 9-17 * * 1-5" covers a day and a half, so it measured the
+      # weeknight gap (54,900s) and never the real Fri 17:45 -> Mon 09:00 one
+      # (227,700s) — the monitor then went `down` every Friday evening and
+      # false-recovered on Monday. Eight days guarantees at least one full
+      # weekend transition wherever in the week the app boots.
+      MIN_HORIZON_SECONDS = 8 * 24 * 60 * 60
+      # A floor on samples as well as on span: sparse crons (monthly, "Feb 29
+      # only") clear the horizon in two occurrences, but their gaps are uneven
+      # across months and leap years, so we keep taking occurrences to find the
+      # longest month / the century leap skip rather than register whichever
+      # month we happened to boot in.
+      MIN_OCCURRENCE_SAMPLES = 50
+      # And a ceiling, so deriving an interval always terminates in bounded time:
+      # a per-second cron would need ~700k occurrences to span the horizon. Any
+      # cron dense enough to hit this ceiling has gaps of a second or two, which
+      # are regular by then — stopping short costs nothing.
+      MAX_OCCURRENCE_SAMPLES = 10_000
 
       def initialize(recurring_path: nil, environment: nil, config: Stablemate.config)
         @recurring_path = recurring_path || config.recurring_path
@@ -119,19 +136,31 @@ module Stablemate
           [ (interval * DEFAULT_GRACE_FRACTION).round, MIN_GRACE_SECONDS ].max
         end
 
-        # Sample consecutive occurrences and return the longest gap. For a regular
-        # cron every gap is equal; for an irregular one (e.g. 9am & 5pm) the gaps
-        # alternate and we want the longest (the overnight 16h, not the 8h).
+        # Walk consecutive occurrences from now and return the longest gap. For a
+        # regular cron every gap is equal; for an irregular one (9am & 5pm) the
+        # gaps alternate and we want the longest (the overnight 16h, not the 8h);
+        # for a weekday-restricted one the longest is the weekend, which is only
+        # in view once the occurrences span MIN_HORIZON_SECONDS — hence sampling
+        # to a horizon rather than to a count. Returns nil when fewer than two
+        # occurrences exist (an unsizable schedule the caller skips and logs).
         def largest_cron_gap(cron)
-          times = []
+          first = previous = largest = nil
           t = Time.now
-          OCCURRENCE_SAMPLES.times do
-            t = cron.next_time(t).to_t
-            times << t
+          samples = 0
+
+          while samples < MAX_OCCURRENCE_SAMPLES
+            occurrence = cron.next_time(t)
+            break if occurrence.nil?
+
+            t = occurrence.to_t
+            samples += 1
+            largest = [ largest.to_i, (t - previous).to_i ].max if previous
+            first ||= t
+            previous = t
+            break if samples >= MIN_OCCURRENCE_SAMPLES && (t - first) >= MIN_HORIZON_SECONDS
           end
 
-          gaps = times.each_cons(2).map { |a, b| (b - a).to_i }
-          gaps.max
+          largest
         end
 
         # Solid Queue's exact section rule (configuration.rb#config_from):
