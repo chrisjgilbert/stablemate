@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_01_140529) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_01_195746) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -94,6 +94,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_140529) do
     t.bigint "customer_id", null: false
     t.jsonb "data"
     t.jsonb "metadata"
+    t.jsonb "object"
     t.string "processor_id", null: false
     t.string "stripe_account"
     t.bigint "subscription_id"
@@ -108,6 +109,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_140529) do
     t.jsonb "data"
     t.boolean "default"
     t.datetime "deleted_at", precision: nil
+    t.jsonb "object"
     t.bigint "owner_id"
     t.string "owner_type"
     t.string "processor", null: false
@@ -156,6 +158,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_140529) do
     t.jsonb "metadata"
     t.boolean "metered"
     t.string "name", null: false
+    t.jsonb "object"
     t.string "pause_behavior"
     t.datetime "pause_resumes_at", precision: nil
     t.datetime "pause_starts_at", precision: nil

@@ -66,16 +66,14 @@ elif bundle exec brakeman --version >/dev/null 2>&1; then
 fi
 if [ -x bin/bundler-audit ] || bundle exec bundle-audit version >/dev/null 2>&1; then
   step "bundle-audit"
-  # Ignore GHSA-mjgf-xj26-9qf9: a non-constant-time HMAC compare in Pay's PADDLE
-  # webhook signature verifier. Stablemate is Stripe-only — no Paddle backend is
-  # wired (config.enabled_processors is %i[stripe] or []), so that code path is
-  # never loaded and there is no exposure. Revisit when we bump pay to the patched
-  # 9.x+ line (a major upgrade, tracked separately), or if a Paddle processor is
-  # ever added. Every other advisory still fails the build.
+  # No ignores. GHSA-mjgf-xj26-9qf9 (Pay's Paddle HMAC compare) was carried here
+  # while we were pinned to pay 8.3; pay 11 is on the patched line, so the
+  # advisory is gone rather than excused. Keep this list empty — an ignored
+  # advisory on the billing path is exactly the thing that rots quietly.
   if [ -x bin/bundler-audit ]; then
-    bin/bundler-audit check --update --ignore GHSA-mjgf-xj26-9qf9 || note_fail "bundle-audit"
+    bin/bundler-audit check --update || note_fail "bundle-audit"
   else
-    bundle exec bundle-audit check --update --ignore GHSA-mjgf-xj26-9qf9 || note_fail "bundle-audit"
+    bundle exec bundle-audit check --update || note_fail "bundle-audit"
   fi
 fi
 

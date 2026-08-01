@@ -52,7 +52,7 @@ What's left is seven workstreams, four of them code:
 
 | WS | What | Kind | Launch-blocking? |
 |----|------|------|------------------|
-| A | Billing dependency security upgrade (`pay` 8→11, `stripe` 13→19, drop the CI ignore) | code | **Yes** — before real money moves |
+| A | ~~Billing dependency security upgrade (`pay` 8→11, `stripe` 13→19, drop the CI ignore)~~ **DONE** | code | ~~Yes~~ shipped |
 | B | Dependabot backlog (9 small bumps) | code | Should-do |
 | C | Legal pages: Terms + Privacy | code + copy | **Yes** — paid product, EU users |
 | D | Account page: deletion + password change | code | **Yes** — GDPR-adjacent, cheap now, awkward later |
@@ -62,7 +62,19 @@ What's left is seven workstreams, four of them code:
 
 ---
 
-## 2 · WS-A: billing dependency security upgrade
+## 2 · WS-A: billing dependency security upgrade — **DONE (2026-08-01)**
+
+> Shipped: `pay` 8.3.0 → **11.7.0**, `stripe` 13.5.1 → **19.4.0**, Pay's
+> `AddObjectToPayModels` migration installed, and the `--ignore` removed from
+> `bin/ci` — bundle-audit now reports **"No vulnerabilities found"** with an
+> empty ignore list, and the dead `config/bundler-audit.yml` placeholder is
+> gone. Issue #39 closed. Breaking changes that actually bit: the 11.0
+> association rename (`owner.subscriptions` → `pay_subscriptions`, test-side
+> only — app code goes through `payment_processor.subscriptions`, which
+> `Pay::Customer` still exposes) and the post-2025-03-31 Stripe invoice shape
+> Pay 11 reads. Re-verified at boot with keys set: automount still suppressed
+> (0 `/pay` routes), emails off, Stripe-only processor, key bridging intact.
+> The API-version requirement this surfaced is now an ops item in §7.
 
 **Why.** `pay` is pinned at 8.3.0, which carries GHSA-mjgf-xj26-9qf9 (a
 non-constant-time HMAC compare in Pay's *Paddle* webhook verifier). `bin/ci`
@@ -338,9 +350,17 @@ calendar time.
     period-end deliberately, and make the ToS say what the portal does).
   - **Webhook event list + Pay's stock emails:** register a deliberate event
     list — `Billing::Webhook#pay_process!` hands *any* subscribed event to
-    Pay's handlers, and Pay's customer-facing emails (receipts,
-    payment-failed) default **on** and are entirely unconfigured. Decide to
-    disable or brand them (**D9**) before the first live charge.
+    Pay's handlers. (Pay's customer-facing emails are now **off**; D9 resolved.)
+  - **⚠️ Webhook endpoint API version ≥ `2025-03-31`.** Stripe sends each
+    endpoint the payload shape of *its* pinned API version, and Pay 11 reads
+    the post-2025-03-31 shape — e.g. its `invoice.payment_failed` handler reads
+    `invoice.parent.subscription_details.subscription`, which simply does not
+    exist on an older invoice. An endpoint pinned to an old version therefore
+    raises `NoMethodError` inside `Pay::Webhooks.instrument`, 500s our webhook,
+    rolls the `ProcessedEvent` claim back, and has Stripe retry forever — and
+    disabling Pay's emails does *not* avoid it, because the crash happens
+    before the send decision. A newly-created endpoint defaults to a current
+    version; verify it rather than assume, and re-check after any Pay upgrade.
 
   A live-mode test purchase + refund is the only true end-to-end — owner call
   (**D5**).

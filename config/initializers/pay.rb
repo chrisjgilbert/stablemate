@@ -13,7 +13,7 @@
 # available here. stablemate.rb self-guards against the redundant second load.
 require_relative "stablemate"
 
-# Hand Stripe its keys from our single config-gate source. Pay 8 has no key
+# Hand Stripe its keys from our single config-gate source. Pay has no key
 # setters — `Pay::Stripe.public_key/private_key/signing_secret` are *readers* that
 # resolve via `find_value_by_name(:stripe, …)`, i.e. ENV["STRIPE_PUBLIC_KEY"] /
 # ["STRIPE_PRIVATE_KEY"] / ["STRIPE_SIGNING_SECRET"] (then Rails credentials). So
@@ -27,8 +27,9 @@ if Stablemate.billing_enabled?
   ENV["STRIPE_SIGNING_SECRET"] ||= Stablemate.stripe_webhook_secret
 end
 
-# Never let Pay mount its own routes. Pay 8.3 defaults automount_routes to true,
-# which mounts the engine at /pay and hands us two surfaces we never asked for:
+# Never let Pay mount its own routes. Pay still defaults automount_routes to true
+# (checked again on 11.7), which mounts the engine at /pay and hands us two
+# surfaces we never asked for:
 #
 #   * POST /pay/webhooks/stripe — a SECOND Stripe webhook endpoint. It verifies
 #     against the same signing secret, so it looks legitimate, but it bypasses
