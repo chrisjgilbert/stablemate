@@ -52,6 +52,25 @@ Pay.setup do |config|
   # User::Subscription#subscribed_to_pro? ask Pay a single, plan-agnostic question.
   config.default_product_name = "pro"
 
+  # No stock Pay emails (launch-readiness decision D9). Pay's customer-facing
+  # mailers default ON and are entirely unconfigured — unbranded copy, our support
+  # address, never reviewed. This switches off all of them: receipt,
+  # refund, payment_failed, payment_action_required, subscription_renewing,
+  # subscription_trial_will_end and subscription_trial_ended.
+  #
+  # Beyond the copy, `payment_failed` is the dangerous one: Pay's handler calls
+  # `deliver_now` *inside* our Billing::ProcessedEvent idempotency transaction, so
+  # an SMTP failure raises through the webhook (production raises delivery errors
+  # since F1), rolls the ledger claim back, and has Stripe retry the whole event —
+  # re-sending the mail each time. Every message we do send is our own, queued, and
+  # sent after commit.
+  #
+  # Reversing this is one line: drop it (or set `config.send_emails = true`) and
+  # re-enable per-email with `config.emails.receipt = true` etc. — but brand and
+  # review the templates first, and move the payment_failed delivery off the
+  # webhook's transaction.
+  config.send_emails = false
+
   # Only register the Stripe backend when keys are present; otherwise Pay has no
   # processor and the billing surface stays dormant. Pay::Stripe.setup reads the
   # keys bridged above and sets ::Stripe.api_key itself.
