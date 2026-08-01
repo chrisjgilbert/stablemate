@@ -91,6 +91,33 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity
   end
 
+  # M2 — a double-submitted "Create project" (two identical POSTs in flight) has
+  # both requests pass the uniqueness validation, because neither row is
+  # committed yet, and the second INSERT hits the (user_id, name) unique index.
+  # That must read like an ordinary duplicate, not a 500. Staged by committing
+  # the competing row from Project's before_create — after validation, before our
+  # INSERT — which is exactly where the real race lands.
+  test "create re-renders the friendly duplicate error when a concurrent create wins the race" do
+    sign_in @alice
+
+    racing_project_insert_of("Raced app") do
+      post projects_path, params: { project: { name: "Raced app" } }
+    end
+
+    assert_response :unprocessable_entity
+    assert_match "has already been taken", response.body
+  end
+
+  test "the racing project insert really does violate the unique index" do
+    # Guard for the test above: if the staged duplicate ever stopped colliding it
+    # would pass for the wrong reason.
+    assert_raises ActiveRecord::RecordNotUnique do
+      racing_project_insert_of("Guard app") do
+        @alice.projects.create!(name: "Guard app")
+      end
+    end
+  end
+
   test "create after having no projects can return to new-monitor" do
     sign_in @alice
     @alice.projects.destroy_all
@@ -123,4 +150,25 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     end
     assert_redirected_to edit_project_path(@alices_project)
   end
+
+  private
+    # Commit a competing project of the same name for the same user from inside
+    # Project's before_create — i.e. after the uniqueness validation has already
+    # passed — so the next INSERT hits the (user_id, name) unique index, exactly
+    # as a double-submitted create does.
+    def racing_project_insert_of(name)
+      raced = false
+      user_id = @alice.id
+      racer = ->(*_args) do
+        next if raced
+
+        raced = true
+        Project.insert!({ user_id:, name:, created_at: Time.current, updated_at: Time.current })
+      end
+
+      Project.set_callback(:create, :before, racer)
+      yield
+    ensure
+      Project.skip_callback(:create, :before, racer, raise: false)
+    end
 end

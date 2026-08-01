@@ -183,7 +183,70 @@ class SignupTest < ActiveSupport::TestCase
     end
   end
 
+  # --- M2: a double-submit must not 500 -------------------------------------
+  #
+  # Two identical sign-ups arriving together both pass the uniqueness validation
+  # (neither row is committed yet) and the second INSERT hits the unique index on
+  # lower(email_address). Staged by committing the competing row from a
+  # before_create callback — after validation, before our INSERT — which is
+  # exactly where the real race lands.
+
+  test "a duplicate that slips past the validation surfaces the friendly error, not RecordNotUnique" do
+    result = nil
+    racing_user_insert_of("racer@example.com") do
+      result = Signup.new(email: "racer@example.com", password: "password1234", password_confirmation: "password1234").run
+    end
+
+    assert_kind_of User, result
+    refute result.persisted?
+    assert_includes result.errors[:email_address], "has already been taken"
+  end
+
+  test "a duplicate that slips past the validation leaves the capacity-lock transaction usable" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
+      result = nil
+      racing_user_insert_of("locked-racer@example.com") do
+        result = Signup.new(email: "locked-racer@example.com", password: "password1234").run
+      end
+
+      assert_includes result.errors[:email_address], "has already been taken"
+      # The index violation must be confined to its own savepoint: without one,
+      # Postgres aborts the enclosing capacity-lock transaction and every
+      # statement after the rescue fails.
+      assert_nothing_raised { User.count }
+    end
+  end
+
+  test "the racing insert really does violate the unique index" do
+    # Guard for the two tests above: if the staged duplicate ever stopped
+    # colliding they would pass for the wrong reason.
+    assert_raises ActiveRecord::RecordNotUnique do
+      racing_user_insert_of("guard@example.com") do
+        User.create!(email_address: "guard@example.com", password: "password1234")
+      end
+    end
+  end
+
   private
+    # Commit a competing user with the same address from inside User's
+    # before_create — i.e. after the uniqueness validation has already passed —
+    # so the next INSERT hits the unique index, exactly as a double-submit does.
+    def racing_user_insert_of(email)
+      raced = false
+      racer = ->(*_args) do
+        next if raced
+
+        raced = true
+        User.insert!({ email_address: email, password_digest: "raced",
+                       created_at: Time.current, updated_at: Time.current })
+      end
+
+      User.set_callback(:create, :before, racer)
+      yield
+    ensure
+      User.skip_callback(:create, :before, racer, raise: false)
+    end
+
     def capture_sql
       statements = []
       subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|

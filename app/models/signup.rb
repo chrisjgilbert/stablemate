@@ -80,10 +80,23 @@ class Signup
         password_confirmation: @password_confirmation
       )
 
-      if user.save
+      # Insert in its OWN savepoint (requires_new) so a lost double-submit race
+      # rolls back only this INSERT: Postgres aborts the whole enclosing
+      # transaction on an index violation, which would take the capacity lock's
+      # COMMIT — and any statement after the rescue below — down with it. Mirrors
+      # Project::MonitorSync#save_isolated.
+      if User.transaction(requires_new: true) { user.save }
         user.send_verification_email
         NotifySignupJob.perform_later(user.id)
       end
+      user
+    rescue ActiveRecord::RecordNotUnique
+      # A double-submit (or two racing requests) for the same address: both passed
+      # the uniqueness validation because neither row was committed yet, and the
+      # unique index on lower(email_address) caught the second INSERT. Surface the
+      # SAME friendly error the ordinary duplicate produces — the sign-up form
+      # re-renders with "has already been taken" instead of a 500.
+      user.errors.add(:email_address, :taken)
       user
     end
 
