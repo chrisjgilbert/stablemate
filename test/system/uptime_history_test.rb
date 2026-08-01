@@ -15,6 +15,10 @@ class UptimeHistoryTest < ApplicationSystemTestCase
   # S8 — Detail uptime panel: 90-bar UptimeBar, overall % matching a fixture, and
   # the recent-events list with mono timestamps + duration_ms where present.
   test "S8: detail page renders the 90-day uptime bar, overall percent, and recent events" do
+    # Noon UTC, so today's live half-day is an exact 43_200 seconds (#51 / F8:
+    # the percent blends today in, so the fixture has to pin the clock).
+    travel_to Date.current.to_time(:utc) + 12.hours
+
     monitor = @project.monitors.create!(
       name: "History job",
       expected_interval_seconds: 3600,
@@ -23,10 +27,18 @@ class UptimeHistoryTest < ApplicationSystemTestCase
     )
     monitor.update_column(:created_at, 100.days.ago)
 
-    # Hand-computed fixture: one fully-up day + one half-down day → 75.00%.
+    # Hand-computed fixture: one fully-up day (86_400 up) + one half-down day
+    # (43_200/43_200) + today, which is half elapsed at noon and spent 6h of it
+    # down (03:00–09:00, already recovered) → 21_600 up / 21_600 down.
+    # up = 151_200, down = 64_800 → 151_200 / 216_000 = 70.00%.
     base = Date.current - 10
     monitor.uptime_day_stats.create!(day: base, up_seconds: 86_400, down_seconds: 0, ping_count: 24)
     monitor.uptime_day_stats.create!(day: base + 1, up_seconds: 43_200, down_seconds: 43_200, ping_count: 12)
+    monitor.incidents.create!(
+      started_at: Date.current.to_time(:utc) + 3.hours,
+      resolved_at: Date.current.to_time(:utc) + 9.hours,
+      cause: "missed_ping"
+    )
 
     # A ping carrying a duration so the events list shows it.
     monitor.ping_events.create!(received_at: 5.minutes.ago, kind: "success", duration_ms: 142)
@@ -37,7 +49,10 @@ class UptimeHistoryTest < ApplicationSystemTestCase
     within "[data-testid='uptime-panel']" do
       # UptimeBar renders 90 day bars (rounded-[2px]).
       assert_equal 90, all("span.rounded-\\[2px\\]", visible: :all).size
-      assert_selector "[data-testid='uptime-percent']", text: "75.00%"
+      # Today's outage shows amber on the bar AND in the number: the two read the
+      # same seconds, so a stale 100.00% next to an amber bar is impossible.
+      assert_selector "span[title='today'].bg-chart-partial", visible: :all
+      assert_selector "[data-testid='uptime-percent']", text: "70.00%"
     end
 
     within "[data-testid='recent-events']" do

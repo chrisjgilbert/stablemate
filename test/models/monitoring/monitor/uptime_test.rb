@@ -75,6 +75,11 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
 
   # Scenario 7 — overall % = up / (up + down), no-data excluded; hand fixture.
   test "uptime_percent is up over up-plus-down with no-data excluded" do
+    # Pinned to 00:00 UTC so today's live segment has no elapsed seconds to
+    # contribute — this case is about the persisted-day math. Today's live
+    # blending gets its own cases below.
+    travel_to Date.current.to_time(:utc)
+
     base = Date.current - 10
     # Day A: fully up (86400 up). Day B: half down (43200 up, 43200 down).
     @monitor.uptime_day_stats.create!(day: base, up_seconds: 86_400, down_seconds: 0, ping_count: 1)
@@ -86,8 +91,74 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_in_delta 75.0, @monitor.uptime_percent(days: 90), 0.01
   end
 
-  test "uptime_percent is nil when there is no measured data" do
-    assert_nil @monitor.uptime_percent(days: 90)
+  # "—" is only honest when nothing at all has been measured — today included.
+  test "uptime_percent is nil when nothing has been measured, today included" do
+    never_pinged = @project.monitors.create!(
+      name: "Never pinged", expected_interval_seconds: 3600, grace_period_seconds: 300, status: "pending"
+    )
+
+    assert_nil never_pinged.uptime_percent(days: 90)
+  end
+
+  # F8 (#51) — the probe: an all-green rolled history plus a resolved outage
+  # today. Today has no UptimeDayStat until the 00:10 rollup, so the percent used
+  # to sit at a stale 100.00% beside an amber today bar for up to 24h (and the
+  # API served that number). The bar and the percent must read the same seconds.
+  test "uptime_percent counts today's resolved outage before the nightly rollup" do
+    travel_to Date.current.to_time(:utc) + 12.hours
+
+    7.times do |i|
+      @monitor.uptime_day_stats.create!(day: Date.current - (i + 1), up_seconds: 86_400, down_seconds: 0, ping_count: 24)
+    end
+    @monitor.incidents.create!(
+      started_at: Date.current.to_time(:utc) + 6.hours,
+      resolved_at: Date.current.to_time(:utc) + 9.hours,
+      cause: "missed_ping"
+    )
+
+    percent = @monitor.uptime_percent(days: 90)
+
+    # The bar says partial, so the percent may not say 100: up = 7*86_400 +
+    # (43_200 elapsed - 10_800 down), down = 10_800 → 637_200 / 648_000.
+    assert_equal :partial, @monitor.uptime_series(days: 90).last
+    assert_in_delta 98.33, percent, 0.01
+    assert_operator percent, :<, 100.0
+  end
+
+  # A monitor whose only data is today reports today's number, not "—".
+  test "uptime_percent reflects today alone when nothing has been rolled up yet" do
+    travel_to Date.current.to_time(:utc) + 12.hours
+
+    @monitor.incidents.create!(
+      started_at: Date.current.to_time(:utc) + 3.hours,
+      resolved_at: Date.current.to_time(:utc) + 9.hours,
+      cause: "missed_ping"
+    )
+
+    # 6h down out of the 12h elapsed today → 50%.
+    assert_in_delta 50.0, @monitor.uptime_percent(days: 90), 0.01
+  end
+
+  # An OPEN incident is down up to NOW — the rest of the day hasn't elapsed and
+  # must not be scored (that is exactly what the end-of-day clamp gets wrong).
+  test "uptime_percent counts an open incident only up to now, not to end of day" do
+    travel_to Date.current.to_time(:utc) + 12.hours
+
+    @monitor.incidents.create!(started_at: Date.current.to_time(:utc) + 6.hours, cause: "missed_ping")
+
+    # 6h up, 6h down of the 12h elapsed → 50%, not 6/24 up.
+    assert_in_delta 50.0, @monitor.uptime_percent(days: 90), 0.01
+  end
+
+  # A not-monitored today (paused/suspended) is no-data, so it stays out of the
+  # denominator — the same rule the bar applies to today's segment.
+  test "uptime_percent excludes today while the monitor is paused" do
+    travel_to Date.current.to_time(:utc) + 12.hours
+
+    @monitor.uptime_day_stats.create!(day: Date.current - 1, up_seconds: 43_200, down_seconds: 43_200, ping_count: 1)
+    @monitor.update!(status: "paused")
+
+    assert_in_delta 50.0, @monitor.uptime_percent(days: 90), 0.01
   end
 
   # Recent events feed: pings + incident open/resolve, cause-aware labels
