@@ -71,11 +71,16 @@ module Monitoring
 
       # Overall uptime over the window: sum(up) / sum(up + down), with no-data days
       # excluded from the denominator (they contribute 0/0). Returns nil when
-      # nothing was measured. Derived from the same rows uptime_series loads, so the
-      # detail panel renders both off ONE query.
+      # nothing was measured — today included. Derived from the same rows
+      # uptime_series loads, so the detail panel renders both off ONE query.
+      #
+      # Today is blended in live from the same measurement the bar's today segment
+      # is drawn from: it has no UptimeDayStat until the 00:10 rollup, so summing
+      # persisted rows alone left an amber today bar sitting next to a stale
+      # "100.00%" for up to 24h (#51 / F8) — and the API served that number.
       def uptime_percent(days: 90)
         up = down = 0
-        windowed_day_stats(days).each do |stat|
+        (windowed_day_stats(days) + [ live_today_stat ]).each do |stat|
           up   += stat.up_seconds
           down += stat.down_seconds
         end
@@ -147,32 +152,41 @@ module Monitoring
 
         # The rolled-up day stats for the window, loaded once and memoized so the
         # detail panel's uptime_series + uptime_percent share a single query.
+        # Deliberately stops BEFORE today: today is always computed live
+        # (live_today_stat), so a stray persisted row for today — a legacy or
+        # hand-rolled one — can neither be double-counted in the percent nor
+        # override the live bar segment.
         def windowed_day_stats(days)
           (@windowed_day_stats ||= {})[days] ||=
-            uptime_day_stats.where(day: (Date.current - (days - 1))..Date.current).to_a
+            uptime_day_stats.where(day: (Date.current - (days - 1))...Date.current).to_a
         end
 
-        # The live status of the current, not-yet-rolled day, derived from the
-        # monitor's present state: paused/suspended/pending → no-data; otherwise
-        # today's down seconds so far (from ANY incident overlapping today, open OR
-        # already resolved — a same-day down-then-recovery must still show
-        # partial, never a phantom green `up`) versus the elapsed monitored time,
-        # classified by the same up/down/partial cutoffs as a rolled-up day
-        # (UptimeDayStat#status) via an unsaved instance, so today never drifts
-        # from how it will be classified once tonight's rollup persists it.
-        # `suspended` (plan-downgrade, issue #19) is not-monitored like `paused`, so
-        # today's segment is no-data, not a phantom green `up`.
-        def live_today_status
-          return :no_data if paused? || suspended? || pending?
+        # Today's measurement so far, as an UNSAVED UptimeDayStat — the current day
+        # has no persisted row until tonight's rollup. Derived from the monitor's
+        # present state: paused/suspended/pending → 0/0 (no-data, never a phantom
+        # green `up`; `suspended`, the plan-downgrade state from issue #19, is
+        # not-monitored just like `paused`); otherwise today's down seconds so far
+        # (from ANY incident overlapping today, open OR already resolved — a
+        # same-day down-then-recovery must still count) against the elapsed
+        # monitored time.
+        #
+        # ONE method feeds both readers — the bar's today segment
+        # (live_today_status) and uptime_percent — so the % and the bar cannot
+        # disagree, and today is classified by the same up/down/partial cutoffs it
+        # will get once the rollup persists it (UptimeDayStat#status).
+        def live_today_stat
+          return UptimeDayStat.new(up_seconds: 0, down_seconds: 0) if paused? || suspended? || pending?
 
           now = Time.current
           window_start = [ created_at, first_ping_at, Date.current.to_time(:utc) ].compact.max
-          return :no_data if window_start >= now
+          return UptimeDayStat.new(up_seconds: 0, down_seconds: 0) if window_start >= now
 
           down = today_down_seconds(window_start, now)
           up   = [ (now - window_start).to_i - down, 0 ].max
-          UptimeDayStat.new(up_seconds: up, down_seconds: down).status
+          UptimeDayStat.new(up_seconds: up, down_seconds: down)
         end
+
+        def live_today_status = live_today_stat.status
 
         # Down seconds from window_start through now, overlapped by any incident
         # interval (mirrors UptimeRollup#raw_down_seconds, but the window end is
