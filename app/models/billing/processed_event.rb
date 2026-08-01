@@ -12,15 +12,30 @@ module Billing
     # The claim and the block run in one transaction: if the block raises, the
     # ledger row rolls back too, so the event is NOT marked processed and Stripe's
     # retry can reprocess it (no silently-lost webhook). The unique index still
-    # makes concurrent duplicate deliveries safe — the loser hits RecordNotUnique.
+    # makes concurrent duplicate deliveries safe — the loser's insert fails.
     def self.record_once(event_id, event_type:)
+      claimed = false
+
       transaction do
-        create!(event_id: event_id, event_type: event_type)
-        yield
+        claimed = claim(event_id, event_type)
+        yield if claimed
       end
+
+      claimed
+    end
+
+    # Insert the ledger row, false if this event id is already claimed. Its own
+    # savepoint for two reasons: a losing race must not poison the surrounding
+    # transaction, and the RecordNotUnique rescue must not reach the caller's block
+    # (M6). Rescuing the whole block made a unique violation raised by the
+    # *processing* look like a duplicate delivery — we'd ack 200 to Stripe with
+    # nothing applied and no retry, silently losing the event.
+    def self.claim(event_id, event_type)
+      transaction(requires_new: true) { create!(event_id: event_id, event_type: event_type) }
       true
     rescue ActiveRecord::RecordNotUnique
       false
     end
+    private_class_method :claim
   end
 end
