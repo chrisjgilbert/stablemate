@@ -48,3 +48,8 @@
 # Ignore key files for decrypting credentials and more.
 /config/*.key
 
+# Transient git worktrees created for background coding agents. These are
+# scratch checkouts of this same repo (removed when the agent finishes) — they
+# must never be committed into it.
+/.claude/worktrees/
+
