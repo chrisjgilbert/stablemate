@@ -12,6 +12,14 @@ Rails.application.routes.draw do
   # Non-blocking email verification link.
   get "verify/:token", to: "email_verifications#show", as: :email_verification
 
+  # The signed-in account page: who you are, and how to leave (WS-D). The nested
+  # password resource is the SIGNED-IN change (current password required) and is
+  # deliberately distinct from the unauthenticated token-reset flow in
+  # `resources :passwords` above — a sub-resource, not a custom verb on either.
+  resource :account, only: %i[show destroy] do
+    resource :password, only: :update, module: :accounts
+  end
+
   # First-class projects: the grouping entity that owns monitors and the
   # per-project API keys. Standard REST, tenant-scoped to current_user.projects.
   # Keys are managed from a project's show page (Design B — a key is one app's

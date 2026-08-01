@@ -1,0 +1,102 @@
+<% content_for :title, "Account" %>
+
+<div class="mb-6">
+  <h1 class="font-display text-xl font-bold tracking-tight">Account</h1>
+  <p class="mt-1 text-[13px] text-muted">Your sign-in details, and how to leave.</p>
+</div>
+
+<div class="rounded-xl border border-border bg-surface p-5 shadow-sm" data-testid="account-panel">
+  <div class="flex items-center justify-between gap-4">
+    <div class="min-w-0">
+      <div class="text-[13px] text-muted">Email address</div>
+      <div class="mt-0.5 font-mono text-[14px] text-ink truncate" data-testid="account-email">
+        <%= current_user.email_address %>
+      </div>
+    </div>
+    <% if current_user.verified? %>
+      <span class="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[11px] font-semibold bg-up-bg text-up-text shrink-0"
+            data-testid="verified-badge">
+        <span class="w-1.5 h-1.5 rounded-full bg-up-dot"></span> Verified
+      </span>
+    <% else %>
+      <span class="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[11px] font-semibold bg-pending-bg text-pending-text shrink-0"
+            data-testid="verified-badge">
+        <span class="w-1.5 h-1.5 rounded-full bg-pending-dot"></span> Unverified
+      </span>
+    <% end %>
+  </div>
+
+  <%# Billing lives on its own page; link there only when the hosted tier is
+      configured, exactly like the header nav (a keyless self-host instance 404s
+      the whole Billing:: namespace, so a link would be a dead end). %>
+  <% if billing_enabled? %>
+    <div class="mt-4 pt-4 border-t border-hairline flex items-center justify-between gap-4">
+      <div class="text-[13px] text-muted">Plan and payment details</div>
+      <%= link_to "Billing", billing_subscription_path,
+            class: "h-8 px-3 inline-flex items-center rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline",
+            data: { testid: "account-billing-link" } %>
+    </div>
+  <% end %>
+</div>
+
+<%# Signed-in password change. The current password is required so a hijacked
+    session can't lock the real owner out; PasswordsController's token flow stays
+    the route for someone who has forgotten it. %>
+<div class="mt-5 rounded-xl border border-border bg-surface p-5 shadow-sm" data-testid="change-password">
+  <h2 class="text-[14px] font-bold text-ink">Change password</h2>
+  <p class="text-[13px] text-muted mt-1 mb-4">
+    You'll stay signed in here; every other session is signed out.
+  </p>
+
+  <%= form_with url: account_password_path, method: :patch, class: "space-y-4 max-w-sm" do |form| %>
+    <div>
+      <%= form.label :current_password, "Current password", class: "block text-[13px] font-medium text-secondary mb-1" %>
+      <%= form.password_field :current_password, required: true, autocomplete: "current-password", maxlength: 72,
+            class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
+    </div>
+    <div>
+      <%= form.label :password, "New password", class: "block text-[13px] font-medium text-secondary mb-1" %>
+      <%= form.password_field :password, required: true, autocomplete: "new-password", maxlength: 72,
+            class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
+    </div>
+    <div>
+      <%= form.label :password_confirmation, "Confirm new password", class: "block text-[13px] font-medium text-secondary mb-1" %>
+      <%= form.password_field :password_confirmation, required: true, autocomplete: "new-password", maxlength: 72,
+            class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
+    </div>
+    <%= form.submit "Change password",
+          data: { testid: "change-password-submit" },
+          class: "h-9 px-4 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
+  <% end %>
+</div>
+
+<%#
+  Irreversible delete. Unlike a project (typed name, projects/_danger_zone), this
+  one takes money down with it, so the confirmation is the account credential
+  itself: re-enter the current password. That is also the only confirmation a
+  hijacked session can't satisfy.
+%>
+<div class="mt-5 rounded-xl border border-down-bg bg-down-bg/40 p-5" data-testid="danger-zone">
+  <h2 class="text-[14px] font-bold text-down-text">Delete this account</h2>
+  <p class="text-[13px] text-muted mt-1 mb-3">
+    This permanently deletes your account,
+    <strong><%= pluralize(current_user.projects.count, "project") %></strong>,
+    <strong><%= pluralize(current_user.monitors.count, "monitor") %></strong>
+    and all their history and API keys. This cannot be undone.
+    <% if billing_enabled? && current_user.live_pro_subscription? %>
+      Your Pro subscription is cancelled immediately, with no pro-rata refund.
+    <% end %>
+  </p>
+
+  <%= form_with url: account_path, method: :delete, class: "space-y-3 max-w-sm" do |form| %>
+    <div>
+      <%= form.label :current_password, "Type your password to confirm", class: "block text-[12px] text-secondary mb-1" %>
+      <%= form.password_field :current_password, required: true, autocomplete: "current-password", maxlength: 72,
+            id: "delete_current_password",
+            class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
+    </div>
+    <%= form.submit "Delete my account",
+          data: { testid: "delete-account" },
+          class: "h-9 px-4 rounded-lg bg-down-text text-white text-[13px] font-semibold hover:opacity-90 cursor-pointer" %>
+  <% end %>
+</div>

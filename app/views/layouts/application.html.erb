@@ -32,6 +32,7 @@
                            (section.start_with?("billing/") ? "text-ink border-brand" : "text-secondary border-transparent hover:text-ink"),
                     data: { testid: "nav-billing" } %>
             <% end %>
+            <%= nav_link.call("Account", account_path, section == "accounts" || section.start_with?("accounts/")) %>
             <%= button_to "Sign out", session_path, method: :delete,
                   class: "h-14 inline-flex items-center font-mono text-[13px] text-secondary hover:text-ink" %>
           </nav>
