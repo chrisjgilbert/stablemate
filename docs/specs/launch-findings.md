@@ -12,6 +12,27 @@ Severity: **F1–F13** are the confirmed majors (fix before launch: F1–F9;
 fix-soon races: F10–F13). **M-series** are minors — triaged below into
 fix-now (batched with the majors), decision-needed, and backlog.
 
+## Progress
+
+**Wave 1 merged and verified (2026-08-01).** Batches A, B and D are on the
+branch: **F1, F6, F7, F8, F10, F11, F12** plus **M9, M11, M12, M13** are fixed,
+full `bin/ci` green (rubocop, brakeman, bundle-audit, unit/request, 57 system
+tests, gem suite), and each fix passed a `/verify` pass observing the real
+behaviour — browser-driven where user-visible (the interval edit driven through
+the actual Stimulus preset field; the uptime panel rendering 98.35% instead of a
+stale 100.00%), runner-driven against the live dev database where not (the
+after-commit dispatch semantics, the suspend/reactivate memory, the rollup and
+prune guards). Remaining: wave 2 — batches C, E, F.
+
+Follow-ups raised during review (not yet findings, no owner):
+- `Monitoring::Monitor::Suspension#reactivate!` still runs unlocked, so a
+  `reactivate!` racing a `suspend!` is theoretically interleavable (F11 covered
+  only `pause!`/`suspend!`).
+- Display rounding can still make a very short outage today show an amber bar
+  beside "100.00%" at 2 dp — a product call on flooring, not staleness.
+- F7 interacts with E's F2: a gem sync that changes the interval now also moves
+  `next_due_at`; read the two together when E lands.
+
 ## Fix batches (disjoint file sets; A–D + F parallel, E after A)
 
 | Batch | Findings | Files owned |
@@ -33,7 +54,7 @@ exists anywhere, the swallowed exception makes the delivery job *succeed*, and
 down/recovered email, invisibly. **Fix:** raise delivery errors so the mail
 job fails, add retries to `ActionMailer::MailDeliveryJob` (bounded, backoff);
 correct the comment; keep tolerating *unconfigured* SMTP per the documented
-self-host intent. — [ ] fixed · [ ] verified
+self-host intent. — [x] fixed · [x] verified
 
 ### F2 · Re-sync clobbers user-tightened interval/grace/name on every deploy
 `app/models/project/monitor_sync.rb:113-123` unconditionally overwrites
@@ -76,7 +97,7 @@ Pro subscription (exclude only `canceled`/`incomplete_expired`), both places.
 `ActiveModel::RangeError` inside `CheckIn`'s transaction; PingEvent AND
 `register_contact` roll back. A client always sending it loses every ping →
 permanent false down that can never recover. Probe-confirmed. **Fix:** clamp
-to int4 range (out-of-range → nil), same for negatives (M9). — [ ] fixed · [ ] verified
+to int4 range (out-of-range → nil), same for negatives (M9). — [x] fixed · [x] verified
 
 ### F7 · Editing `expected_interval_seconds` never recomputes `next_due_at`
 `next_due_at` is written only by `register_contact`; an interval edit leaves
@@ -85,7 +106,7 @@ down ~1h later (probed); tightening leaves detection blind up to the old
 interval. Grace edits apply instantly (scope reads live column) — the
 asymmetry is the trap. **Fix:** recompute `next_due_at` from `last_ping_at` +
 new interval when the interval changes (model-side, so every write path gets
-it). — [ ] fixed · [ ] verified
+it). — [x] fixed · [x] verified
 
 ### F8 · `uptime_percent` ignores today's live incidents — stale 100.00% next to an amber bar
 `monitor/uptime.rb:76-87` sums persisted `UptimeDayStat` rows only; today has
@@ -93,7 +114,7 @@ no row until the 00:10 rollup. Commit 88f8b1a fixed the *bar* half of #51
 only; the API serves the same stale number. Probe: resolved 3h outage today →
 `series.last == :partial`, `uptime_percent == 100.0`. **Fix:** blend today's
 live up/down seconds (the bar's existing live computation) into the percent.
-— [ ] fixed · [ ] verified
+— [x] fixed · [x] verified
 
 ### F9 · The gem silently discards the sync response's `skipped` list
 `gem/lib/stablemate/registration.rb:26-28` never reads `response["skipped"]`;
@@ -112,7 +133,7 @@ designed Stripe-retry rollback. `enqueue_after_transaction_commit` is false in
 Rails 8.1. Probe-confirmed mechanism. **Fix:** defer the dispatch to after
 commit (e.g. `ActiveRecord.after_all_transactions_commit` in the channel, or
 enqueue-after-commit config), keeping `delivered_at` semantics honest.
-— [ ] fixed · [ ] verified
+— [x] fixed · [x] verified
 
 ### F11 · `pause!`/`suspend!` read the open incident before taking the row lock
 `monitor/pausing.rb:13-18`, `suspension.rb:22-27`: the incident SELECT runs
@@ -120,7 +141,7 @@ unlocked; racing the sweep leaves `status: paused` **with an open incident**
 and a down email the user just tried to silence (probe-reproduced on two
 connections), and the un-resolved incident later corrupts rollups
 retroactively. **Fix:** take `with_lock` before reading, mirroring every
-ping-path operation. — [ ] fixed · [ ] verified
+ping-path operation. — [x] fixed · [x] verified
 
 ### F12 · Suspension has no memory of `paused` — re-upgrade un-pauses silenced monitors
 `suspension.rb:21-27` suspends paused monitors (callers include them via
@@ -129,7 +150,7 @@ ping-path operation. — [ ] fixed · [ ] verified
 back `up` or `down`+alert after a downgrade→re-upgrade cycle
 (probe-confirmed), contradicting the code's own guard comment. **Fix:**
 remember the pre-suspension status (column or restore-to-paused rule) so
-restore returns paused monitors to `paused`. — [ ] fixed · [ ] verified
+restore returns paused monitors to `paused`. — [x] fixed · [x] verified
 
 ### F13 · The downgrade backstop never re-checks state before suspending
 `user/subscription.rb:113-116` has no `must_choose_downgrade?` guard and
