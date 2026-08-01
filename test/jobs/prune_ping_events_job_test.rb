@@ -34,23 +34,51 @@ class PrunePingEventsJobTest < ActiveJob::TestCase
   end
 
   # Scenario 12 — an old ping whose day has NO UptimeDayStat is skipped + logged,
-  # never deleted blind.
-  test "skips and logs pruning for a day that has not been rolled up" do
-    old_time = Stablemate::PING_RETENTION.ago - 3.days
-    old = @monitor.ping_events.create!(received_at: old_time, kind: "success")
-    # Deliberately no UptimeDayStat for old_time.to_date.
+  # never deleted blind. The day has to be one the rollup can still reach (the
+  # horizon day: prunable, because the retention cutoff falls at midday, but
+  # still inside the backfill window) — see the M11 case below for the days it
+  # can't.
+  test "skips and logs pruning for a rollable day that has not been rolled up" do
+    travel_to Date.current.to_time(:utc) + 12.hours do
+      old_time = Monitoring::Monitor.uptime_backfill_horizon.to_time(:utc) + 3.hours
+      old = @monitor.ping_events.create!(received_at: old_time, kind: "success")
+      # Deliberately no UptimeDayStat for old_time.to_date.
 
-    out = StringIO.new
-    old_logger = Rails.logger
-    Rails.logger = ActiveSupport::Logger.new(out)
-    begin
-      PrunePingEventsJob.perform_now
-    ensure
-      Rails.logger = old_logger
+      out = StringIO.new
+      old_logger = Rails.logger
+      Rails.logger = ActiveSupport::Logger.new(out)
+      begin
+        PrunePingEventsJob.perform_now
+      ensure
+        Rails.logger = old_logger
+      end
+
+      assert PingEvent.exists?(old.id), "un-rolled day's pings must not be deleted"
+      assert_match(/skipping un-rolled day/, out.string)
     end
+  end
 
-    assert PingEvent.exists?(old.id), "un-rolled day's pings must not be deleted"
-    assert_match(/skipping un-rolled day/, out.string)
+  # M11 — the prune/rollup deadlock: uptime_days_to_roll clamps a never-rolled
+  # monitor's backfill at the retention horizon, so a day older than that can
+  # never gain an UptimeDayStat. Demanding one there protected nothing and
+  # stranded those raw pings for ever (skipped + warn-logged on every run).
+  test "prunes a pre-horizon day the rollup can never reach" do
+    travel_to Date.current.to_time(:utc) + 12.hours do
+      horizon = Monitoring::Monitor.uptime_backfill_horizon
+      @monitor.update_column(:created_at, (horizon - 10.days).to_time(:utc))
+
+      stranded = @monitor.ping_events.create!(received_at: (horizon - 1.day).to_time(:utc) + 3.hours, kind: "success")
+      rollable = @monitor.ping_events.create!(received_at: horizon.to_time(:utc) + 3.hours, kind: "success")
+
+      # The premise: the backfill starts at the horizon, so the older day is
+      # unreachable no matter how many times the rollup job runs.
+      assert_not_includes @monitor.uptime_days_to_roll, horizon - 1.day
+
+      PrunePingEventsJob.perform_now
+
+      assert_not PingEvent.exists?(stranded.id), "an unreachable day's pings must not be stranded for ever"
+      assert PingEvent.exists?(rollable.id), "the horizon day is still rollable — keep the safety check"
+    end
   end
 
   # Scenario 13 — pruning deletes in batches (does not load all rows at once).

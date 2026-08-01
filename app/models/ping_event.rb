@@ -21,9 +21,17 @@ class PingEvent < ApplicationRecord
   # a UptimeDayStat — pruning never destroys un-rolled data. A prunable day with
   # no rollup is skipped and logged rather than deleted blind. This invariant
   # lives on the record (callable/testable directly); the job just calls it.
+  #
+  # …with one exception, or the check deadlocks against the rollup (M11): the
+  # backfill is clamped at Monitor.uptime_backfill_horizon, so a day older than
+  # that can never gain a stat row however often the rollup runs. Waiting for one
+  # there protects nothing and strands those pings for ever (skipped + warn-logged
+  # on every daily run), so a pre-horizon day is pruned on its own.
   def self.prune!
+    horizon = Monitoring::Monitor.uptime_backfill_horizon
+
     prunable_days.each do |monitor_id, day|
-      if UptimeDayStat.exists?(monitor_id:, day:)
+      if day < horizon || UptimeDayStat.exists?(monitor_id:, day:)
         prunable.where(monitor_id:).where("received_at::date = ?", day).in_batches.delete_all
       else
         Rails.logger.warn(
