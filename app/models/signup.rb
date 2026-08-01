@@ -42,28 +42,47 @@ class Signup
   #   - a persisted WaitlistSignup — when at/over the cap.
   # The controller branches on the class.
   def run
-    # No cap configured (issue #16, the self-host default): sign-ups are always
-    # open, so there is no window to guard and no lock to pay for.
-    return create_user unless Stablemate.signup_cap_enabled?
-
-    # Serialise the whole check-then-create window. Without it two requests racing
-    # for the last slot both read User.count < cap and both insert, taking the
-    # account count past the cap — the same TOCTOU MonitorsController#create closes
-    # with current_user.with_lock (WU-3). There is no row to lock FOR UPDATE here
-    # (the cap is a global COUNT, and the row being created doesn't exist yet), so
-    # we take a transaction-scoped Postgres advisory lock instead: no extra table,
-    # no gem, released automatically on COMMIT/ROLLBACK, and free when uncontended.
-    # The capacity re-check therefore runs inside the lock, against committed state.
-    user = with_capacity_lock { create_user unless self.class.at_capacity? }
+    user = create_user_within_cap
 
     # nil = at capacity. The waitlist branch deliberately runs OUTSIDE the lock:
     # it is already idempotent through its own unique index (a duplicate is a
     # friendly no-op) and holding the global signup lock across it would serialise
     # every waitlist join for nothing.
-    user || join_waitlist
+    return join_waitlist unless user
+
+    announce(user) if user.persisted?
+    user
   end
 
   private
+    # The User half of #run: returns the created (or invalid, unpersisted) user,
+    # or nil when the account cap is full and the caller should waitlist instead.
+    def create_user_within_cap
+      # No cap configured (issue #16, the self-host default): sign-ups are always
+      # open, so there is no window to guard and no lock to pay for.
+      return create_user unless Stablemate.signup_cap_enabled?
+
+      # Serialise the whole check-then-create window. Without it two requests racing
+      # for the last slot both read User.count < cap and both insert, taking the
+      # account count past the cap — the same TOCTOU MonitorsController#create closes
+      # with current_user.with_lock (WU-3). There is no row to lock FOR UPDATE here
+      # (the cap is a global COUNT, and the row being created doesn't exist yet), so
+      # we take a transaction-scoped Postgres advisory lock instead: no extra table,
+      # no gem, released automatically on COMMIT/ROLLBACK, and free when uncontended.
+      # The capacity re-check therefore runs inside the lock, against committed state.
+      with_capacity_lock { create_user unless self.class.at_capacity? }
+    end
+
+    # The non-blocking side effects of a successful sign-up: the verification
+    # email and the team's Slack alert. Deliberately runs AFTER the capacity lock
+    # has committed — the queue lives in its own database, so a job enqueued
+    # inside the open transaction can be picked up before the user row is visible
+    # (F10) — and keeps the global signup lock off the enqueue path.
+    def announce(user)
+      user.send_verification_email
+      NotifySignupJob.perform_later(user.id)
+    end
+
     def with_capacity_lock(&block)
       User.transaction do
         User.with_connection do |connection|
@@ -84,11 +103,9 @@ class Signup
       # rolls back only this INSERT: Postgres aborts the whole enclosing
       # transaction on an index violation, which would take the capacity lock's
       # COMMIT — and any statement after the rescue below — down with it. Mirrors
-      # Project::MonitorSync#save_isolated.
-      if User.transaction(requires_new: true) { user.save }
-        user.send_verification_email
-        NotifySignupJob.perform_later(user.id)
-      end
+      # Project::MonitorSync#save_isolated. (#run announces the new user once the
+      # lock has been released.)
+      User.transaction(requires_new: true) { user.save }
       user
     rescue ActiveRecord::RecordNotUnique
       # A double-submit (or two racing requests) for the same address: both passed
