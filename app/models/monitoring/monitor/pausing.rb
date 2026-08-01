@@ -7,11 +7,18 @@ module Monitoring
       extend ActiveSupport::Concern
 
       # Stop monitoring. Resolving any open incident first means a paused monitor
-      # never carries a stranded outage into its not-measured window (WU-2). Both
-      # writes are one transaction so the monitor never sits paused-with-open-incident.
+      # never carries a stranded outage into its not-measured window (WU-2).
       # Idempotent.
+      #
+      # with_lock (not a bare transaction) so the incident is read under
+      # SELECT ... FOR UPDATE, mirroring every ping-path operation. Reading it
+      # unlocked let a detection sweep open an incident — and send the down email
+      # the user was silencing — between the read and the flip, leaving the
+      # monitor `paused` with an open incident that the rollup counts as downtime
+      # forever. Under the lock, a racing sweep either commits first (we reload
+      # and resolve its incident) or waits and then finds a non-`up` monitor.
       def pause!
-        transaction do
+        with_lock do
           resolve_open_incident!
           update!(status: "paused")
         end
