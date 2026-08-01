@@ -101,6 +101,46 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     refute @project.monitors.exists?(registration_key: "bad")
   end
 
+  # M7 — one payload listing the same key twice used to be processed twice: the
+  # second pass found the row the first had just written and pushed the SAME
+  # monitor into the result again, so the gem saw one job as two monitors (and a
+  # diverging app was reported as two conflicts). Collapse repeats to one entry.
+  test "a registration_key repeated in one payload yields one monitor" do
+    result = @project.sync_monitors(app: "my-app", entries: [
+      entry("daily_digest", name: "First", interval: 3600),
+      entry("daily_digest", name: "Second", interval: 7200)
+    ])
+
+    assert_equal [ "daily_digest" ], result[:registered].map(&:registration_key)
+    assert_equal 1, @project.monitors.where(registration_key: "daily_digest").count
+    # The last occurrence wins — the value the row is left with either way.
+    monitor = @project.monitors.find_by(registration_key: "daily_digest")
+    assert_equal "Second", monitor.name
+    assert_equal 7200, monitor.expected_interval_seconds
+  end
+
+  # The same collapse on the create path, and it must not burn two cap slots for
+  # one monitor.
+  test "a repeated NEW key consumes one cap slot and reports once" do
+    # bob has 1 fixture monitor; cap 5 -> 4 slots for 3 distinct new keys.
+    result = @project.sync_monitors(entries: [
+      entry("a"), entry("b"), entry("a"), entry("c"), entry("b")
+    ])
+
+    assert_equal %w[a b c], result[:registered].map(&:registration_key)
+    assert_empty result[:skipped]
+    assert_equal 4, @user.reload.monitors.count
+  end
+
+  # A repeat must not double-report the shared-key collision either.
+  test "a repeated key with a diverging app reports one conflict" do
+    @project.sync_monitors(app: "billing-app", entries: [ entry("heartbeat") ])
+
+    result = @project.sync_monitors(app: "worker-app", entries: [ entry("heartbeat"), entry("heartbeat") ])
+
+    assert_equal [ "heartbeat" ], result[:conflicts]
+  end
+
   test "a concurrent create of the same key (RecordNotUnique) is upserted, not raised" do
     # The race: a sibling boot process (another Puma worker / container running
     # the railtie's after_initialize sync) already inserted this key, but THIS
