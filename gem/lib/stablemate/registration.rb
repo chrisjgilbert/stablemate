@@ -25,6 +25,7 @@ module Stablemate
 
       response = @client.sync_monitors(app: @app, monitors: tuples)
       cache_ping_urls(response)
+      log_skipped(response)
       Stablemate.ping_urls
     rescue StandardError => e
       log_warn("sync failed: #{e.class}: #{e.message}")
@@ -55,6 +56,23 @@ module Stablemate
         end
         # Atomic fold into the shared cache (subscriber threads read concurrently).
         Stablemate.merge_ping_urls(pairs)
+      end
+
+      # The server registers what it can and returns the rest under `skipped`
+      # (over the account's monitor cap, or a tuple it judged malformed). Those
+      # jobs are NOT monitored — the same silent hole the registrar refuses to
+      # leave when it can't size a schedule — so name each one and say why,
+      # rather than dropping the list on the floor. Logged after the URL cache
+      # is folded in, and defensively (a junk entry can't cost the caller its
+      # ping URLs).
+      def log_skipped(response)
+        Array(response["skipped"]).each do |entry|
+          next unless entry.is_a?(Hash)
+
+          key = entry["registration_key"] || "(unnamed)"
+          reason = entry["reason"] || "no reason given"
+          log_warn("the server did not register '#{key}' (#{reason}) — that job is NOT monitored.")
+        end
       end
 
       def default_app_name
