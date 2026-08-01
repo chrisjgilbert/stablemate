@@ -119,9 +119,21 @@ re-deriving the "0 ⇒ unlimited" rule at each call site. Tests assert behaviour
 **relative to these constants**, never hard-coded numbers.
 
 ### Security defaults
-- `ping_token` and `ApiKey` raw tokens are **secrets**: tokens are random,
-  stored hashed (SHA-256), compared in constant time, shown raw exactly once.
-  Unknown ping token → opaque `404` (no tenant leak).
+Both credentials are random and treated as secrets, but they have **different
+postures** — the difference is deliberate, not an oversight:
+- **`ApiKey` raw tokens are hashed, constant-time-compared and shown once.**
+  Only a SHA-256 digest (+ the last 4 chars, for the masked UI) is stored, the
+  lookup is an indexed equality on that digest with a `secure_compare`
+  backstop, and the raw key is displayed exactly once at creation — a lost key
+  is replaced, never recovered. Missing/invalid/revoked → opaque `401`.
+- **`ping_token` stays plaintext, by design.** The app has to be able to
+  *reconstruct the ping URL*: the dashboard shows it, and the
+  API re-serves it on index/show/sync/rotate. So it cannot be hashed and cannot
+  be shown-once. Its posture is instead: 32 url-safe random chars (~190 bits,
+  unguessable), unique, opaque `404` on any unknown token (no tenant leak, no
+  enumeration signal), rate-limited per token *and* per IP, and rotatable —
+  `POST /api/v1/monitors/:id/rotate` mints a new one and invalidates the old URL
+  immediately, which is the recovery path for a leaked token.
 - All tenant-scoped queries go through `current_user.monitors` (never
   `Monitor.find` by bare id in user-facing controllers) — cross-tenant access
   must be impossible, and there is a test for it in every CRUD slice.
