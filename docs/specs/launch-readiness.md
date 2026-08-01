@@ -12,6 +12,70 @@ each piece of work. No new product features. Follow the architecture rulebook in
 > accepting open sign-ups and real Stripe payments. Self-hosting is already
 > shipped and unaffected except where noted.
 
+---
+
+## 0 · Execution ledger — **the state file; read this first**
+
+This section is the single source of truth for what is done and what is next.
+It is committed, so it survives a container restart: to resume, read this table,
+find the first chunk that isn't `MERGED`, and continue from its unchecked boxes.
+
+**Each chunk ships the same way:** TDD → adversarial code review with fixes
+applied → `/simplify` pass → `/verify` pass against the running app → full
+`bin/ci` → PR → merge to `main` only when GitHub Actions is green → tick the
+boxes here → next chunk.
+
+| # | Chunk | Covers | Status | PR |
+|---|-------|--------|--------|-----|
+| 0 | Launch-readiness spec + verification campaign + 27 bug fixes | — | **MERGED** | #62 |
+| 0 | Billing dependency upgrade | WS-A | **MERGED** | #63 |
+| 1 | Account page — deletion + password change | WS-D | **NOT STARTED** | — |
+| 2 | Legal pages — Terms + Privacy + consent | WS-C | **NOT STARTED** | — |
+| 3 | Findings follow-ups + Honeybadger secret move | launch-findings tail | **NOT STARTED** | — |
+| 4 | Dependabot backlog | WS-B | **NOT STARTED** | — |
+
+Deliberately **not** in these chunks: WS-E (publishing the gem needs an
+MFA'd RubyGems account — owner action, though the repo-side prep can ride in a
+chunk), WS-F (ops, entirely off-repo), and WS-G (the launch switch, which must
+be last and needs D6).
+
+### Chunk 1 — Account page (WS-D)
+- [ ] `resource :account` → `AccountsController#show/destroy` + nested password sub-resource
+- [ ] `User::Closure` operation (`close_account!`), **explicitly destroying `pay_customers`**
+- [ ] Stripe-failure policy: abort cleanly, delete nothing
+- [ ] Signed-in password change (current password required)
+- [ ] Webhook tolerates an event for a deleted customer (request test)
+- [ ] `enforce_downgrade_fallback!`'s `reload` survives a user deleted mid-batch
+- [ ] Browser-driven system test for the deletion flow
+- [ ] Review → `/simplify` → `/verify` → CI → PR → merge
+
+### Chunk 2 — Legal pages (WS-C)
+- [ ] `/terms` and `/privacy` on the marketing layout, public
+- [ ] Footer links + sign-up consent line (D3: linked text, no checkbox)
+- [ ] Privacy content matches what the code actually collects/retains
+- [ ] Request tests + footer-link assertions
+- [ ] Review → `/simplify` → `/verify` → CI → PR → merge
+
+### Chunk 3 — Follow-ups + secret hygiene
+- [ ] Honeybadger key out of `config/honeybadger.yml` into ENV/credentials
+      (**rotation itself is owner action**)
+- [ ] `release_downgrade_lock_if_within_cap!` wired into monitor destroy
+- [ ] `past_due` user no longer shown an "Upgrade to Pro" button that bounces
+- [ ] `live_today_stat` memoized; `broadcast_status_update` after commit
+- [ ] `Signup` builds the user before taking the advisory lock (bcrypt outside)
+- [ ] `status_before_suspension` backfill for the migration cohort
+- [ ] System test for the new grace-banner / downgrade-page states
+- [ ] `docs/integrating.md` drift (API-keys location, F2 precedence rule)
+- [ ] Review → `/simplify` → `/verify` → CI → PR → merge
+
+### Chunk 4 — Dependabot backlog (WS-B)
+- [ ] solid_queue 1.5.0 (#61) — eye the recurring-task changelog
+- [ ] solid_cable 4.0.2 (#59), thruster 0.1.23 (#58), honeybadger 6.9.1 (#57)
+- [ ] selenium-webdriver 4.46 (#40), image_processing 2.0.2 (#6)
+- [ ] actions/checkout v7 (#5), setup-chrome v2 (#4), ssh-agent 0.10 (#35)
+- [ ] Watch one auto-deploy complete after the Actions bumps land
+- [ ] Review → `/simplify` → `/verify` → CI → PR → merge
+
 > **Review note (2026-08-01).** An adversarial pressure-test pass verified every
 > file/behaviour claim in this spec against the code and the installed gems.
 > Material corrections it forced, now folded in: Pay declares **no**
