@@ -77,6 +77,32 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
     assert_equal FREE - 1, @user.monitors.counting_toward_cap.count
   end
 
+  # F13 — the job's batch is loaded once, so a re-upgrade webhook committing while
+  # the batch is being walked leaves an in-memory record that still looks
+  # free+awaiting. over_free_cap_by is plan-blind, so without a re-check the
+  # backstop would suspend a *paying* Pro user's monitors until the next webhook.
+  test "a record that re-upgraded mid-batch is left alone" do
+    monitors = start_grace!(FREE + 2)
+
+    travel_to Stablemate::DOWNGRADE_GRACE_PERIOD.from_now + 1.hour do
+      # The record as the job loaded it: free, awaiting, deadline passed.
+      stale = User.downgrade_grace_expired.find(@user.id)
+
+      # Meanwhile the re-upgrade webhook commits: plan pro, lock cleared.
+      User.where(id: @user.id).update_all(
+        plan: "pro", awaiting_downgrade_choice: false, downgrade_choice_deadline_at: nil
+      )
+
+      stale.enforce_downgrade_fallback!
+    end
+
+    @user.reload
+    assert_equal "pro", @user.plan, "the paying user's plan must not be touched"
+    refute @user.awaiting_downgrade_choice?
+    assert_equal 0, @user.monitors.where(status: "suspended").count
+    monitors.each { |m| refute m.reload.suspended?, "a paying Pro user's monitor was suspended" }
+  end
+
   test "a user still within the window is left untouched even when another is overdue" do
     # Two users in grace: bob overdue, alice still inside her window. Only bob settles.
     overdue = start_grace!(FREE + 2)

@@ -129,7 +129,15 @@ class User
     # then clear the choose-N flags. enforce_free_cap! is itself a no-op when the
     # account is already within the cap, so this is safe either way — after it runs
     # the account is settled, nothing left awaiting.
+    #
+    # Re-read the record and re-check first: the job's batch is loaded once, so a
+    # re-upgrade (or a choice the user just committed) landing mid-batch leaves us
+    # holding a stale free+awaiting copy. over_free_cap_by is plan-blind, so acting
+    # on it would suspend a *paying* Pro user's monitors until the next webhook (F13).
     def enforce_downgrade_fallback!
+      reload
+      return unless must_choose_downgrade?
+
       Downgrade.new(self).enforce_free_cap!
       clear_downgrade_choice!
     end
