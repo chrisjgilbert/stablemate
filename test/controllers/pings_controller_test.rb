@@ -86,6 +86,52 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     assert_nil @monitor.ping_events.order(:received_at).last.duration_ms
   end
 
+  # F6 — a duration_ms beyond int4 must not take the ping down with it. The
+  # column is an int4, so assigning 2^40 raises ActiveModel::RangeError *inside*
+  # CheckIn's transaction: the PingEvent AND register_contact both roll back, the
+  # endpoint 500s, and a client that always sends the bad value never registers a
+  # ping again — a permanent false `down` that can never recover. Out of range is
+  # therefore "no latency measured" (nil), and the ping itself still counts.
+  test "an out-of-range duration_ms is stored as nil and the ping still registers" do
+    freeze_time do
+      now = Time.current
+
+      assert_difference -> { @monitor.ping_events.count }, 1 do
+        get ping_path(@monitor.ping_token, duration_ms: 2**40)
+      end
+
+      assert_response :success
+      assert_equal({ "ok" => true }, response.parsed_body)
+      assert_nil @monitor.ping_events.order(:received_at).last.duration_ms
+
+      @monitor.reload
+      assert_equal "up", @monitor.status
+      assert_equal now, @monitor.last_ping_at
+    end
+  end
+
+  # M9 — a negative duration_ms is nonsense as latency and was stored verbatim,
+  # rendering as "-5000ms" in the events list. Treat it exactly like out-of-range.
+  test "a negative duration_ms is stored as nil and the ping still registers" do
+    assert_difference -> { @monitor.ping_events.count }, 1 do
+      get ping_path(@monitor.ping_token, duration_ms: -5000)
+    end
+
+    assert_response :success
+    assert_nil @monitor.ping_events.order(:received_at).last.duration_ms
+    assert_equal "up", @monitor.reload.status
+  end
+
+  # The boundaries themselves stay storable — 0 is a legitimate sub-millisecond
+  # job, and int4 max is the largest value the column can hold.
+  test "duration_ms at the edges of the storable range is kept" do
+    get ping_path(@monitor.ping_token, duration_ms: 0)
+    assert_equal 0, @monitor.ping_events.order(:received_at).last.duration_ms
+
+    get ping_path(@monitor.ping_token, duration_ms: 2_147_483_647)
+    assert_equal 2_147_483_647, @monitor.ping_events.order(:received_at).last.duration_ms
+  end
+
   # Scenario 5 — unknown token -> opaque 404, no PingEvent.
   test "an unknown token returns 404 and creates no PingEvent" do
     assert_no_difference -> { PingEvent.count } do

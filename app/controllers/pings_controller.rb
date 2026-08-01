@@ -75,11 +75,23 @@ class PingsController < ActionController::Base
   end
 
   private
-    # Store a duration only when the param is actually numeric; a non-numeric
-    # value (e.g. ?duration_ms=abc) must become nil, not 0 — String#to_i would
-    # silently corrupt latency data.
+    # The widest value the int4 `duration_ms` column can hold. Anything above it
+    # raises ActiveModel::RangeError on assignment, and that raise happens INSIDE
+    # CheckIn's transaction — so a bad duration would roll back the PingEvent and
+    # the contact timestamps too, silently un-registering the ping (F6).
+    DURATION_MS_RANGE = 0..2_147_483_647
+
+    # Store a duration only when the param is a number we can actually keep. A
+    # non-numeric value (e.g. ?duration_ms=abc) must become nil, not 0 —
+    # String#to_i would silently corrupt latency data — and a value outside the
+    # storable range is likewise "no latency measured" rather than a reason to
+    # reject the ping: the heartbeat is the payload here, the duration is a nice
+    # to have. Negatives are nonsense as a latency and were previously stored
+    # verbatim, rendering as "-5000ms" in the events list (M9), so the same rule
+    # covers them.
     def numeric_duration_ms
-      Integer(params[:duration_ms], exception: false)
+      duration = Integer(params[:duration_ms], exception: false)
+      duration if DURATION_MS_RANGE.cover?(duration)
     end
 
     # First present String among aliased params. Only String values count: this
