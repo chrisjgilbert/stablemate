@@ -17,6 +17,15 @@ module Billing
       price_id = Stablemate.pro_price_id
       return redirect_back_or_to(billing_subscription_path, alert: "Pro plan isn't configured.") if price_id.blank?
 
+      # Past the guard, the only Pro subscription that can still exist is an
+      # `incomplete` one — a first payment that was never authenticated, which we
+      # deliberately let the user retry rather than blocking them for the ~23h
+      # Stripe takes to expire it. Cancel it before opening the new session: Stripe
+      # emails that customer a link straight back to the old invoice, so leaving it
+      # alive means "retry, then complete the original" ends in two active
+      # subscriptions. It has never been charged, so this costs the user nothing.
+      current_user.cancel_pro_subscription!
+
       session = current_user.stripe_customer.checkout(
         mode: "subscription",
         line_items: price_id,

@@ -192,7 +192,20 @@ class Project
       # Nil remembered = a monitor registered before we started remembering. We
       # can't tell an override from an untouched value, so we don't touch it —
       # the first sync after the deploy is precisely when the clobber used to
-      # happen — and we start remembering, so genuine changes land from then on.
+      # happen — and we start remembering.
+      #
+      # KNOWN LIMIT for that first sync (pinned by a test below). If the stored
+      # value and the incoming one already differ when we start remembering, the
+      # two branches above can never both be false again for THAT value: stored
+      # stays != last_sent, and an unchanged payload keeps arriving == last_sent.
+      # So a `recurring.yml` change that was already in flight when the migration
+      # deployed is refused until the schedule changes AGAIN, which does then
+      # land. It is a genuine coin flip — on that first sync a divergence is
+      # equally consistent with "the user tightened this" and "the schedule
+      # changed" — and we deliberately resolve it toward never overwriting a
+      # setting the user may have chosen. Cost: a stale cadence on monitors that
+      # existed before this shipped. Revisit if that trade ever bites; today
+      # there are no such monitors in production.
       def gem_may_write?(monitor, setting, remembered, incoming)
         last_sent = monitor.public_send(remembered)
         return false if last_sent.nil?

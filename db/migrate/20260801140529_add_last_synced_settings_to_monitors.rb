@@ -10,6 +10,13 @@
 # these in from the current columns would assert that today's value is the gem's
 # — a lie for exactly the monitors the user has already overridden, and it would
 # revert them once on the next deploy, which is the bug this exists to fix.
+#
+# The cost of that choice, stated plainly: a `recurring.yml` change already in
+# flight when this deploys is NOT applied to a pre-existing monitor — it waits for
+# the schedule to change again. On that first sync a divergence is equally
+# consistent with "the user tightened this" and "the schedule changed", and we
+# resolve it toward never overwriting the user. See the KNOWN LIMIT note on
+# Project::MonitorSync#gem_may_write? and its pinning test.
 class AddLastSyncedSettingsToMonitors < ActiveRecord::Migration[8.1]
   def change
     add_column :monitors, :last_synced_name, :string
