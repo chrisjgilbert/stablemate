@@ -3,11 +3,12 @@ module Monitoring
     # Plan-downgrade (de)activation — reached via monitor.suspend! / monitor.reactivate!.
     # Hosted-tier only (issue #19): a `suspended` monitor is retained but not
     # monitored, sends no alerts, and does NOT count toward the cap (PRD §3.3),
-    # distinct from user-initiated `paused`. Suspending records nothing else —
-    # detection already skips non-`up` monitors. Reactivation re-evaluates the
-    # heartbeat via the shared HeartbeatStates#reactivate_heartbeat! rule (the same
-    # path user-resume uses), so an overdue monitor opens an incident and alerts
-    # rather than silently flipping to a stale `up`.
+    # distinct from user-initiated `paused`. Suspending records only the status it
+    # suspended FROM — detection already skips non-`up` monitors. Reactivation
+    # restores a previously-`paused` monitor to `paused` and otherwise re-evaluates
+    # the heartbeat via the shared HeartbeatStates#reactivate_heartbeat! rule (the
+    # same path user-resume uses), so an overdue monitor opens an incident and
+    # alerts rather than silently flipping to a stale `up`.
     #
     # Retention (PRD §8 Q10): suspended monitors are kept forever — there is NO
     # auto-purge job. A purge/retention policy is deliberately deferred; we never
@@ -17,7 +18,9 @@ module Monitoring
         @monitor = monitor
       end
 
-      # Deactivate for a plan downgrade. Idempotent.
+      # Deactivate for a plan downgrade. Idempotent — an already-suspended monitor
+      # keeps the status it was suspended FROM, so a second call can't overwrite
+      # the memory with "suspended" and lose the user's pause.
       #
       # with_lock (not a bare transaction) so the incident is read under
       # SELECT ... FOR UPDATE, mirroring every ping-path operation and Pausing.
@@ -27,17 +30,38 @@ module Monitoring
       # downtime forever.
       def suspend!
         @monitor.with_lock do
+          next if @monitor.suspended?
+
+          suspending_from = @monitor.status
           @monitor.resolve_open_incident!
-          @monitor.update!(status: "suspended")
+          @monitor.update!(status: "suspended", status_before_suspension: suspending_from)
         end
       end
 
       # Re-activate on re-upgrade. No-op unless actually suspended, so a stray call
       # can't disturb a live monitor.
+      #
+      # A monitor the user had already PAUSED goes straight back to `paused`,
+      # never through the heartbeat re-evaluation: callers suspend paused monitors
+      # too (they occupy a cap slot — locked #8), and re-evaluating one would
+      # un-pause it and, if the silenced window had run long, open an incident and
+      # email an outage for a monitor nobody was watching. It keeps its cap slot,
+      # exactly as it held one before the downgrade.
+      #
+      # Every other pre-suspension status re-evaluates the grace window as before:
+      # restoring a stale `up`/`down` verbatim would either hide a real outage or
+      # assert one that may have ended.
       def reactivate!
         return unless @monitor.suspended?
 
-        @monitor.reactivate_heartbeat!
+        if @monitor.status_before_suspension == "paused"
+          @monitor.update!(status: "paused", status_before_suspension: nil)
+        else
+          # Cleared first so the memory can never outlive its suspension — the
+          # next downgrade must remember afresh.
+          @monitor.update!(status_before_suspension: nil)
+          @monitor.reactivate_heartbeat!
+        end
       end
     end
   end
