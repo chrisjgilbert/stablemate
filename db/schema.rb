@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_01_133812) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_01_140529) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -52,6 +52,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_133812) do
     t.integer "grace_period_seconds"
     t.datetime "last_ping_at"
     t.string "last_synced_app"
+    t.integer "last_synced_expected_interval_seconds"
+    t.integer "last_synced_grace_period_seconds"
+    t.string "last_synced_name"
     t.string "monitor_type", default: "heartbeat", null: false
     t.string "name", null: false
     t.datetime "next_due_at"
