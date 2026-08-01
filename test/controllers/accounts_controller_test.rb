@@ -82,6 +82,52 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     assert User.exists?(@user.id)
   end
 
+  # The current-password prompt exists to stop someone who already holds a stolen
+  # session cookie. Unlimited guesses hand that exact attacker an online password
+  # oracle (and a bcrypt hash of CPU per guess), so the attempts are bounded the
+  # way the unauthenticated credential surfaces already are.
+  test "repeated wrong-password deletes are throttled" do
+    sign_in @user
+
+    AccountsController::CREDENTIAL_ATTEMPT_LIMIT.times do
+      delete account_path, params: { current_password: "not-my-password" }
+      assert_response :unprocessable_entity
+    end
+
+    delete account_path, params: { current_password: "not-my-password" }
+    assert_response :too_many_requests
+    assert User.exists?(@user.id)
+  end
+
+  # One budget across both forms: the password-change form re-checks the same
+  # credential, so a separate allowance would just double the guesses.
+  test "the delete and password-change forms share one attempt budget" do
+    sign_in @user
+
+    AccountsController::CREDENTIAL_ATTEMPT_LIMIT.times do
+      delete account_path, params: { current_password: "not-my-password" }
+    end
+
+    patch account_password_path,
+      params: { current_password: "not-my-password", password: "newpassword12" }
+    assert_response :too_many_requests
+  end
+
+  # Keyed by user, not by IP: one throttled account must not lock everyone else
+  # out (and an attacker rotating IPs must not get a fresh budget).
+  test "the throttle is per account, not global" do
+    sign_in @user
+    AccountsController::CREDENTIAL_ATTEMPT_LIMIT.times do
+      delete account_path, params: { current_password: "not-my-password" }
+    end
+    delete account_path, params: { current_password: "not-my-password" }
+    assert_response :too_many_requests
+
+    sign_in users(:bob)
+    delete account_path, params: { current_password: "not-my-password" }
+    assert_response :unprocessable_entity
+  end
+
   test "destroy with the correct password closes the account and signs the user out" do
     sign_in @user
     project = @user.projects.sole

@@ -127,7 +127,7 @@ module ActiveSupport
     # requests never accumulate into a spurious throttle. Throttle tests drive the
     # limit within a single test after this clean slate.
     setup do
-      [ PingsController, RegistrationsController, Api::V1::BaseController ].each do |controller|
+      [ PingsController, RegistrationsController, Api::V1::BaseController, AccountsController ].each do |controller|
         controller::RATE_LIMIT_STORE.clear
       end
     end
