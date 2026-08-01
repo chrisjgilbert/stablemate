@@ -34,10 +34,21 @@ module Monitoring
     # keep working; allow_nil avoids a NoMethodError on a monitor built before its
     # project is set.
     delegate :user, to: :project, allow_nil: true
-    has_many :ping_events, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
+    # delete_all, not destroy, for the two high-volume leaf tables. A monitor
+    # accumulates one ping_event per check-in and keeps PING_RETENTION (90 days)
+    # of them, so a busy account holds hundreds of thousands: destroying them
+    # row-by-row loads every record and issues a DELETE each, which measured
+    # ~0.5ms/row — a minute or more inside one open transaction for a single Free
+    # account, and an out-of-memory for a Pro one. Both tables are leaves (no
+    # dependent associations, no destroy callbacks, nothing observes them), so a
+    # single bulk DELETE is equivalent and constant-time.
+    #
+    # incidents and notifications stay :destroy — they are low-volume (one per
+    # transition, not per ping) and incidents cascade to their own notifications.
+    has_many :ping_events, dependent: :delete_all, foreign_key: :monitor_id, inverse_of: :monitor
     has_many :incidents, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
     has_many :notifications, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
-    has_many :uptime_day_stats, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
+    has_many :uptime_day_stats, dependent: :delete_all, foreign_key: :monitor_id, inverse_of: :monitor
 
     validates :name, presence: true
     validates :status, presence: true
