@@ -143,14 +143,20 @@ class User
     end
 
     # Lift the choose-N lock when the account is back within the Free cap — e.g. the
-    # user deleted monitors while locked. Every remaining monitor now fits, so
-    # reactivate the suspended ones and clear the flag. Without this a user who
-    # dropped to <= FREE_PLAN_MONITOR_LIMIT total while locked would be stranded:
-    # the picker requires choosing exactly N, which they can no longer satisfy.
-    # Idempotent; a no-op unless actually locked and within the cap.
+    # user deleted monitors while locked, or a voluntary choose-N downgrade already
+    # suspended the difference. The account fits, so reactivate whatever the free
+    # slots allow and clear the flag. Without this a user who dropped to <=
+    # FREE_PLAN_MONITOR_LIMIT while locked would be stranded: the picker requires
+    # choosing exactly N, which they can no longer satisfy.
+    #
+    # Count only monitors occupying a cap slot, as every other cap decision does
+    # (locked decision #8) — counting suspended ones kept an account that had
+    # ALREADY settled itself looking permanently over cap, so a voluntary downgrade
+    # that raced its own cancel webhook into a spurious lock could never escape it
+    # (M3). Idempotent; a no-op unless actually locked and within the cap.
     def release_downgrade_lock_if_within_cap!
       return unless free? && awaiting_downgrade_choice?
-      return if monitors.count > Stablemate::FREE_PLAN_MONITOR_LIMIT
+      return if over_free_cap_by.positive?
 
       restore_suspended_monitors!
       clear_downgrade_choice!

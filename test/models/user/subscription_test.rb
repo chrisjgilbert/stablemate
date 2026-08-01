@@ -188,6 +188,35 @@ class User::SubscriptionTest < ActiveSupport::TestCase
     end
   end
 
+  # M3 — a voluntary choose-N downgrade can race its own cancel webhook: the
+  # webhook lands between User::Downgrade#to_free!'s Stripe cancel and its
+  # suspends, still sees every monitor active, and opens an involuntary lock the
+  # user has in fact already answered. The release must then let them out —
+  # counting only monitors that occupy a cap slot, as everywhere else (locked
+  # decision #8). Counting suspended ones too kept the account "over cap" forever
+  # and left the user re-picking a choice they'd already made.
+  test "the choose-N lock releases once suspensions put the account within the cap" do
+    with_billing_enabled do
+      @user.update!(plan: "pro")
+      monitors = (Stablemate::FREE_PLAN_MONITOR_LIMIT + 2).times.map { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
+
+      # The racing cancel webhook, seeing the pre-suspension counts.
+      @user.sync_plan_from_subscription!
+      assert @user.reload.must_choose_downgrade?
+
+      # The user's own choice completes: the unchosen monitors are suspended.
+      monitors.last(2).each(&:suspend!)
+
+      @user.release_downgrade_lock_if_within_cap!
+
+      refute @user.reload.awaiting_downgrade_choice?
+      assert_nil @user.downgrade_choice_deadline_at
+      # Their choice stands — no cap slots are free, so nothing is reactivated.
+      assert_equal Stablemate::FREE_PLAN_MONITOR_LIMIT, @user.monitors.counting_toward_cap.count
+      assert_equal 2, @user.monitors.where(status: "suspended").count
+    end
+  end
+
   test "restore_suspended_monitors! reactivates only up to the available Pro slots" do
     with_billing_enabled do
       @user.update!(plan: "pro")
