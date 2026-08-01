@@ -10,6 +10,16 @@ module Accounts
   # cookie, so the other sessions have to die — but re-prompting the person who
   # just typed both passwords proves nothing.
   class PasswordsController < ApplicationController
+    # Shares AccountsController's per-user attempt budget — same credential, same
+    # oracle, so the two forms must not add up to twice the guesses. See the
+    # comment on that constant for why a signed-in surface needs a bound at all.
+    rate_limit to: ::AccountsController::CREDENTIAL_ATTEMPT_LIMIT,
+      within: ::AccountsController::CREDENTIAL_ATTEMPT_WINDOW,
+      by: -> { Current.user.id },
+      scope: ::AccountsController::CREDENTIAL_ATTEMPT_SCOPE,
+      store: ::AccountsController::RATE_LIMIT_STORE,
+      with: -> { render_account(::AccountsController::THROTTLED_MESSAGE, status: :too_many_requests) }
+
     def update
       unless current_user.authenticate(params[:current_password].to_s)
         return render_account("That password is incorrect.")
@@ -37,10 +47,10 @@ module Accounts
     private
       # Re-render the account page in place. The user object may be dirty from a
       # rejected update, so reload it before the page reads it back.
-      def render_account(alert)
+      def render_account(alert, status: :unprocessable_entity)
         current_user.reload
         flash.now[:alert] = alert
-        render template: "accounts/show", status: :unprocessable_entity
+        render template: "accounts/show", status: status
       end
   end
 end
