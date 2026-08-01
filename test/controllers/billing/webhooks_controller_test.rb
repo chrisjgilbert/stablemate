@@ -8,6 +8,8 @@ require "test_helper"
 # boundary — we never hit Stripe's API. We drive the plan change directly through
 # the user's Pay subscription mirror so the controller's sync reflects it.
 class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
+  include StripeApiStubs
+
   setup do
     @user = users(:bob)
     @project = @user.projects.sole
@@ -146,6 +148,32 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
           end
         end
 
+        assert_response :ok
+      end
+    end
+  end
+
+  # WS-D: closing an account destroys its pay_customers, so an in-flight Stripe
+  # event can arrive seconds later referencing a customer that no longer resolves
+  # here. It MUST be acknowledged — Stripe retries a 500 for days, and every
+  # retry is an exception we'd have to look at.
+  test "an event for a deleted customer is acknowledged, not 500" do
+    with_billing_enabled do
+      without_pay_stripe_network do
+        cus = make_pro!
+        subscription = @user.pay_subscriptions.sole
+        stub_stripe_subscription_cancel(subscription.processor_id)
+        @user.close_account!
+
+        %w[checkout.session.completed customer.subscription.deleted customer.subscription.updated].each do |type|
+          post_event(type: type, customer: cus)
+          assert_response :ok, "#{type} for a deleted customer must be acknowledged"
+        end
+
+        # The dangerous one: Pay's invoice handlers reach for the customer and
+        # its owner (Pay 11 reads the post-2025-03-31 invoice shape).
+        post_event(type: "invoice.payment_failed", customer: cus,
+          object: { parent: { subscription_details: { subscription: subscription.processor_id } } })
         assert_response :ok
       end
     end
