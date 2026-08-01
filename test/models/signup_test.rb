@@ -183,6 +183,28 @@ class SignupTest < ActiveSupport::TestCase
     end
   end
 
+  # The capacity lock must not swallow the sign-up's side effects: the queue
+  # lives in its own database, so a job enqueued while the app transaction is
+  # still open can be picked up before the user row is visible (F10). It also
+  # keeps the global signup lock off the enqueue path.
+  test "the verification email and alert job are enqueued outside the capacity lock" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
+      baseline = User.with_connection(&:open_transactions)
+      depths = []
+      subscriber = ActiveSupport::Notifications.subscribe("enqueue.active_job") do
+        depths << User.with_connection(&:open_transactions)
+      end
+
+      Signup.new(email: "after-commit@example.com", password: "password1234").run
+
+      assert depths.any?, "expected the sign-up to enqueue the email and the alert"
+      assert_equal [ baseline ] * depths.size, depths,
+        "nothing may be enqueued while the capacity-lock transaction is open"
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber)
+    end
+  end
+
   # --- M2: a double-submit must not 500 -------------------------------------
   #
   # Two identical sign-ups arriving together both pass the uniqueness validation
