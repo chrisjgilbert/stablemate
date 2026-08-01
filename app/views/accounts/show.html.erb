@@ -90,7 +90,11 @@
 
   <%= form_with url: account_path, method: :delete, class: "space-y-3 max-w-sm" do |form| %>
     <div>
-      <%= form.label :current_password, "Type your password to confirm", class: "block text-[12px] text-secondary mb-1" %>
+      <%# Both forms on this page carry a current_password field, so the delete
+          one takes an explicit id — and the label an explicit `for` — rather than
+          colliding on the auto-generated one. %>
+      <%= form.label :current_password, "Type your password to confirm", for: "delete_current_password",
+            class: "block text-[12px] text-secondary mb-1" %>
       <%= form.password_field :current_password, required: true, autocomplete: "current-password", maxlength: 72,
             id: "delete_current_password",
             class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
