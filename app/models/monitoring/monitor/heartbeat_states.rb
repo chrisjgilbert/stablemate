@@ -47,7 +47,11 @@ module Monitoring
         # interval. Grace edits apply instantly (the overdue scope reads the live
         # column) — this removes that asymmetry. On the model rather than in the
         # edit action so every write path (form, gem sync, console) gets it.
-        before_save :recompute_next_due_at, if: :expected_interval_seconds_changed?
+        #
+        # before_update, not before_save: on create the interval is not "changing"
+        # in any meaningful sense, and a caller that supplies its own next_due_at
+        # alongside it must be taken at its word.
+        before_update :recompute_next_due_at, if: :expected_interval_seconds_changed?
       end
 
       def pending?   = status == "pending"
