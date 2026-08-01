@@ -18,13 +18,18 @@ class PasswordsController < ApplicationController
   end
 
   def update
-    # A blank password is a no-op in has_secure_password (it neither clears nor
-    # sets the digest), so `update` would return true, log the user out everywhere,
-    # and claim "Password has been reset" while the old password still works.
-    # Reject it explicitly. (WU-11)
-    if params[:password].blank?
+    # Guard the PERMITTED password, not the raw param. A blank one is a no-op in
+    # has_secure_password (it neither clears nor sets the digest), so `update`
+    # would return true, log the user out everywhere, and claim "Password has been
+    # reset" while the old password still works. A non-scalar one (`password[]=…`)
+    # does exactly the same: it passes `.blank?` but strong parameters drop it, so
+    # `update` is handed an empty hash. Reading the guard off the attributes we
+    # actually write closes both. (WU-11)
+    attributes = params.permit(:password, :password_confirmation)
+
+    if attributes[:password].blank?
       redirect_to edit_password_path(params[:token]), alert: "Password can't be blank."
-    elsif @user.update(params.permit(:password, :password_confirmation))
+    elsif @user.update(attributes)
       @user.sessions.destroy_all
       redirect_to new_session_path, notice: "Password has been reset."
     else

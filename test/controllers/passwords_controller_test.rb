@@ -77,6 +77,25 @@ class PasswordsControllerTest < ActionDispatch::IntegrationTest
       "the old password must still work"
   end
 
+  # WU-11 again, one step along: a NON-SCALAR password sails past `.blank?` on the
+  # raw param but is dropped by strong parameters, so `update` gets an empty hash
+  # and returns true — the token holder is told "Password has been reset", every
+  # session is revoked, and the old password still works. Guarding the permitted
+  # attributes rather than the raw param closes it.
+  test "update with a non-scalar password is rejected and changes nothing" do
+    user = users(:alice)
+    session = user.sessions.create!
+    token = user.password_reset_token
+
+    assert_no_changes -> { user.reload.password_digest } do
+      put password_path(token), params: { password: [ "brandnewpass9" ] }
+    end
+    assert_redirected_to edit_password_path(token)
+    assert user.sessions.exists?(session.id), "sessions must not be revoked on a rejected reset"
+    assert User.authenticate_by(email_address: user.email_address, password: "password1234"),
+      "the old password must still work"
+  end
+
   # Full happy path: request reset -> email enqueued -> follow the token to edit
   # -> update -> existing sessions revoked, the new password authenticates and the
   # old one no longer does. (Fixtures share the password "password1234".)

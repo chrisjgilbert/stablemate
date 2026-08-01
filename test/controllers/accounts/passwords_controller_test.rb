@@ -43,6 +43,25 @@ class Accounts::PasswordsControllerTest < ActionDispatch::IntegrationTest
     assert @user.reload.authenticate("password1234")
   end
 
+  # The same failure mode one step along: a NON-SCALAR password (password[]=… or
+  # password[x]=…) sails past `.blank?` on the raw param, but strong parameters
+  # drop it, so `update` is handed an empty hash, returns true — and we would
+  # report "Password changed", sign every other session out, and leave the old
+  # password working. Guarding the raw param instead of the permitted one is what
+  # opens the gap.
+  test "a non-scalar new password is a 422 and changes nothing" do
+    other = @user.sessions.create!(user_agent: "other device", ip_address: "10.0.0.1")
+    sign_in @user
+
+    patch account_password_path, params: {
+      current_password: "password1234", password: [ "newpassword12" ]
+    }
+
+    assert_response :unprocessable_entity
+    assert @user.reload.authenticate("password1234")
+    assert Session.exists?(other.id), "a rejected change must not sign other sessions out"
+  end
+
   test "a mismatched confirmation is a 422 and changes nothing" do
     sign_in @user
     change_password(password: "newpassword12", confirmation: "somethingelse")
