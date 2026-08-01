@@ -67,6 +67,75 @@ class SolidQueueRecurringTest < StablemateTest
     assert_equal 16 * 3600, interval
   end
 
+  # F3 — a weekday-restricted cron's LARGEST gap is the weekend, and a window of
+  # a fixed number of occurrences never reaches it: 50 slots of "*/15 9-17 * * 1-5"
+  # is a day and a half, so the derived interval was the weeknight gap (54,900s)
+  # instead of Fri 17:45 -> Mon 09:00 (227,700s). The monitor then went `down`
+  # every Friday evening and false-recovered on Monday. The window must span at
+  # least a full week. (Values probed against real fugit; TZ is UTC in CI, so no
+  # DST shift moves them.)
+  def test_weekday_restricted_cron_measures_the_weekend_gap
+    r = registrar
+
+    # Fri 17:45 -> Mon 09:00 = 2d 15h 15m.
+    assert_equal 227_700, r.interval_seconds("*/15 9-17 * * 1-5")
+    # Fri 23:00 -> Mon 00:00 = 49h.
+    assert_equal 176_400, r.interval_seconds("0 * * * 1-5")
+  end
+
+  # The same fix seen through the registered tuple: the interval a weekday task
+  # actually registers with, and the grace derived from it.
+  def test_weekday_restricted_task_registers_the_weekend_sized_interval
+    Tempfile.create([ "weekday", ".yml" ]) do |f|
+      f.write("business_hours:\n  class: BusinessHoursJob\n  schedule: \"*/15 9-17 * * 1-5\"\n")
+      f.flush
+      tuple = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: f.path).tuples.first
+
+      assert_equal 227_700, tuple[:expected_interval_seconds]
+      assert_equal (227_700 * 0.15).round, tuple[:grace_period_seconds]
+    end
+  end
+
+  # The widened window must not disturb the schedules that were already right:
+  # regular crons of every density, and sparse ones whose gaps are uneven across
+  # months and leap years (those clear the week horizon in two occurrences, so a
+  # floor of samples still measures their real maximum).
+  def test_regular_and_sparse_schedules_keep_their_intervals
+    r = registrar
+
+    assert_equal 86_400, r.interval_seconds("@daily")
+    assert_equal 3_600, r.interval_seconds("@hourly")
+    assert_equal 900, r.interval_seconds("*/15 * * * *")
+    assert_equal 604_800, r.interval_seconds("0 0 * * 1")
+    # 9am & 5pm daily -> the 16h overnight gap, not the 8h daytime one.
+    assert_equal 57_600, r.interval_seconds("0 9,17 * * *")
+    # Monthly: the longest month (31d), not whichever month we booted in.
+    assert_equal 31 * 86_400, r.interval_seconds("0 3 1 * *")
+    # Feb 29 only: years apart, and it must terminate rather than sample forever.
+    assert_operator r.interval_seconds("0 0 29 2 *"), :>=, 4 * 365 * 86_400
+    # A per-minute cron spans the week in thousands of occurrences — the upper
+    # bound has to keep that bounded while still deriving the right gap.
+    assert_equal 60, r.interval_seconds("* * * * *")
+  end
+
+  # An impossible date ("Feb 30") never parses to a Cron, so it can't be sized:
+  # skip the task rather than register a monitor that is permanently down, and
+  # warn so the unmonitored job is visible to the operator.
+  def test_unsizable_schedule_is_skipped_with_a_warning
+    assert_nil registrar.interval_seconds("0 0 30 2 *")
+
+    Tempfile.create([ "impossible", ".yml" ]) do |f|
+      f.write("never:\n  class: NeverJob\n  schedule: \"0 0 30 2 *\"\n")
+      f.flush
+      out = StringIO.new
+      r = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: f.path, config: logging_config(out))
+
+      assert_empty r.tuples
+      assert_match(/WARN/, out.string)
+      assert_match(/never/, out.string)
+    end
+  end
+
   # Scenario 23 — grace default = max(interval * fraction, 5 minutes).
   def test_grace_defaults_to_fraction_with_a_five_minute_floor
     tuples = registrar.tuples
