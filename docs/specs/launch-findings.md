@@ -48,7 +48,59 @@ prevent a double charge that cannot occur. Narrowed with its own failing test
 first (`UNBILLABLE_STATUSES`); it still counts as live for *cancellation*,
 where tearing down a dangling attempt is free.
 
+**Pre-merge review (2026-08-01).** A `/security-review` returned **zero
+findings** (Brakeman 0 warnings), clearing the new raw-SQL advisory lock, the
+sync endpoint's mass-assignment surface, view escaping and the narrowed webhook
+rescue. A cross-batch `/code-review` — the only pass to look at the six
+independently-built batches *against each other* — found three real defects that
+no single-batch review could see, all fixed before merge:
+
+- **Blocker.** `User::Downgrade#resolve_choice!` made no Stripe call, on the
+  strength of a comment claiming the subscription was "already cancelled". True
+  for a portal cancel, false for a **`past_due`** one: the plan drops to Free and
+  the choose-N lock opens while Stripe keeps dunning. The picker promised
+  cancellation, and it is that user's only in-app route (the billing page hides
+  Portal and Downgrade once `plan == free`), so a dunning retry days later would
+  bill them for Pro with monitors suspended. Now cancels first, with a test
+  asserting the Stripe `DELETE`.
+- **Major.** Lock-order inversion: `resolve_choice!` took monitor rows before the
+  user row, while the gem sync's cap serialisation and the webhook's restore both
+  take user→monitor. A concurrent sync or re-upgrade could deadlock into a 500.
+  Now `@user.with_lock` is the outermost lock, with the Stripe call outside it.
+- **Major.** F2's nil-remembered rule permanently refuses a `recurring.yml`
+  change that was in flight when the migration deployed — not "until the next
+  sync" as the migration comment claimed. Reproduced, then pinned by a test and
+  documented honestly at both sites. **Owner decision:** the first sync cannot
+  distinguish "user overrode" from "schedule changed"; we resolve it toward never
+  overwriting the user, at the cost of a stale cadence on pre-existing monitors.
+  Reversible (write on the first nil-remembered sync instead) — no such monitors
+  exist in production today, so it can be decided deliberately before launch.
+
+Review also flagged, and fixed: the `incomplete` relaxation reopened a narrower
+double-billing window (Stripe emails the customer a link back to the abandoned
+invoice for ~23h), so checkout now cancels the dangling attempt first.
+
 Follow-ups raised during review (not yet findings, no owner):
+- `Notifications::Dispatch`'s after-commit enqueue trades a broad alert-drop for
+  a narrow one: if `deliver_later` raises after the COMMIT, the ledger row is
+  already committed and Stripe's retry finds the event claimed. Belongs with
+  M18's reconciliation-sweep decision.
+- `broadcast_status_update` still enqueues inside the enclosing transaction on
+  the webhook/choose-N paths (F10 fixed only the mailer dispatch). Impact is a
+  stale badge or an orphan job, not a lost alert.
+- `Project::MonitorSync#persist_update` recomputes `next_due_at` from an
+  in-memory `last_ping_at` without a row lock, so a ping landing mid-sync can be
+  overwritten onto the pre-ping cadence. Same shape in `MonitorsController#update`.
+- `live_today_stat` is unmemoized, costing one extra incidents query per monitor
+  detail / API detail render.
+- The new grace-banner and downgrade-page states ship without a browser-driven
+  system test (covered by integration + request tests only) — a `CLAUDE.md`
+  deviation worth closing.
+- `Signup#create_user` runs bcrypt inside the global advisory lock, serialising
+  signups by ~250ms; build the `User` before taking the lock.
+- The `status_before_suspension` migration has no backfill, so monitors already
+  suspended at deploy time still come back un-paused on re-upgrade (F12 for the
+  migration cohort only).
 - `release_downgrade_lock_if_within_cap!` is still only reached on a billing
   page load — wiring it into monitor destroy needs a file batch C didn't own.
 - `docs/integrating.md` still says "Settings → API keys" (same drift M15 fixed
