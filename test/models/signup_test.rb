@@ -129,4 +129,101 @@ class SignupTest < ActiveSupport::TestCase
       assert result.persisted?
     end
   end
+
+  # --- M1: the cap check-and-create must not race ---------------------------
+  #
+  # A true two-request race can't be staged here: the suite runs inside
+  # transactional fixtures on a single pinned connection, so two committing
+  # signups aren't expressible. These three tests pin the property that makes the
+  # race impossible instead — (a) the capacity COUNT and the INSERT both happen
+  # *after* the lock is taken, so the window between them can't be entered twice;
+  # (b) the lock genuinely excludes a second database connection while that
+  # decision is being made (probed from a real second connection); and (c) with
+  # the cap off there is no window to guard, so no lock is taken at all.
+
+  test "the create path takes the capacity lock before it counts accounts and inserts the user" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
+      statements = capture_sql do
+        Signup.new(email: "locked@example.com", password: "password1234").run
+      end
+
+      lock   = index_of(statements, /pg_advisory_xact_lock/)
+      count  = index_of(statements, /COUNT\(\*\).+"users"/i)
+      insert = index_of(statements, /INSERT INTO "users"/)
+
+      assert lock, "expected the signup to take an advisory lock"
+      assert count, "expected the signup to count accounts against the cap"
+      assert insert, "expected the signup to insert the user"
+      assert lock < count, "the cap COUNT must run under the lock, not before it"
+      assert lock < insert, "the INSERT must run under the lock, not before it"
+    end
+  end
+
+  test "the capacity lock excludes a second connection while capacity is being decided" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
+      taken_elsewhere = nil
+
+      while_deciding_capacity(-> { taken_elsewhere = try_capacity_lock_on_another_connection }) do
+        Signup.new(email: "excluded@example.com", password: "password1234").run
+      end
+
+      assert_equal false, taken_elsewhere,
+        "a second connection must not be able to enter the check-then-create window"
+    end
+  end
+
+  test "with the signup cap OFF there is no window to guard, so no lock is taken" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, 0) do
+      statements = capture_sql do
+        Signup.new(email: "unlocked@example.com", password: "password1234").run
+      end
+
+      assert_nil index_of(statements, /pg_advisory_xact_lock/),
+        "an uncapped instance must not pay for the signup lock"
+    end
+  end
+
+  private
+    def capture_sql
+      statements = []
+      subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|
+        statements << payload[:sql]
+      end
+      yield
+      statements
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber)
+    end
+
+    def index_of(statements, pattern)
+      statements.index { |sql| sql.match?(pattern) }
+    end
+
+    # Run `probe` at the moment Signup consults the cap — i.e. inside the window
+    # the lock is supposed to close.
+    def while_deciding_capacity(probe)
+      original = Signup.method(:at_capacity?)
+      Signup.define_singleton_method(:at_capacity?) do
+        probe.call
+        original.call
+      end
+      yield
+    ensure
+      Signup.define_singleton_method(:at_capacity?, original)
+    end
+
+    # Try to take the signup lock from a genuinely separate database connection
+    # (the pooled one is pinned to this transactional test, so it would re-enter
+    # its own lock). Non-blocking try-lock, rolled back immediately: it writes
+    # nothing and can never deadlock the suite.
+    def try_capacity_lock_on_another_connection
+      config = ActiveRecord::Base.connection_db_config.configuration_hash
+      conn = PG.connect(dbname: config[:database], host: config[:host],
+                        port: config[:port], user: config[:username], password: config[:password])
+      conn.exec("BEGIN")
+      conn.exec("SELECT pg_try_advisory_xact_lock(#{Signup::CAPACITY_LOCK_KEY})").getvalue(0, 0) == "t"
+    ensure
+      conn&.exec("ROLLBACK")
+      conn&.close
+    end
 end

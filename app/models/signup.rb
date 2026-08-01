@@ -16,6 +16,12 @@
 class Signup
   attr_reader :record
 
+  # Key for the Postgres advisory lock that serialises the cap check-and-create
+  # (see #run). Arbitrary but stable, and the only advisory lock the app takes —
+  # Postgres keeps one global int8 space for them, so a second use must pick a
+  # different number.
+  CAPACITY_LOCK_KEY = 8_474_101
+
   # Whether new sign-ups are currently gated to the waitlist. The controller asks
   # this to decide which mode of the sign-up screen to render. With no signup cap
   # configured (issue #16) sign-ups are always open and there is no waitlist.
@@ -36,10 +42,37 @@ class Signup
   #   - a persisted WaitlistSignup — when at/over the cap.
   # The controller branches on the class.
   def run
-    self.class.at_capacity? ? join_waitlist : create_user
+    # No cap configured (issue #16, the self-host default): sign-ups are always
+    # open, so there is no window to guard and no lock to pay for.
+    return create_user unless Stablemate.signup_cap_enabled?
+
+    # Serialise the whole check-then-create window. Without it two requests racing
+    # for the last slot both read User.count < cap and both insert, taking the
+    # account count past the cap — the same TOCTOU MonitorsController#create closes
+    # with current_user.with_lock (WU-3). There is no row to lock FOR UPDATE here
+    # (the cap is a global COUNT, and the row being created doesn't exist yet), so
+    # we take a transaction-scoped Postgres advisory lock instead: no extra table,
+    # no gem, released automatically on COMMIT/ROLLBACK, and free when uncontended.
+    # The capacity re-check therefore runs inside the lock, against committed state.
+    user = with_capacity_lock { create_user unless self.class.at_capacity? }
+
+    # nil = at capacity. The waitlist branch deliberately runs OUTSIDE the lock:
+    # it is already idempotent through its own unique index (a duplicate is a
+    # friendly no-op) and holding the global signup lock across it would serialise
+    # every waitlist join for nothing.
+    user || join_waitlist
   end
 
   private
+    def with_capacity_lock(&block)
+      User.transaction do
+        User.with_connection do |connection|
+          connection.execute(User.sanitize_sql_array([ "SELECT pg_advisory_xact_lock(?)", CAPACITY_LOCK_KEY ]))
+        end
+        block.call
+      end
+    end
+
     def create_user
       user = User.new(
         email_address: @email,
