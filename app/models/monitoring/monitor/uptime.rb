@@ -31,6 +31,12 @@ module Monitoring
                        :ping_events
                      )
                      .where("rn <= ?", MINI_TICKS)
+                     # The rank exists to order the ticks, but SQL guarantees no
+                     # row order for the outer SELECT — the subquery's ordering is
+                     # an artifact of today's plan, not a contract. Order by it
+                     # explicitly so each monitor's ticks stay newest→oldest (what
+                     # mini_ticks reverses into the sparkline) under any plan.
+                     .order(:monitor_id, :rn)
 
           ranked.each_with_object({}) do |row, acc|
             (acc[row.monitor_id] ||= []) << row.kind

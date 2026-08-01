@@ -215,6 +215,37 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_equal [ :down, :failure ], kinds.first(2)
   end
 
+  # M13 — mini_ticks_for ranks rows inside a window-function subquery, and the
+  # outer SELECT's row order is not guaranteed to survive that under a different
+  # plan. Newest-first per monitor is the contract mini_ticks reverses into the
+  # sparkline, so pin it here rather than trust the planner.
+  test "mini_ticks_for returns each monitor's kinds newest first" do
+    other = @project.monitors.create!(
+      name: "Second sparkline", expected_interval_seconds: 3600, grace_period_seconds: 300, status: "up"
+    )
+
+    # Written in a deliberately jumbled order, and interleaved between the two
+    # monitors, so nothing but an explicit ordering can hand them back right.
+    [
+      [ other,    2, "failure" ],
+      [ @monitor, 3, "success" ],
+      [ other,    1, "failure" ],
+      [ @monitor, 1, "success" ],
+      [ other,    3, "success" ],
+      [ @monitor, 4, "failure" ],
+      [ @monitor, 2, "failure" ]
+    ].each do |monitor, minutes_ago, kind|
+      monitor.ping_events.create!(received_at: minutes_ago.minutes.ago, kind:)
+    end
+
+    ticks = Monitoring::Monitor.mini_ticks_for([ @monitor.id, other.id ])
+
+    assert_equal %w[success failure success failure], ticks[@monitor.id]
+    assert_equal %w[failure failure success], ticks[other.id]
+    # …and the sparkline the dashboard draws from them runs oldest → newest.
+    assert_equal %w[down up down up], @monitor.mini_ticks(kinds: ticks[@monitor.id])
+  end
+
   # MiniTicks helper: last 16 ping events mapped to up/down ticks.
   test "mini_ticks maps the last 16 ping events to up and down ticks" do
     18.times do |i|
