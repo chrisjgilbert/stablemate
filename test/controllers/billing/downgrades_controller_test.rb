@@ -201,6 +201,58 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # M4 — a user who deletes monitors mid-grace lands here with the lock already
+  # released (BaseController) and nothing left to do. The old confirm copy promised
+  # to cancel a Pro subscription that was cancelled days ago, and offered a button
+  # whose success notice claimed monitors had been suspended.
+  test "an account already on Free is told there is nothing to downgrade" do
+    with_billing_enabled do
+      build_monitors(FREE - 2)
+      @user.update!(plan: "free") # the involuntary drop already happened
+      sign_in @user
+
+      get new_billing_downgrade_path
+
+      assert_response :ok
+      assert_no_match(/subscription will be cancelled/, response.body)
+      assert_match "already on the Free plan", response.body
+      assert_select "[data-testid='confirm-downgrade']", false
+    end
+  end
+
+  # The involuntary picker is not a downgrade — the plan has already dropped and
+  # the subscription is already gone; all that's left is picking which N stay.
+  test "the involuntary picker does not promise to cancel a subscription" do
+    with_billing_enabled do
+      build_monitors(FREE + 2)
+      @user.sync_plan_from_subscription! # ⇒ free + choose-N lock
+      assert @user.reload.must_choose_downgrade?
+      sign_in @user
+
+      get new_billing_downgrade_path
+
+      assert_response :ok
+      assert_no_match(/subscription will be cancelled/, response.body)
+      assert_select "h1", text: "Choose monitors to keep"
+    end
+  end
+
+  # …whereas a real Pro user leaving Pro is told exactly what happens to their
+  # subscription.
+  test "a voluntary over-cap downgrade says the subscription will be cancelled" do
+    with_billing_enabled do
+      build_monitors(FREE + 2)
+      give_active_pro_subscription!
+      sign_in @user
+
+      get new_billing_downgrade_path
+
+      assert_response :ok
+      assert_match "subscription will be cancelled", response.body
+      assert_select "h1", text: "Downgrade to Free"
+    end
+  end
+
   test "downgrade is an opaque 404 when billing is disabled" do
     with_billing_disabled do
       sign_in @user

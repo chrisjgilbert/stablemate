@@ -5,6 +5,9 @@ require "test_helper"
 # account owes a choose-N decision AND the hosted tier is live — a keyless
 # self-host never sees it.
 class DowngradeGraceBannerTest < ActionDispatch::IntegrationTest
+  ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze
+  FREE  = Stablemate::FREE_PLAN_MONITOR_LIMIT
+
   setup { @user = users(:alice) }
 
   def enter_grace!
@@ -12,13 +15,42 @@ class DowngradeGraceBannerTest < ActionDispatch::IntegrationTest
       downgrade_choice_deadline_at: 5.days.from_now)
   end
 
+  # Top the account up to `n` monitors that occupy a cap slot. Done as a Pro user,
+  # since that is the only way to get over the Free cap in the first place.
+  def monitors_totalling!(n)
+    @user.update!(plan: "pro")
+    project = @user.projects.first
+    (n - @user.monitors.counting_toward_cap.count).times { |i| project.monitors.create!(name: "Extra#{i}", **ATTRS) }
+  end
+
   test "the banner appears on the dashboard while a choice is owed" do
     with_billing_enabled do
+      monitors_totalling!(FREE + 1)
       enter_grace!
       sign_in @user
       get monitors_path
       assert_select "[data-testid='downgrade-grace-banner']"
       assert_select "[data-testid='grace-choose-link']"
+      assert_match "You have <strong>#{FREE + 1} monitors</strong>", response.body
+      assert_match "Pick the #{FREE} to keep active", response.body
+    end
+  end
+
+  # M4 — the lock is only released on a billing page load, so a user who deletes
+  # monitors mid-grace keeps the banner. It must at least stop lying: with 3
+  # monitors and a cap of 5 there is nothing over the cap and nothing to pick.
+  test "the banner stops asking for a choice once the account is within the cap" do
+    with_billing_enabled do
+      enter_grace! # alice's fixture monitors are well under the Free cap
+      assert_equal 0, @user.over_free_cap_by
+      sign_in @user
+      get monitors_path
+
+      assert_select "[data-testid='downgrade-grace-banner']"
+      assert_select "[data-testid='grace-choose-link']", false
+      assert_select "[data-testid='grace-review-link']"
+      assert_no_match(/Pick the #{FREE} to keep active/, response.body)
+      assert_match "nothing will be suspended", response.body
     end
   end
 

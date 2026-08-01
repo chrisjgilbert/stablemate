@@ -1,29 +1,62 @@
-<% content_for :title, @mode == :confirm ? "Downgrade to Free" : "Choose monitors to keep" %>
+<%#
+  Three shapes share this page (see the controller):
+    * leaving Pro over the cap  — the "pick exactly N" picker, subscription cancelled;
+    * leaving Pro within the cap — a plain confirm, subscription cancelled;
+    * already on Free           — the involuntary choose-N lock (nothing to cancel),
+      or, once the account is back within the cap, nothing to do at all (M4).
+  @leaving_pro is what keeps the copy honest about the subscription.
+%>
+<% heading =
+     if @leaving_pro then "Downgrade to Free"
+     elsif @mode == :choose then "Choose monitors to keep"
+     else "You're already on the Free plan"
+     end %>
+<% content_for :title, heading %>
 
 <div class="mb-6">
-  <h1 class="font-display text-xl font-bold tracking-tight">Downgrade to Free</h1>
+  <h1 class="font-display text-xl font-bold tracking-tight"><%= heading %></h1>
   <% if @mode == :confirm %>
+    <% if @leaving_pro %>
+      <p class="mt-1 text-[13px] text-muted">
+        You're within the Free plan's <%= @keep_limit %>-monitor limit, so nothing will be suspended.
+        Your Pro subscription will be cancelled.
+      </p>
+    <% else %>
+      <p class="mt-1 text-[13px] text-muted">
+        Your plan is already Free and your monitors are within the <%= @keep_limit %>-monitor
+        limit, so there's nothing to downgrade and nothing to choose.
+      </p>
+    <% end %>
+  <% elsif @leaving_pro %>
     <p class="mt-1 text-[13px] text-muted">
-      You're within the Free plan's <%= @keep_limit %>-monitor limit, so nothing will be suspended.
+      Free keeps <%= @keep_limit %> active monitors. Select exactly <%= @keep_limit %> to keep —
+      the rest will be <strong>suspended</strong> (kept, but not monitored) and can be reactivated if you upgrade again.
       Your Pro subscription will be cancelled.
     </p>
   <% else %>
     <p class="mt-1 text-[13px] text-muted">
-      Free keeps <%= @keep_limit %> active monitors. Select exactly <%= @keep_limit %> to keep —
-      the rest will be <strong>suspended</strong> (kept, but not monitored) and can be reactivated if you upgrade again.
+      Your plan already dropped to Free, but nothing has been suspended yet.
+      Select exactly <%= @keep_limit %> to keep active — the rest will be
+      <strong>suspended</strong> (kept, but not monitored) and can be reactivated if you upgrade again.
     </p>
   <% end %>
 </div>
 
 <% if @mode == :confirm %>
-  <%= form_with url: billing_downgrade_path, method: :post do %>
-    <div class="flex items-center gap-3">
-      <button type="submit" data-testid="confirm-downgrade"
-              class="h-9 px-4 inline-flex items-center rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover">
-        Downgrade to Free
-      </button>
-      <%= link_to "Cancel", billing_subscription_path, class: "text-[13px] text-secondary hover:underline" %>
-    </div>
+  <% if @leaving_pro %>
+    <%= form_with url: billing_downgrade_path, method: :post do %>
+      <div class="flex items-center gap-3">
+        <button type="submit" data-testid="confirm-downgrade"
+                class="h-9 px-4 inline-flex items-center rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover">
+          Downgrade to Free
+        </button>
+        <%= link_to "Cancel", billing_subscription_path, class: "text-[13px] text-secondary hover:underline" %>
+      </div>
+    <% end %>
+  <% else %>
+    <%= link_to "Back to billing", billing_subscription_path,
+          class: "h-9 px-4 inline-flex items-center rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover",
+          data: { testid: "back-to-billing" } %>
   <% end %>
 <% else %>
   <%= form_with url: billing_downgrade_path, method: :post,
