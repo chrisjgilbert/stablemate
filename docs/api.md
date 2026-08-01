@@ -64,14 +64,37 @@ Used by the gem. Authenticate with an API key:
 Authorization: Bearer sm_live_xxxxxxxxxxxxxxxxxxxx
 ```
 
-Generate a key in **Settings → API keys** (shown once). All endpoints are
-**tenant-scoped** to the key's owner. Auth failures and cross-tenant access are
-opaque:
+Generate a key on a **project's page** (Projects → the project → *Generate key*).
+The raw key is shown exactly once, at creation; only its digest and last 4 chars
+are stored, so a lost key is replaced, never recovered. Revoke takes effect
+immediately.
+
+A key belongs to **one project** and *is* that app's identity, so every endpoint
+is **project-scoped**: it sees only that project's monitors. Another project of
+the same account is as invisible as another account's — an id from it is the same
+opaque `404`. (The monitor cap itself stays per-account, across all your
+projects.) Auth failures and cross-project access are opaque:
 
 | Status | When |
 |---|---|
 | `401 {"error":"unauthorized"}` | Missing / malformed / invalid / revoked key. |
 | `404 {"error":"not_found"}` | Unknown **or foreign** monitor id (no existence leak). |
+| `429 {"error":"rate_limited"}` | Over a rate limit (see below). |
+
+### Rate limiting
+
+Two layers, both generous enough never to throttle a healthy gem cadence, and
+both answering `429 {"error":"rate_limited"}`:
+
+- **Per key:** 120 requests / minute for one bearer token.
+- **Per IP:** 300 requests / minute for one client, whatever token it presents.
+  This is the layer that bounds enumeration, since the token is caller-supplied;
+  it applies before authentication, so `401`s count towards it too.
+
+Unlike the ping endpoint, the `429` here is plain: every auth failure already
+answers with an identical `401` whether or not the token exists, so a throttle
+response gives away nothing about a token — and a client sharing an egress IP
+needs an honest `429` to back off on.
 
 ### List monitors
 
@@ -110,9 +133,15 @@ Returns the list fields plus `source`, `expected_interval_seconds`,
 POST /api/v1/monitors/sync
 ```
 
-Idempotent upsert keyed on `(owner, registration_key)`. Monitors created this way
-get `source: "gem"`. Respects the per-account monitor cap: entries over the cap are
-returned in `skipped`, not an error.
+Idempotent upsert keyed on `(project, registration_key)` — the project is the one
+the key belongs to, so the same `registration_key` in two of your projects is two
+separate monitors. Monitors created this way get `source: "gem"`; an entry
+matching an existing monitor updates its name/interval/grace instead.
+
+The call is always a **graceful partial**: a bad or over-cap entry never fails the
+request or half-applies the payload. Entries the sync could not register come back
+under `skipped`, and monitors absent from the payload are left alone (nothing is
+auto-deleted).
 
 Request:
 
@@ -139,9 +168,24 @@ Response:
       "ping_url": "https://stablemate.dev/ping/<token>",
       "status": "pending" }
   ],
-  "skipped": []
+  "skipped": [
+    { "registration_key": "nightly_report", "reason": "limit_reached" }
+  ]
 }
 ```
+
+`monitors` lists every entry that was registered (created **or** updated).
+`skipped` lists the rest, one object per entry, each with the entry's
+`registration_key` and a `reason`:
+
+| `reason` | Meaning |
+|---|---|
+| `limit_reached` | Your account is at its monitor cap and this would have been a *new* monitor. Updates to monitors that already exist are always applied, even at the cap. |
+| `invalid` | The entry itself was rejected — its `expected_interval_seconds` / `grace_period_seconds` are missing or out of range, or the monitor failed to save. |
+
+Treat the vocabulary as open: log an unrecognised `reason` rather than matching
+exhaustively. An entry with no `registration_key` is ignored entirely — there is
+nothing to report it under — so always send one.
 
 ### Rotate a ping token
 
