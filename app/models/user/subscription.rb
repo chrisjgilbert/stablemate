@@ -144,8 +144,18 @@ class User
     # re-upgrade (or a choice the user just committed) landing mid-batch leaves us
     # holding a stale free+awaiting copy. over_free_cap_by is plan-blind, so acting
     # on it would suspend a *paying* Pro user's monitors until the next webhook (F13).
+    #
+    # The account may also have been CLOSED since the batch was loaded
+    # (User::Closure), in which case the reload raises. There is nothing left to
+    # settle — the monitors went with it — so skip the record rather than let it
+    # abandon everyone after it in the batch.
     def enforce_downgrade_fallback!
-      reload
+      begin
+        reload
+      rescue ActiveRecord::RecordNotFound
+        return
+      end
+
       return unless must_choose_downgrade?
 
       Downgrade.new(self).enforce_free_cap!
