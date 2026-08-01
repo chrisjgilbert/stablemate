@@ -42,6 +42,12 @@ The product is done and healthy:
   `STABLEMATE_SIGNUP_ACCOUNT_CAP: 1` in `config/deploy.yml` keeps the waitlist
   on, and every page wears a "Coming soon" badge.
 
+> **Addendum (2026-08-01):** a full pre-launch verification campaign (six
+> adversarial subsystem reviews + live browser verification) confirmed 13
+> major edge-case bugs and 17 minors against this baseline. Their fixes are a
+> **prerequisite workstream ahead of WS-G**, tracked with evidence and status
+> in [`launch-findings.md`](launch-findings.md).
+
 What's left is seven workstreams, four of them code:
 
 | WS | What | Kind | Launch-blocking? |
