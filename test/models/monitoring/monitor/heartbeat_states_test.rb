@@ -64,6 +64,52 @@ class Monitoring::Monitor::HeartbeatStatesTest < ActiveSupport::TestCase
     refute @up.next_check_upcoming?
   end
 
+  # F7 — next_due_at used to be written only by register_contact, so an interval
+  # edit left the OLD cadence driving detection: loosening hourly -> daily kept
+  # the hourly due time and guaranteed a false `down` about an hour later, while
+  # a grace edit applied instantly (the scope reads the live column). The
+  # asymmetry is the trap. Recomputing on the model means every write path — the
+  # edit form, the gem sync, the console — gets it.
+  test "loosening the interval pushes next_due_at out from the last ping" do
+    @up.update!(expected_interval_seconds: 1.day.to_i)
+
+    assert_equal @up.last_ping_at + 1.day, @up.reload.next_due_at
+    refute_includes Monitoring::Monitor.overdue, @up
+  end
+
+  test "tightening the interval pulls next_due_at in from the last ping" do
+    @up.update!(expected_interval_seconds: 60)
+
+    assert_equal @up.last_ping_at + 60.seconds, @up.reload.next_due_at
+  end
+
+  # A never-pinged monitor has nothing to measure from: next_due_at stays nil
+  # (register_contact writes the first one) rather than being invented from now.
+  test "an interval edit leaves next_due_at nil when the monitor has never pinged" do
+    pending = monitors(:pending)
+    pending.update!(expected_interval_seconds: 60)
+
+    assert_nil pending.reload.next_due_at
+  end
+
+  # Recomputing for a not-monitored monitor is harmless — `overdue` only scans
+  # `up` — and keeps the column honest for when it resumes.
+  test "an interval edit still recomputes next_due_at on a paused monitor" do
+    @up.pause!
+    @up.update!(expected_interval_seconds: 60)
+
+    assert_equal @up.last_ping_at + 60.seconds, @up.reload.next_due_at
+  end
+
+  # Only the interval feeds next_due_at; grace is added on read (due_with_grace_at
+  # / the overdue scope), so editing it must not disturb the stored due time.
+  test "editing anything other than the interval leaves next_due_at alone" do
+    original = @up.next_due_at
+    @up.update!(grace_period_seconds: 60, name: "Renamed")
+
+    assert_equal original, @up.reload.next_due_at
+  end
+
   test "grace_period_configured? reflects whether a grace period is set" do
     @up.grace_period_seconds = 300
     assert @up.grace_period_configured?
