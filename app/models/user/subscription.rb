@@ -12,6 +12,13 @@ class User
 
     PRO_PRODUCT = "pro".freeze
 
+    # Pay::Subscription statuses that mean the subscription is over for good.
+    # Everything else Stripe can still bill — `past_due` and `unpaid` are mid-
+    # dunning and a retry may yet succeed, `incomplete` is awaiting a first
+    # payment, `paused` resumes, `trialing`/`active` are obviously live. Only
+    # `canceled` and `incomplete_expired` are terminal.
+    TERMINAL_STATUSES = %w[canceled incomplete_expired].freeze
+
     included do
       # Make the User a Pay billable: pay_customers / subscriptions / charges.
       pay_customer
@@ -38,9 +45,21 @@ class User
     end
 
     # Does Stripe currently consider this user actively subscribed to Pro? Reads
-    # Pay's local mirror (kept current by webhooks) — not the client.
+    # Pay's local mirror (kept current by webhooks) — not the client. Deliberately
+    # narrow (Pay's `active` scope): a past_due account drops to Free by design,
+    # which is why this must not be used to answer "can they subscribe again?" —
+    # see #live_pro_subscription?.
     def subscribed_to_pro?
       payment_processor&.subscribed?(name: PRO_PRODUCT) || false
+    end
+
+    # Does a Pro subscription Stripe could still bill exist? True for every
+    # non-terminal status, so a `past_due` subscription mid-dunning still counts.
+    # This — not subscribed_to_pro? — is the question the Upgrade path must ask:
+    # a dunning retry on the old subscription can succeed days later, so allowing
+    # a second Checkout means two live Pro subscriptions and double billing (F5).
+    def live_pro_subscription?
+      live_pro_subscriptions.exists?
     end
 
     # Recompute `plan` from the Pay subscription mirror and persist it. THE ONLY
@@ -129,11 +148,14 @@ class User
       clear_downgrade_choice!
     end
 
-    # Cancel the user's active Pro subscription at Stripe (e.g. on downgrade). The
+    # Cancel the user's live Pro subscription(s) at Stripe (e.g. on downgrade). The
     # plan flip is left to the resulting webhook (the only writer of plan), so the
     # client and server can never drift. Pay coupling lives here, not in callers.
+    # Every non-terminal subscription is cancelled, not just the `active` one: a
+    # past_due subscription the user downgrades away from must actually stop, or
+    # Stripe keeps dunning a customer we've already suspended monitors for (F5).
     def cancel_pro_subscription!
-      pro_subscription&.cancel_now!
+      live_pro_subscriptions.each(&:cancel_now!)
     end
 
     # Reactivate plan-suspended monitors (oldest first) up to the available Pro
@@ -157,10 +179,15 @@ class User
 
     private
 
-    # The user's active Pro subscription per Pay's mirror (active scope, not just
-    # newest-created), so we never act on a stale/canceled row.
-    def pro_subscription
-      payment_processor&.subscriptions&.active&.find_by(name: PRO_PRODUCT)
+    # The user's still-billable Pro subscriptions per Pay's mirror. Pay's own
+    # `active` scope is too narrow here — it excludes past_due/unpaid/incomplete,
+    # which Stripe can still turn back into a charge — so we exclude only the
+    # terminal statuses. Normally 0 or 1 rows; a relation because a pre-fix account
+    # could have collected two.
+    def live_pro_subscriptions
+      return Pay::Subscription.none unless payment_processor
+
+      payment_processor.subscriptions.for_name(PRO_PRODUCT).where.not(status: TERMINAL_STATUSES)
     end
   end
 end

@@ -21,12 +21,12 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
 
   # Give the user a real active Pro subscription mirror so the downgrade actually
   # reaches Stripe to cancel (cancel_now!) — exercised end-to-end against a stub.
-  def give_active_pro_subscription!(subscription_id: "sub_dg_123")
+  def give_active_pro_subscription!(subscription_id: "sub_dg_123", status: "active")
     customer = @user.set_payment_processor(:stripe)
     customer.update!(processor_id: "cus_dg_123")
     customer.subscriptions.create!(
       name: "pro", processor_id: subscription_id,
-      processor_plan: "price_pro", status: "active", quantity: 1
+      processor_plan: "price_pro", status: status, quantity: 1
     )
     subscription_id
   end
@@ -68,6 +68,25 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
       assert_requested :delete, %r{https://api\.stripe\.com/v1/subscriptions/#{sub_id}}
       assert_equal FREE, @user.monitors.counting_toward_cap.count
       assert_equal 2, @user.monitors.where(status: "suspended").count
+    end
+  end
+
+  # F5 — a card failure leaves the subscription `past_due` and the plan already on
+  # Free. The user downgrading in-app to stop the dunning must actually reach
+  # Stripe: with the old active-only lookup, cancel_pro_subscription! was a silent
+  # no-op and Stripe kept retrying the invoice.
+  test "the downgrade cancels a past_due subscription at Stripe" do
+    with_billing_enabled do
+      build_monitors(FREE - 2)
+      @user.update!(plan: "free") # a failed payment already dropped the plan
+      sub_id = give_active_pro_subscription!(status: "past_due")
+      stub_stripe_subscription_cancel(sub_id)
+      sign_in @user
+
+      post billing_downgrade_path
+
+      assert_redirected_to billing_subscription_path
+      assert_requested :delete, %r{https://api\.stripe\.com/v1/subscriptions/#{sub_id}}
     end
   end
 

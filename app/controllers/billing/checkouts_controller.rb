@@ -7,9 +7,12 @@ module Billing
     def create
       # Guard against a second subscription: the Upgrade button is hidden for Pro
       # users, but this action is directly reachable. Without this, an already-Pro
-      # user could open a second Checkout and be billed twice (WU-4). subscribed_to_pro?
-      # reads Pay's webhook-kept mirror, so a stale client can't spoof it.
-      return redirect_back_or_to(billing_subscription_path, alert: "You're already on Pro.") if current_user.subscribed_to_pro?
+      # user could open a second Checkout and be billed twice (WU-4).
+      # live_pro_subscription? reads Pay's webhook-kept mirror (so a stale client
+      # can't spoof it) and counts every non-terminal subscription — including a
+      # past_due one, whose plan has already dropped to Free but whose dunning retry
+      # can still succeed days later (F5).
+      return redirect_back_or_to(billing_subscription_path, alert: "You're already on Pro.") if current_user.live_pro_subscription?
 
       price_id = Stablemate.pro_price_id
       return redirect_back_or_to(billing_subscription_path, alert: "Pro plan isn't configured.") if price_id.blank?
