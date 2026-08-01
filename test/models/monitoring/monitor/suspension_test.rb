@@ -59,6 +59,81 @@ class Monitoring::Monitor::SuspensionTest < ActiveSupport::TestCase
     refute monitor.incidents.open.exists?
   end
 
+  # F12 — a downgrade suspends paused monitors too (they count toward the cap,
+  # locked #8), but suspension kept no memory of that, so the re-upgrade's
+  # reactivate_heartbeat! — which only knows pending/up/down — brought a
+  # deliberately-silenced monitor back live. Round-tripping the plan must leave
+  # the user's own pause exactly where they left it.
+  test "reactivate! returns a monitor that was paused before suspension to paused" do
+    monitor = monitors(:up)
+    monitor.pause!
+    monitor.suspend!
+
+    monitor.reactivate!
+
+    assert monitor.paused?
+  end
+
+  # The sharp edge: the paused monitor is long overdue, so the naive restore
+  # flipped it to `up` and immediately flagged it down — an outage email for a
+  # monitor the user had switched off, about a window nobody was watching.
+  test "reactivate! opens no incident and sends no alert for a previously-paused monitor" do
+    monitor = monitors(:up)
+    monitor.pause!
+    monitor.suspend!
+
+    travel_to monitor.due_with_grace_at + 1.day do
+      assert_no_difference -> { monitor.incidents.count } do
+        assert_enqueued_emails 0 do
+          monitor.reactivate!
+        end
+      end
+    end
+
+    assert monitor.paused?
+  end
+
+  # A paused monitor restored to paused still occupies a cap slot (locked #8),
+  # exactly as it did before the downgrade — restoring must not quietly buy the
+  # user a free slot.
+  test "a monitor restored to paused still counts toward the cap" do
+    monitor = monitors(:up)
+    monitor.pause!
+    monitor.suspend!
+    monitor.reactivate!
+
+    assert_includes monitor.project.user.monitors.counting_toward_cap, monitor
+  end
+
+  # Re-suspending an already-suspended monitor must not overwrite the memory with
+  # "suspended" — that would lose the pause on the next re-upgrade.
+  test "suspend! is idempotent about the status it remembers" do
+    monitor = monitors(:up)
+    monitor.pause!
+    monitor.suspend!
+    monitor.suspend!
+
+    monitor.reactivate!
+
+    assert monitor.paused?
+  end
+
+  # The memory is per-suspension: once restored it is cleared, so a later
+  # suspension of a live monitor restores it live rather than to a stale pause.
+  test "the remembered status does not survive into the next suspension" do
+    monitor = monitors(:up)
+    monitor.pause!
+    monitor.suspend!
+    monitor.reactivate!
+    monitor.resume!
+    assert monitor.up?
+
+    monitor.suspend!
+    monitor.reactivate!
+
+    assert monitor.up?
+  end
+
   # F11 — suspend! had pause!'s bug: the open-incident SELECT ran unlocked, so a
   # detection sweep landing between that read and the status flip left the monitor
   # `suspended` WITH an open incident (and a down email for a monitor the plan
