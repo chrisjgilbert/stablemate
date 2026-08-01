@@ -10,7 +10,7 @@ class RollupUptimeJob < ApplicationJob
   queue_as :default
 
   def perform
-    Monitoring::Monitor.find_each do |monitor|
+    each_record(Monitoring::Monitor.all) do |monitor|
       monitor.uptime_days_to_roll.each { |day| monitor.roll_up_uptime(day) }
     end
   end

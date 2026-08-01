@@ -7,6 +7,6 @@ class EnforceOverdueDowngradesJob < ApplicationJob
   queue_as :default
 
   def perform
-    User.downgrade_grace_expired.find_each(&:enforce_downgrade_fallback!)
+    each_record(User.downgrade_grace_expired, &:enforce_downgrade_fallback!)
   end
 end

@@ -6,6 +6,6 @@ class DetectMissedPingsJob < ApplicationJob
   queue_as :default
 
   def perform
-    Monitoring::Monitor.overdue.find_each(&:flag_missed!)
+    each_record(Monitoring::Monitor.overdue, &:flag_missed!)
   end
 end
