@@ -71,10 +71,32 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
         give_pro_subscription!(status: "incomplete")
         sign_in @user
 
+        stub_stripe_subscription_cancel("sub_test_123")
         url = stub_stripe_checkout_session
         post billing_checkout_path
 
         assert_redirected_to url
+      end
+    end
+  end
+
+  # …but letting them retry must not leave the abandoned attempt alive behind them.
+  # Stripe gives the customer ~23h to authenticate that first invoice and emails
+  # them a link straight to it, so "retry checkout, then complete the OLD invoice
+  # from the email" would end in two active Pro subscriptions — the double billing
+  # the guard exists to stop. Tear the dangling attempt down first; it has never
+  # been charged, so cancelling it costs the user nothing.
+  test "retrying checkout cancels the abandoned incomplete subscription first" do
+    with_billing_enabled do
+      Stablemate.stub_price_id_pro("price_pro_123") do
+        give_pro_subscription!(status: "incomplete")
+        sign_in @user
+
+        stub_stripe_subscription_cancel("sub_test_123")
+        stub_stripe_checkout_session
+        post billing_checkout_path
+
+        assert_requested :delete, %r{https://api\.stripe\.com/v1/subscriptions/sub_test_123}
       end
     end
   end

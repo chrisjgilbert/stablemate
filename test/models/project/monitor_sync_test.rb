@@ -377,6 +377,32 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     assert_equal 10_800, monitor.reload.expected_interval_seconds
   end
 
+  # The known limit of that rule, pinned so it can't drift unnoticed: a schedule
+  # change already IN FLIGHT when we started remembering is refused for as long as
+  # the payload keeps repeating it. On the first sync a divergence is equally
+  # consistent with "the user tightened this" and "the schedule changed", and we
+  # resolve it toward never overwriting a setting the user may have chosen — so
+  # this monitor keeps its old cadence until the schedule changes again.
+  test "a schedule change in flight when we start remembering waits for the next change" do
+    monitor = @project.monitors.create!(
+      registration_key: "legacy", name: "legacy", expected_interval_seconds: 3600,
+      grace_period_seconds: 300, source: "gem", status: "pending"
+    )
+    assert_nil monitor.last_synced_expected_interval_seconds
+
+    # The same, unchanged payload arriving repeatedly never lands.
+    3.times do
+      @project.sync_monitors(entries: [ entry("legacy", name: "legacy", interval: 7200, grace: 300) ])
+    end
+    assert_equal 3600, monitor.reload.expected_interval_seconds,
+      "an in-flight change is refused while the payload keeps repeating it"
+    assert_equal 7200, monitor.last_synced_expected_interval_seconds
+
+    # A genuinely NEW schedule change does land, which is how it recovers.
+    @project.sync_monitors(entries: [ entry("legacy", name: "legacy", interval: 1800, grace: 300) ])
+    assert_equal 1800, monitor.reload.expected_interval_seconds
+  end
+
   test "a newly created monitor remembers what the gem sent" do
     result = @project.sync_monitors(entries: [ entry("fresh", name: "Fresh", interval: 3600, grace: 300) ])
     monitor = result[:registered].first
