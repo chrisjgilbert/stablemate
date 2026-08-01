@@ -74,7 +74,7 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
         @user.update!(plan: "pro")
 
         # Cancel the mirror so subscribed_to_pro? becomes false.
-        @user.subscriptions.update_all(status: "canceled", ends_at: 1.minute.ago)
+        @user.pay_subscriptions.update_all(status: "canceled", ends_at: 1.minute.ago)
 
         post_event(type: "customer.subscription.deleted", customer: cus)
 
@@ -131,15 +131,18 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
     with_billing_enabled do
       without_pay_stripe_network do
         cus = make_pro!
-        subscription = @user.subscriptions.sole
+        subscription = @user.pay_subscriptions.sole
         # Pay's handler skips `incomplete` subscriptions; past_due is the real
         # dunning state, where it would mail the customer.
         subscription.update!(status: "past_due")
 
         assert_no_emails do
           assert_no_enqueued_emails do
+            # The invoice shape Stripe has sent since API version 2025-03-31: the
+            # subscription reference moved off the invoice and under
+            # `parent.subscription_details`, which is where Pay 11 reads it.
             post_event(type: "invoice.payment_failed", customer: cus,
-              object: { subscription: subscription.processor_id })
+              object: { parent: { subscription_details: { subscription: subscription.processor_id } } })
           end
         end
 

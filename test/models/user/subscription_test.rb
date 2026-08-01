@@ -51,7 +51,7 @@ class User::SubscriptionTest < ActiveSupport::TestCase
       give_active_pro!(status: "canceled")
       refute @user.reload.live_pro_subscription?
 
-      @user.subscriptions.update_all(status: "incomplete_expired")
+      @user.pay_subscriptions.update_all(status: "incomplete_expired")
       refute @user.reload.live_pro_subscription?
     end
   end
