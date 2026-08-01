@@ -9,14 +9,15 @@ module Billing
   # lands via the verified webhook (the only writer of plan).
   class DowngradesController < BaseController
     def new
-      @keep_limit = Stablemate::FREE_PLAN_MONITOR_LIMIT
-      @mode = downgrade_mode
-      @monitors = picker_monitors if @mode == :choose
+      load_downgrade
     end
 
     def create
-      # Capture the mode BEFORE committing — a successful resolve clears the lock.
+      # Capture the shape of the account BEFORE committing — a successful resolve
+      # clears the lock, and the cancel/suspends change every other answer too.
       choosing = current_user.must_choose_downgrade?
+      suspending = current_user.over_free_cap_by.positive?
+      leaving_pro = leaving_pro?
       result =
         if choosing
           current_user.resolve_downgrade_choice!(keep_ids: params[:keep_ids])
@@ -25,7 +26,8 @@ module Billing
         end
 
       if result.ok?
-        redirect_to billing_subscription_path, notice: success_notice(choosing), status: :see_other
+        redirect_to billing_subscription_path, status: :see_other,
+          notice: success_notice(choosing: choosing, suspending: suspending, leaving_pro: leaving_pro)
       else
         render_new(status: :unprocessable_entity,
           alert: "Choose exactly #{Stablemate::FREE_PLAN_MONITOR_LIMIT} monitors to keep active.")
@@ -41,6 +43,22 @@ module Billing
     end
 
     private
+      def load_downgrade
+        @keep_limit = Stablemate::FREE_PLAN_MONITOR_LIMIT
+        @mode = downgrade_mode
+        @leaving_pro = leaving_pro?
+        @monitors = picker_monitors if @mode == :choose
+      end
+
+      # Is there actually a Pro to leave? The involuntary path arrives here with
+      # the plan already on Free and the subscription already cancelled, so copy
+      # promising to cancel one is a lie (M4). Asks about the subscription as well
+      # as the plan because a past_due account reads Free while Stripe is still
+      # very much billing it (F5) — that one does need cancelling.
+      def leaving_pro?
+        current_user.pro? || current_user.live_pro_subscription?
+      end
+
       # Choose-N when the account owes an involuntary decision, or a voluntary
       # downgrade while still over the Free cap; otherwise a plain confirm (WU-5).
       def downgrade_mode
@@ -60,18 +78,19 @@ module Billing
         scope.includes(:project).order(:created_at).to_a
       end
 
-      def success_notice(choosing)
-        if choosing
-          "Monitors updated — the rest stay suspended."
-        else
-          "Downgrade scheduled. Unselected monitors were suspended."
-        end
+      # Say only what actually happened: an account already on Free had no
+      # subscription to cancel, and a within-cap downgrade suspended nothing.
+      def success_notice(choosing:, suspending:, leaving_pro:)
+        return "Monitors updated — the rest stay suspended." if choosing
+
+        [
+          leaving_pro ? "Downgrade scheduled." : "You're on the Free plan.",
+          ("Unselected monitors were suspended." if suspending)
+        ].compact.join(" ")
       end
 
       def render_new(status:, alert:)
-        @keep_limit = Stablemate::FREE_PLAN_MONITOR_LIMIT
-        @mode = downgrade_mode
-        @monitors = picker_monitors if @mode == :choose
+        load_downgrade
         flash.now[:alert] = alert
         render :new, status: status
       end
