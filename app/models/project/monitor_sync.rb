@@ -57,10 +57,7 @@ class Project
       @project.user.with_lock do
         @slots = @project.user.remaining_monitor_slots
 
-        Array(entries).each do |raw|
-          entry = Entry.from(raw)
-          next if entry.registration_key.blank?
-
+        unique_entries(entries).each do |entry|
           monitor = @project.monitors.find_by(registration_key: entry.registration_key)
 
           if monitor
@@ -83,6 +80,21 @@ class Project
     end
 
     private
+      # The payload sanitized into Entries, at most ONE per registration_key.
+      # registration_key is the upsert identity, so a payload that lists a key
+      # twice describes one monitor — processing it twice made the second pass
+      # find the row the first had just written and push the SAME monitor into
+      # `registered` again, so the gem saw one job as two (M7). The last
+      # occurrence wins, which is the value the row is left with either way.
+      # Blank keys are dropped: there is nothing to upsert them by.
+      def unique_entries(entries)
+        Array(entries)
+          .map { |raw| Entry.from(raw) }
+          .reject { |entry| entry.registration_key.blank? }
+          .index_by(&:registration_key)
+          .values
+      end
+
       # Slots remaining for NEW monitors this run. Seeded once from the user's live
       # count and decremented by persist_create on each successful creation; updates
       # to existing monitors never consume a slot.
