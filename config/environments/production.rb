@@ -60,8 +60,9 @@ Rails.application.configure do
   config.active_job.queue_adapter = :solid_queue
   config.solid_queue.connects_to = { database: { writing: :queue } }
 
-  # Don't blow up a request if SMTP hiccups; alerting is retried by the job layer.
-  config.action_mailer.raise_delivery_errors = false
+  # Mail goes out over SMTP. Whether a delivery is attempted, and whether a
+  # failed one is fatal, depends on SMTP actually being configured — see the
+  # smtp_settings block below, which sets perform_deliveries/raise_delivery_errors.
   config.action_mailer.delivery_method = :smtp
 
   # Host used by links generated in mailer templates and absolute URLs. Links must
@@ -129,9 +130,9 @@ Rails.application.configure do
   # Outgoing SMTP. A self-hoster wires this entirely from the environment (no
   # in-repo credentials needed). The managed Kamal instance keeps storing SMTP in
   # Rails credentials, so env takes precedence and credentials are the fallback —
-  # neither path regresses. A missing address simply means mail isn't sent
-  # (raise_delivery_errors is off); the install guide makes SMTP a required step
-  # for down-alerts to work.
+  # neither path regresses. A missing address means mail isn't sent at all (see
+  # the two regimes below); the install guide makes SMTP a required step for
+  # down-alerts to work.
   smtp_creds = Rails.application.credentials.smtp || {}
   smtp_address = ENV["SMTP_ADDRESS"].presence || smtp_creds[:address]
   smtp_username = ENV["SMTP_USERNAME"].presence || smtp_creds[:user_name]
@@ -152,6 +153,22 @@ Rails.application.configure do
     smtp[:authentication] = (ENV["SMTP_AUTHENTICATION"].presence || "plain").to_sym
   end
   config.action_mailer.smtp_settings = smtp
+
+  # Two deliberate regimes, keyed off whether SMTP is configured at all:
+  #
+  #   Configured   → deliver for real and let SMTP errors RAISE. The exception
+  #     fails the ActionMailer::MailDeliveryJob, which retries with backoff
+  #     (config/initializers/mail_delivery_retries.rb) and, if it still can't
+  #     send, leaves a failed job an operator can see. Swallowing the error here
+  #     would silently discard a down/recovered alert — i.e. the whole product —
+  #     while the Notification row still claimed it was delivered.
+  #   Not configured → don't attempt delivery at all, and don't raise. A
+  #     self-hoster who hasn't wired SMTP yet gets no alert emails, but no
+  #     perpetual failing-job storm either: there is nothing to retry against, so
+  #     retrying would only burn the queue. (Alerts are lost in this state by
+  #     design — the install guide makes SMTP a required step.)
+  config.action_mailer.perform_deliveries    = smtp_address.present?
+  config.action_mailer.raise_delivery_errors = smtp_address.present?
 
   # Enable locale fallbacks for I18n (makes lookups for any locale fall back to
   # the I18n.default_locale when a translation cannot be found).

@@ -16,6 +16,8 @@ class ProductionEnvConfigTest < ActiveSupport::TestCase
         smtp_address: c.action_mailer.smtp_settings[:address],
         smtp_port: c.action_mailer.smtp_settings[:port],
         smtp_user: c.action_mailer.smtp_settings[:user_name],
+        raise_delivery_errors: c.action_mailer.raise_delivery_errors,
+        perform_deliveries: c.action_mailer.perform_deliveries,
         force_ssl: c.force_ssl,
         hosts: c.hosts.map(&:to_s)
       }
@@ -53,6 +55,24 @@ class ProductionEnvConfigTest < ActiveSupport::TestCase
     assert_equal "smtp.provider.test", cfg["smtp_address"]
     assert_equal 2525, cfg["smtp_port"]
     assert_equal "postmaster", cfg["smtp_user"]
+  end
+
+  # F1 — a transient SMTP failure used to be swallowed: the delivery job succeeded,
+  # the alert was gone, and the audit row still said "delivered". With SMTP
+  # configured the error must reach the job so the retry layer can re-send it.
+  test "a configured SMTP relay raises delivery errors so a failed send fails the job" do
+    cfg = boot_production("STABLEMATE_HOST" => "example.com", "SMTP_ADDRESS" => "smtp.provider.test")
+    assert_equal true, cfg["raise_delivery_errors"]
+    assert_equal true, cfg["perform_deliveries"]
+  end
+
+  # …but the documented self-host tolerance survives: an instance with no SMTP
+  # configured must stay quiet rather than generate a perpetual failing-job storm.
+  test "an instance with no SMTP configured neither attempts nor raises deliveries" do
+    cfg = boot_production("STABLEMATE_HOST" => "example.com")
+    assert_nil cfg["smtp_address"]
+    assert_equal false, cfg["raise_delivery_errors"]
+    assert_equal false, cfg["perform_deliveries"]
   end
 
   test "STABLEMATE_FORCE_SSL=false disables forced SSL for plain-HTTP self-hosting" do
