@@ -103,6 +103,41 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
     monitors.each { |m| refute m.reload.suspended?, "a paying Pro user's monitor was suspended" }
   end
 
+  # WS-D: accounts can now be closed, and the batch is loaded once. A user who
+  # deletes their account while the job is walking the batch leaves a stale
+  # in-memory record whose row is gone — enforce_downgrade_fallback! reloads
+  # first, which would raise RecordNotFound and abandon everyone after them in
+  # the batch.
+  test "a record deleted mid-batch is skipped, and the rest of the batch still settles" do
+    overdue = start_grace!(FREE + 2)
+
+    alice = users(:alice)
+    alice_project = alice.projects.sole
+    alice_project.monitors.delete_all
+    alice_monitors = nil
+    with_billing_enabled do
+      alice.update!(plan: "pro")
+      alice_monitors = (FREE + 2).times.map { |i| alice_project.monitors.create!(name: "A#{i}", **ATTRS) }
+      alice.sync_plan_from_subscription!
+    end
+
+    travel_to Stablemate::DOWNGRADE_GRACE_PERIOD.from_now + 1.hour do
+      # The batch as the job loaded it, ordered so the doomed record is walked
+      # first — the point is that everyone after it still gets settled.
+      batch = User.downgrade_grace_expired.to_a.sort_by { |u| u.id == @user.id ? 0 : 1 }
+      assert_equal 2, batch.size
+
+      # Bob closes his account while the job is mid-batch.
+      with_billing_disabled { @user.close_account! }
+
+      assert_nothing_raised { batch.each(&:enforce_downgrade_fallback!) }
+    end
+
+    # Alice — after the deleted record — still got settled.
+    refute alice.reload.awaiting_downgrade_choice?
+    assert_equal 2, alice_monitors.last(2).count { |m| m.reload.suspended? }
+  end
+
   test "a user still within the window is left untouched even when another is overdue" do
     # Two users in grace: bob overdue, alice still inside her window. Only bob settles.
     overdue = start_grace!(FREE + 2)
