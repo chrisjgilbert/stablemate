@@ -17,10 +17,16 @@ module Monitoring
         @monitor = monitor
       end
 
-      # Deactivate for a plan downgrade. Only an active monitor can be suspended;
-      # already-suspended is idempotent. Idempotent.
+      # Deactivate for a plan downgrade. Idempotent.
+      #
+      # with_lock (not a bare transaction) so the incident is read under
+      # SELECT ... FOR UPDATE, mirroring every ping-path operation and Pausing.
+      # Reading it unlocked let a detection sweep open an incident — and email a
+      # monitor the downgrade had just stopped monitoring — between the read and
+      # the flip, leaving `suspended` with an open incident the rollup counts as
+      # downtime forever.
       def suspend!
-        @monitor.transaction do
+        @monitor.with_lock do
           @monitor.resolve_open_incident!
           @monitor.update!(status: "suspended")
         end
