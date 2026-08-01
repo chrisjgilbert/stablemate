@@ -27,6 +27,23 @@ if Stablemate.billing_enabled?
   ENV["STRIPE_SIGNING_SECRET"] ||= Stablemate.stripe_webhook_secret
 end
 
+# Never let Pay mount its own routes. Pay 8.3 defaults automount_routes to true,
+# which mounts the engine at /pay and hands us two surfaces we never asked for:
+#
+#   * POST /pay/webhooks/stripe — a SECOND Stripe webhook endpoint. It verifies
+#     against the same signing secret, so it looks legitimate, but it bypasses
+#     Billing::ProcessedEvent idempotency, the livemode gate and the plan sync in
+#     Billing::WebhooksController. Point Stripe at it by accident and a paying
+#     customer stays on Free. Billing::WebhooksController is the only Stripe
+#     entry point (PRD §12: one writer of User.plan).
+#   * GET /pay/payments/:id — unauthenticated, and the rendered page embeds the
+#     PaymentIntent's client_secret. We use Stripe Checkout, so we never need it.
+#
+# This must be set before Pay::Engine's "pay.processors" initializer, which is
+# where the mount is appended — app config/initializers run first (they land
+# ~index 110 vs the engine's ~372), so here is early enough.
+Pay.automount_routes = false
+
 Pay.setup do |config|
   config.application_name = "Stablemate"
   config.support_email = "support@stablemate.dev"
