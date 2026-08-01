@@ -220,8 +220,33 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # …but "already gone" is only true when Stripe agrees. A card failure leaves the
+  # subscription `past_due`: the plan has dropped to Free and the choose-N lock is
+  # open, yet Stripe is still dunning. The picker tells that user their Pro
+  # subscription will be cancelled, so committing the choice has to actually cancel
+  # it — otherwise a dunning retry succeeds days later and they are billed for Pro
+  # with monitors suspended, and this picker is their only in-app route out (the
+  # billing page hides the Portal and Downgrade links once plan == free).
+  test "resolving the involuntary choice cancels a subscription Stripe is still dunning" do
+    with_billing_enabled do
+      monitors = build_monitors(FREE + 2)
+      sub_id = give_active_pro_subscription!(status: "past_due")
+      @user.sync_plan_from_subscription! # ⇒ free + choose-N lock, nothing suspended
+      assert @user.reload.must_choose_downgrade?
+      stub_stripe_subscription_cancel(sub_id)
+      sign_in @user
+
+      post billing_downgrade_path, params: { keep_ids: monitors.first(FREE).map(&:id) }
+
+      assert_redirected_to billing_subscription_path
+      assert_requested :delete, %r{https://api\.stripe\.com/v1/subscriptions/#{sub_id}}
+      assert_equal FREE, @user.monitors.counting_toward_cap.count
+      assert_equal 2, @user.monitors.where(status: "suspended").count
+    end
+  end
+
   # The involuntary picker is not a downgrade — the plan has already dropped and
-  # the subscription is already gone; all that's left is picking which N stay.
+  # (when Stripe agrees it is gone) all that's left is picking which N stay.
   test "the involuntary picker does not promise to cancel a subscription" do
     with_billing_enabled do
       build_monitors(FREE + 2)

@@ -48,16 +48,33 @@ class User
     # Free but — during the grace window (§12-J) — nothing was suspended yet; the
     # user now picks exactly the Free cap's worth to keep active from among ALL their
     # monitors. The chosen stay (or return) active, the rest are suspended, and the
-    # lock is cleared. No Stripe here — the subscription is already cancelled. Atomic
-    # so the account never sits half-repicked. (Any monitors already suspended from a
-    # prior downgrade are still reactivated if chosen.)
+    # lock is cleared. Atomic so the account never sits half-repicked. (Any monitors
+    # already suspended from a prior downgrade are still reactivated if chosen.)
+    #
+    # Stripe is cancelled first, exactly as in #to_free!. The involuntary drop is
+    # usually a subscription that is already gone — in which case this is a no-op —
+    # but NOT always: a card failure leaves it `past_due`, which drops the plan to
+    # Free and opens this lock while Stripe keeps dunning. The picker tells that
+    # user their subscription will be cancelled, and this is their only in-app route
+    # (the billing page hides the Portal and Downgrade links once plan == free), so
+    # committing the choice must actually cancel it. Otherwise a dunning retry
+    # succeeds days later and they are billed for Pro with monitors suspended.
+    # Cancel-then-suspend ordering means a Stripe failure propagates with no monitor
+    # touched, and the call stays OUTSIDE the row lock below — never hold a lock
+    # across a network round trip.
     def resolve_choice!(keep_ids: [])
       keep_ids = Array(keep_ids).map(&:to_i)
       keep = @user.monitors.where(id: keep_ids)
       return Result.new(false, :must_choose) unless keep.count == limit
 
       keep = keep.ids
-      @user.transaction do
+      cancel_subscription!
+
+      # with_lock, so the USER row is locked before any monitor row. Every other
+      # path that touches both takes them in that order (the gem sync's cap
+      # serialisation, the webhook's restore) — locking monitors first here would
+      # invert the order and deadlock a concurrent sync or re-upgrade.
+      @user.with_lock do
         @user.monitors.where(id: keep).where(status: "suspended").find_each(&:reactivate!)
         active_scope.where.not(id: keep).find_each(&:suspend!)
         @user.clear_downgrade_choice!
