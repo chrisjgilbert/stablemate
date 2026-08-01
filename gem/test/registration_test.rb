@@ -45,6 +45,57 @@ class RegistrationTest < StablemateTest
     assert_equal 1, Stablemate.ping_urls.size # cache not duplicated
   end
 
+  # F9 — the server skips entries it won't register (over the account's monitor
+  # cap, or a malformed tuple). A skipped job is silently UNMONITORED, which is
+  # exactly what the registrar already refuses to let happen quietly when it
+  # can't size a schedule. Warn per entry, with the task key and the reason.
+  def test_skipped_entries_are_logged_with_key_and_reason
+    response = {
+      "monitors" => [ { "registration_key" => "daily_digest", "ping_url" => "u" } ],
+      "skipped" => [
+        { "registration_key" => "clear_sessions", "reason" => "limit_reached" },
+        { "registration_key" => "db_backup", "reason" => "invalid" }
+      ]
+    }
+    out = StringIO.new
+    client = Stablemate::FakeClient.new(sync_response: response)
+
+    cache = Stablemate::Registration.new(registrar:, client:, app: "x", config: logging_config(out)).sync!
+
+    assert_match(/WARN.*clear_sessions/, out.string)
+    assert_match(/limit_reached/, out.string)
+    assert_match(/WARN.*db_backup/, out.string)
+    assert_match(/invalid/, out.string)
+    # The registered monitors are still cached — reporting the skips is additive.
+    assert_equal "u", cache["daily_digest"]
+  end
+
+  # No skips, no noise: a clean sync must stay silent, or the warning stops
+  # meaning anything.
+  def test_clean_sync_logs_nothing
+    out = StringIO.new
+    client = Stablemate::FakeClient.new(
+      sync_response: { "monitors" => [ { "registration_key" => "daily_digest", "ping_url" => "u" } ] }
+    )
+
+    Stablemate::Registration.new(registrar:, client:, app: "x", config: logging_config(out)).sync!
+
+    assert_empty out.string
+  end
+
+  # A malformed skipped list must not cost the caller its ping-URL cache: boot
+  # continues, the URLs are still returned.
+  def test_malformed_skipped_list_does_not_break_the_sync
+    client = Stablemate::FakeClient.new(
+      sync_response: { "monitors" => [ { "registration_key" => "daily_digest", "ping_url" => "u" } ],
+                       "skipped" => [ "just-a-string", nil, {} ] }
+    )
+
+    cache = Stablemate::Registration.new(registrar:, client:, app: "x").sync!
+
+    assert_equal "u", cache["daily_digest"]
+  end
+
   # A sync failure logs a warning and never crashes boot (returns nil).
   def test_sync_failure_is_swallowed
     failing = Object.new
