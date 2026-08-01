@@ -1,6 +1,8 @@
 # Pre-launch verification findings — fix tracker
 
-Status: **IN PROGRESS**. Source: the 2026-08-01 pre-launch verification
+Status: **COMPLETE** — all 13 majors and the 14 fix-now minors are fixed,
+merged and `/verify`-passed; the decision-needed and backlog items below are
+still open (owner's call). Source: the 2026-08-01 pre-launch verification
 campaign (6 adversarial subsystem reviews with probe reproduction + live
 browser verification) run against `main` @ `2dea079` with full `bin/ci` green.
 Companion to [`launch-readiness.md`](launch-readiness.md) — these fixes are an
@@ -22,9 +24,40 @@ behaviour — browser-driven where user-visible (the interval edit driven throug
 the actual Stimulus preset field; the uptime panel rendering 98.35% instead of a
 stale 100.00%), runner-driven against the live dev database where not (the
 after-commit dispatch semantics, the suspend/reactivate memory, the rollup and
-prune guards). Remaining: wave 2 — batches C, E, F.
+prune guards).
+
+**Wave 2 merged and verified (2026-08-01).** Batches C, E and F complete the
+set: **F2, F3, F4, F5, F9, F13** plus **M1–M8, M10, M15, M16**. Full `bin/ci`
+green across all six batches (482 unit/request, 57 system, 94 gem). Verified
+against the running app: the business-hours cron now sizes at 227,700s instead
+of 54,900s (no more Friday-night false alarm); a user's UI override survives
+the gem's next boot sync while a genuine `recurring.yml` change still lands;
+`/pay/webhooks/stripe` and `/pay/payments/:id` no longer route while our gated
+`/billing/webhook` does; Pay's stock customer emails are off; 320 API requests
+with a different made-up token each now hit the per-IP bound at exactly 300;
+and the full sign-up → ping → outage → down email → recovery loop still passes
+end to end after all 24 commits.
+
+**One fix corrected during review.** Batch C implemented F5 exactly as this doc
+specified — "exclude only `canceled`/`incomplete_expired`" — and then flagged
+that the rule it had been given also catches `incomplete`, locking a user whose
+first payment failed SCA out of retrying for ~24h with "You're already on Pro."
+The spec direction was wrong, not the implementation: `incomplete` has never
+billed and expires on its own, so blocking the retry costs a certain upgrade to
+prevent a double charge that cannot occur. Narrowed with its own failing test
+first (`UNBILLABLE_STATUSES`); it still counts as live for *cancellation*,
+where tearing down a dangling attempt is free.
 
 Follow-ups raised during review (not yet findings, no owner):
+- `release_downgrade_lock_if_within_cap!` is still only reached on a billing
+  page load — wiring it into monitor destroy needs a file batch C didn't own.
+- `docs/integrating.md` still says "Settings → API keys" (same drift M15 fixed
+  in `api.md`) and doesn't yet mention F2's override-vs-schedule-change rule.
+- The billing subscription page still shows "Upgrade to Pro" to a `past_due`
+  user, who is then correctly bounced — accurate about Stripe, confusing to
+  read. Worth relabelling.
+- F13's `reload` will raise if a user is deleted mid-batch; harmless today (no
+  deletion path exists) but WS-D's account deletion will need a rescue.
 - `Monitoring::Monitor::Suspension#reactivate!` still runs unlocked, so a
   `reactivate!` racing a `suspend!` is theoretically interleavable (F11 covered
   only `pause!`/`suspend!`).
@@ -63,7 +96,7 @@ payload; the railtie re-syncs on every boot. Violates locked decision #5
 ("user can tighten via UI override") and `docs/integrating.md:116`. Probe:
 tighten + rename → one re-sync reverted all three. **Fix:** preserve
 user-modified values (e.g. only apply a gem value when the stored value still
-equals the *previously gem-sent* value, or stamp overrides). — [ ] fixed · [ ] verified
+equals the *previously gem-sent* value, or stamp overrides). — [x] fixed · [x] verified
 
 ### F3 · Weekday-restricted crons derive an interval that misses the weekend → false down every weekend
 `gem/lib/stablemate/registrars/solid_queue_recurring.rb:29,125-135` samples 50
@@ -71,7 +104,7 @@ consecutive occurrences from boot time; for `*/15 9-17 * * 1-5` that never
 spans Fri→Mon (derived 54,900s vs true 227,700s; `0 * * * 1-5` → 3,600s vs
 176,400s — probed with real fugit). Weekly false alarms + false recoveries.
 **Fix:** sample a horizon covering ≥ a full week (e.g. ≥ 8 days of
-occurrences), not a fixed 50. — [ ] fixed · [ ] verified
+occurrences), not a fixed 50. — [x] fixed · [x] verified
 
 ### F4 · Pay automounts an ungated second Stripe webhook + an unauthenticated payments page
 Pay 8.3 `automount_routes` defaults true and `config/initializers/pay.rb`
@@ -80,7 +113,7 @@ same secret, bypasses `Billing::ProcessedEvent` idempotency, the livemode
 gate, and plan sync — "customer paid but stayed Free" if Stripe points there)
 and `GET /pay/payments/:id` (unauthenticated, embeds any PaymentIntent's
 client_secret). **Fix:** `Pay.automount_routes = false` before initializers;
-route test asserting `/pay/*` is gone. — [ ] fixed · [ ] verified
+route test asserting `/pay/*` is gone. — [x] fixed · [x] verified
 
 ### F5 · `past_due` subscription allows a second checkout → double billing
 `billing/checkouts_controller.rb:12` guards with `subscribed_to_pro?`, which
@@ -90,7 +123,7 @@ dunning retry later succeeds → two live Pro subscriptions.
 `pro_subscription` (`user/subscription.rb:163`) has the same blindness, so the
 in-app downgrade can't cancel it either. **Fix:** guard on any non-terminal
 Pro subscription (exclude only `canceled`/`incomplete_expired`), both places.
-— [ ] fixed · [ ] verified
+— [x] fixed · [x] verified
 
 ### F6 · Out-of-range `duration_ms` 500s the ping endpoint and discards the contact
 `pings_controller.rb:82` guards non-numeric but not magnitude; int4 column →
@@ -121,7 +154,7 @@ live up/down seconds (the bar's existing live computation) into the percent.
 a cap-skipped job is unmonitored with zero gem-side signal, against the
 registrar's own "a silently-unmonitored job is visible to the operator"
 principle (and projects.md §7's assumption that the gem logs it). **Fix:**
-`log_warn` per skipped entry with key + reason. — [ ] fixed · [ ] verified
+`log_warn` per skipped entry with key + reason. — [x] fixed · [x] verified
 
 ### F10 · Alert mailer jobs enqueue inside an open DB transaction on reactivation paths
 Webhook/choose-N paths (`ProcessedEvent.record_once` transaction →
@@ -158,7 +191,7 @@ restore returns paused monitors to `paused`. — [x] fixed · [x] verified
 re-upgrade committing mid-batch → a *paying* Pro user's monitors suspended
 until the next webhook (probe: a pro-flagged user lost 3 monitors).
 **Fix:** re-check `must_choose_downgrade?` on a reloaded record inside
-`enforce_downgrade_fallback!`. — [ ] fixed · [ ] verified
+`enforce_downgrade_fallback!`. — [x] fixed · [x] verified
 
 ## Minor findings
 
