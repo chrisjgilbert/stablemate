@@ -1,7 +1,8 @@
 # SaaS launch readiness — the road to open sign-ups
 
-Status: **PROPOSED** (pressure-test review pending). Author: Claude (session),
-2026-08-01. Owner: @chrisjgilbert. Extends nothing in the data model; this is a
+Status: **PROPOSED — pressure-tested** (adversarial review pass folded in,
+2026-08-01; see the review note below). Author: Claude (session), 2026-08-01.
+Owner: @chrisjgilbert. Extends nothing in the data model; this is a
 **launch punch list spec** — it enumerates what stands between today's `main`
 and taking real customers on the managed instance, and specifies the shape of
 each piece of work. No new product features. Follow the architecture rulebook in
@@ -10,6 +11,18 @@ each piece of work. No new product features. Follow the architecture rulebook in
 > Scope note: "launch" here means the managed instance at `stablemate.dev`
 > accepting open sign-ups and real Stripe payments. Self-hosting is already
 > shipped and unaffected except where noted.
+
+> **Review note (2026-08-01).** An adversarial pressure-test pass verified every
+> file/behaviour claim in this spec against the code and the installed gems.
+> Material corrections it forced, now folded in: Pay declares **no**
+> `dependent:` option on `pay_customers`, so WS-D must destroy them explicitly
+> and handle Pay's destroy-time Stripe callback; a Stripe-portal cancellation is
+> **not** `cancel_now!` (WS-C's billing terms and WS-F's portal config both
+> corrected); Stripe Tax, the live portal configuration, the webhook event list
+> and Pay's default customer emails were missing from WS-F; a live Honeybadger
+> API key is committed in `config/honeybadger.yml` and must be rotated; the
+> waitlist's "we'll email you an invite" promise had no owner; and a signed-in
+> user can neither change their password nor their email (now WS-D scope / D8).
 
 ---
 
@@ -36,7 +49,7 @@ What's left is seven workstreams, four of them code:
 | A | Billing dependency security upgrade (`pay` 8→11, `stripe` 13→19, drop the CI ignore) | code | **Yes** — before real money moves |
 | B | Dependabot backlog (9 small bumps) | code | Should-do |
 | C | Legal pages: Terms + Privacy | code + copy | **Yes** — paid product, EU users |
-| D | Account deletion | code | **Yes** — GDPR-adjacent, cheap now, awkward later |
+| D | Account page: deletion + password change | code | **Yes** — GDPR-adjacent, cheap now, awkward later |
 | E | Publish the companion gem to RubyGems | release ops | **Yes** — onboarding friction until done |
 | F | Ops pre-launch checklist (runbook §0 + Stripe live config) | ops (owner) | **Yes** |
 | G | Launch-day switch (badge removal + open the cap) | code + config | The launch itself |
@@ -70,13 +83,16 @@ billing path. This is open **issue #39**. Dependabot has the two majors queued:
      (`app/controllers/billing/checkouts_controller.rb`,
      `portal_sessions_controller.rb`),
    - webhook verification + dispatch (`app/controllers/billing/webhooks_controller.rb`,
-     `app/models/billing/webhook.rb`) and the `Billing::ProcessedEvent`
-     idempotency + livemode-rejection behaviour,
+     `app/models/billing/webhook.rb`), the `Billing::ProcessedEvent`
+     idempotency, and the livemode rejection (enforced by the *controller*,
+     not `ProcessedEvent`),
    - Pay's own migrations — a major Pay bump usually ships schema changes; run
      `bin/rails pay:install:migrations` (or whatever 11.x prescribes) and keep
      the migration reversible per CI convention.
 3. Remove `--ignore GHSA-mjgf-xj26-9qf9` from `bin/ci` (both invocation arms).
-   bundle-audit must pass **clean** — no ignores left.
+   bundle-audit must pass **clean** — no ignores left. Also delete the dead
+   placeholder ignore in `config/bundler-audit.yml` (`bin/ci` never passes
+   `--config`, so the file is inert — remove the decoy rather than leave it).
 4. **Tests.** Full `bin/ci`; the regression net for behaviour is
    `test/system/billing_test.rb` + `test/system/downgrade_grace_test.rb` plus
    the `test/controllers/billing/` suite. Add coverage only where a Pay API we
@@ -104,6 +120,10 @@ browser-actions/setup-chrome v1→v2 (#4), webfactory/ssh-agent 0.9→0.10 (#35)
 - The three GitHub-Actions bumps modify `ci.yml`, including the **deploy job**
   (`webfactory/ssh-agent`). They only take effect on `main`, so after merging,
   watch one auto-deploy complete rather than assuming.
+- `image_processing` (#6) updates a gem nothing uses: no model declares an
+  attachment, so Active Storage — and `deploy.yml`'s storage volume — is dead
+  config today. Merging is harmless; just don't read the volume/backup advice
+  as load-bearing.
 
 Not strictly launch-blocking, but a clean queue means dependabot noise never
 masks a real security PR later.
@@ -137,7 +157,12 @@ and the sign-up form should reference them.
   - Retention: ping events pruned after `PING_RETENTION` = 90 days
     (`PrunePingEventsJob`); uptime day stats kept indefinitely; sessions until
     sign-out/deletion.
-  - Cookies: the session cookie only. No analytics, no tracking pixels.
+  - Waitlist: `WaitlistSignup` stores email addresses indefinitely, and
+    `WaitlistSignup::SlackAlert` posts each one to the team Slack — D4 covers
+    *both* Slack alert paths, not just sign-ups.
+  - Cookies: strictly necessary first-party cookies only, plural — the signed
+    permanent `session_id` and Rails' `_stablemate_session` (return-to, flash,
+    CSRF). No analytics, no tracking pixels.
   - Subprocessors: Hetzner (hosting), Cloudflare (proxy/TLS), Stripe (payments
     — card data never touches our servers), the SMTP provider (owner to name —
     D2), Honeybadger (error reports), Slack (internal ops alerts).
@@ -146,9 +171,12 @@ and the sign-up form should reference them.
     processor for that purpose, or we redact the address from the Slack message
     — owner decision **D4**.
 - **ToS content:** service description; acceptable use; plans + billing terms
-  that match the code (monthly, cancel any time via the Stripe portal,
-  immediate cancellation with no pro-rata refund — that's `cancel_now!`; the
-  7-day involuntary-downgrade grace); no-SLA availability disclaimer; the
+  that match the code — and the code has **two cancellation paths**: the
+  in-app downgrade is immediate with no pro-rata refund (`cancel_now!` via
+  `User::Downgrade`), while a Stripe-*portal* cancel arrives by webhook and
+  takes effect per the portal's live configuration, typically period-end —
+  WS-F pins that configuration deliberately; the 7-day involuntary-downgrade
+  grace; no-SLA availability disclaimer; the
   AGPLv3 self-host distinction; termination; liability limitation; governing
   law (jurisdiction is owner decision **D2**).
 - **Drafts, not legal advice.** The PR ships complete plain-language drafts;
@@ -159,20 +187,33 @@ extend `test/system/landing_page_test.rb` with footer-link assertions. No
 dedicated system test — a static page is not a *flow*; this is a justified
 deviation from the system-test rule, noted here per `CLAUDE.md`.
 
+Optional, same PR: `public/robots.txt` is the empty Rails default and there is
+no sitemap. Not launch-blocking, but the marketing-page work is the natural
+moment for the SEO basics.
+
 ---
 
-## 5 · WS-D: account deletion
+## 5 · WS-D: the account page — deletion + password change
 
 **Why.** There is no way to delete an account (`resources :registrations,
 only: %i[new create]` — no destroy anywhere). GDPR Art. 17-adjacent, and a
 Stripe subscription must never outlive its account. Far cheaper to ship before
-there are real customers than after.
+there are real customers than after. Two adjacent gaps surfaced in review and
+join this workstream: a signed-in user cannot change their **password** except
+via the "forgot" email round-trip (`PasswordsController` is token-reset only,
+fully unauthenticated), and cannot change their **email address** at all —
+password change ships here; email change is an explicit deferral (**D8**), not
+an oversight.
 
 **Shape** (per the decision table in `CLAUDE.md`):
 
 - **Route/controller:** `resource :account, only: %i[show destroy]` →
-  `AccountsController`. `#show` is a minimal account page: email address,
-  verified badge, a link to `billing_subscription_path` when
+  `AccountsController`, plus a nested
+  `resource :password, only: :update, module: :accounts` for the signed-in
+  password change — a sub-resource, not a custom verb (rule 4), and distinct
+  from the unauthenticated reset flow in `PasswordsController`. `#show` is a
+  minimal account page: email address, verified badge, change-password form
+  (current password required), a link to `billing_subscription_path` when
   `Stablemate.billing_enabled?`, and a danger zone with the delete form. Add an
   "Account" link to the authed header nav in `layouts/application`.
 - **Operation object:** deletion means more than `destroy!` (Stripe must be
@@ -183,28 +224,51 @@ there are real customers than after.
   1. `cancel_pro_subscription!` when billing is enabled — reuses the existing
      Pay coupling in `User::Subscription`; `cancel_now!` semantics (immediate,
      no pro-rata refund) are stated in the danger-zone copy.
-  2. `destroy!` the user. Cascades: `sessions` (dependent: :destroy),
-     `projects` (dependent: :destroy) → monitors → ping events / incidents /
-     uptime stats / notifications / API keys, **and Pay's `pay_customers`**.
-     Pay declares its own dependent option — the test must *assert* the
-     `pay_*` rows are gone, not assume.
+  2. **Explicitly destroy `pay_customers`.** Pay declares **no** `dependent:`
+     option on the association (`pay/attributes.rb` — verified in both the
+     installed 8.3.0 and the 11.6.2 upgrade target), so a bare user
+     `destroy!` would orphan every `pay_*` row with a nil owner — and an
+     orphaned `Pay::Customer` is a live hazard: Pay's webhook handlers call
+     `pay_customer.email`, which delegates to the (now nil) owner and raises.
+     Each `Pay::Customer` does cascade to its own subscriptions / charges /
+     payment methods, so destroying the customers is sufficient. The request
+     test must assert the `pay_*` rows are actually gone.
+  3. `destroy!` the user. The app-side cascade chain is fully declared
+     (verified): `sessions`; `projects` → monitors → ping events / incidents /
+     uptime stats / notifications, and API keys.
 - **Confirmation UX:** re-enter current password
   (`user.authenticate(params[:current_password])`). Wrong password → 422
   re-render with a generic error. Success → `close_account!`,
   `terminate_session`, redirect to root with a plain confirmation notice.
+- **Stripe-failure policy:** `cancel_now!` makes a live Stripe API call and
+  raises `Pay::Stripe::Error` on an outage or on local/Stripe drift (active
+  locally, already cancelled at Stripe). Policy: **abort cleanly, delete
+  nothing** — rescue, re-render with "we couldn't cancel your subscription;
+  try again or email support". Never half-delete. Second hazard: Pay itself
+  installs `after_commit :cancel_active_pay_subscriptions!, on: [:destroy]`,
+  which would fire a live Stripe call *after* the user row is already gone —
+  cancelling first (step 1) makes that callback a no-op, and destroying the
+  `pay_customers` inside the same transaction keeps the rows consistent.
 - **Webhook race:** an in-flight Stripe webhook for a just-deleted customer
   must be swallowed (2xx, skip), never 500 — Stripe retries 500s for days.
-  Verify `Billing::WebhooksController`'s current behaviour for an event whose
-  customer no longer resolves; add the request test; fix if it raises.
+  With the explicit `pay_customers` destroy above, "customer no longer
+  resolves" becomes a real state the controller must tolerate — and today
+  `Billing::WebhooksController` rescues only signature/JSON errors, while
+  Pay's own handlers (e.g. the `invoice.payment_failed` mailer) raise on a
+  missing/ownerless customer. Add the request test for an event referencing a
+  deleted customer; harden the controller if it raises.
 
 **Edge cases.** Deleting while `awaiting_downgrade_choice` → rows gone, lock
 irrelevant. Open incident at deletion → cascaded away; the next detection sweep
 sees nothing (no orphan alerting). Project API keys die with their projects —
 the gem gets opaque 401s afterwards, which is the correct signal.
 
-**Tests.** `[unit]` `User::Closure` — billing on: cancels then destroys (stub
-at the Pay seam); billing off: destroy only. `[request]` wrong password;
-success (cascade assertions incl. `pay_*`); webhook-after-delete. `[system]`
+**Tests.** `[unit]` `User::Closure` — billing on: cancels, destroys
+`pay_customers`, destroys the user (stub at the Pay seam; cover the drift case
+— active locally, already cancelled at Stripe → clean abort); billing off:
+destroy only. `[request]` wrong password; success (cascade assertions incl.
+`pay_*`); webhook-after-delete; password change (wrong current password → 422,
+success re-authenticates). `[system]`
 **required** — destructive, user-facing flow: sign in → Account → delete with
 password → back on the marketing page → old credentials can't sign in.
 
@@ -256,9 +320,31 @@ calendar time.
 - **Stripe live mode:** Pro product + monthly price created live;
   `STRIPE_PRICE_ID_PRO` + live keys + live webhook signing secret in
   credentials (all same-mode — the code rejects cross-mode events); webhook
-  endpoint `https://stablemate.dev/billing/webhook` registered. A live-mode
-  test purchase + refund is the only true end-to-end — owner call (**D5**).
-- **Honeybadger:** production API key set; a deliberate test exception arrives.
+  endpoint `https://stablemate.dev/billing/webhook` registered. Plus three
+  items that will break live billing even with all of that set:
+  - **Stripe Tax:** checkout runs with `automatic_tax: { enabled: true }`
+    (`billing/checkouts_controller.rb`) — a live Checkout Session fails until
+    Stripe Tax is configured (origin address + registrations) in the live
+    dashboard.
+  - **Customer Portal configuration:** live portal-session creation errors
+    until a default portal configuration is saved — and that configuration
+    decides portal-cancellation timing (see WS-C's ToS terms; choose
+    period-end deliberately, and make the ToS say what the portal does).
+  - **Webhook event list + Pay's stock emails:** register a deliberate event
+    list — `Billing::Webhook#pay_process!` hands *any* subscribed event to
+    Pay's handlers, and Pay's customer-facing emails (receipts,
+    payment-failed) default **on** and are entirely unconfigured. Decide to
+    disable or brand them (**D9**) before the first live charge.
+
+  A live-mode test purchase + refund is the only true end-to-end — owner call
+  (**D5**).
+- **Honeybadger — ⚠️ rotate the committed key:** `config/honeybadger.yml`
+  carries a hardcoded, git-tracked API key in a publicly distributed repo
+  (it's in history regardless of any future removal). Rotate it in the
+  Honeybadger dashboard, move the new one to ENV/credentials per the house
+  pattern (`CLAUDE.md` third-party-secrets rule; the `stripe_secret_key`
+  shape), strip it from the YAML — a small code change, ride along with
+  WS-A/WS-B — then confirm a deliberate test exception arrives in production.
 - **Mailboxes:** `support@` (reply-to) and `dmarc@` (aggregate reports) exist
   and are read; `alerts@` is authorised to send.
 - **Cloudflare posture re-check:** orange cloud, SSL "Full (strict)", origin
@@ -292,9 +378,18 @@ change, both reversible.
   re-opens manually by raising the value). This is a tracked-file change, so
   it rides the same commit and auto-deploys.
 
+**Tell the waitlist (D7):** the sign-up page has been promising *"we'll email
+you an invite"* (`registrations_controller.rb:38`), and no invite mailer
+exists anywhere. When the cap opens, email the accumulated `WaitlistSignup`
+rows that sign-ups are open — a one-off owner task (BCC from a mail client is
+fine at this scale) or a tiny mailer driven from the console. Deciding
+*against* notifying means changing the promise copy before launch; the promise
+can't just be dropped on the floor.
+
 **Sequence on the day:** WS-A–F all done → merge the switch commit → auto-deploy
 → smoke test production as a stranger: sign up fresh, create a monitor, ping
-it, watch it go `up`; and confirm a checkout with a real/test card per D5.
+it, watch it go `up`; confirm a checkout per D5 — then send the waitlist
+email (D7).
 
 ---
 
@@ -302,7 +397,7 @@ it, watch it go `up`; and confirm a checkout with a real/test card per D5.
 
 ```
 WS-A (billing deps)  ──►  WS-B (backlog)      code, ~0.5–1.5d + ~0.5d
-WS-C (legal pages)   ──►  WS-D (deletion)     code, ~0.5–1d each
+WS-C (legal pages)   ──►  WS-D (account page)  code, ~0.5–1d + ~1–1.5d
 WS-E (publish gem)   ──►  WS-F dog-food item  ~0.5d + owner time
 WS-F (ops checklist)      owner, parallel throughout; DNS/restore ≈ 0.5d
 WS-G (switch)             last, ~0.25d
@@ -320,20 +415,28 @@ deliverability verification, legal sign-off).
 | D1 | Gem name fallback if `stablemate` is taken on RubyGems | Check first; `stablemate-monitor` if needed |
 | D2 | Legal drafts: jurisdiction + professional review? | Review recommended; name the SMTP provider in the policy |
 | D3 | Sign-up consent UX | Linked text line, no checkbox (SaaS standard) |
-| D4 | Slack signup alert includes the new user's email | Disclose in the privacy policy **or** redact the address |
+| D4 | Slack alerts (`User::SignupAlert` **and** `WaitlistSignup::SlackAlert`) post email addresses | Disclose in the privacy policy **or** redact the address |
 | D5 | Live-mode Stripe test purchase before launch | Yes — one purchase + refund |
 | D6 | Launch cap value for `STABLEMATE_SIGNUP_ACCOUNT_CAP` | e.g. 100 with waitlist re-arm; owner's call |
+| D7 | Waitlist invite when the cap opens | Email the accumulated sign-ups (one-off owner task); deciding against means changing the promise copy |
+| D8 | Email-address change for signed-in users | Defer post-launch (needs re-verification plumbing); password change ships in WS-D |
+| D9 | Pay's stock customer emails (receipts, payment-failed) | Disable at launch (`Pay.send_emails = false`) unless deliberately branded + reviewed |
 
 ## 11 · Definition of done (the whole spec)
 
-- Issue #39 closed; `bundle-audit` clean with **no ignores**; dependabot queue
-  empty; full CI green.
+- Issue #39 closed; `bundle-audit` clean with **no ignores** (and the inert
+  `config/bundler-audit.yml` removed); dependabot queue empty; full CI green.
+- The committed Honeybadger key rotated, served from ENV/credentials, and no
+  secret of any kind tracked in the repo.
 - `/terms` and `/privacy` live, linked from footer + sign-up, copy approved.
-- Account deletion shipped with unit + request + **system** coverage and a
-  `/security-review` pass.
+- The account page shipped — deletion (with the explicit `pay_customers`
+  destroy and clean Stripe-failure abort) + password change — with unit +
+  request + **system** coverage and a `/security-review` pass.
 - `gem "stablemate"` installs from RubyGems; `integrating.md` updated;
   production dog-foods the published gem.
-- Every runbook §0 box actually checked, plus Stripe live-mode verified.
-- Badge gone, cap open, and a stranger can complete the full loop on
-  production: sign up → install gem → monitor `up` → break the job → `down`
-  email → fix → `recovered` email.
+- Every runbook §0 box actually checked, plus Stripe live-mode verified end to
+  end: Tax configured, portal configuration saved (cancellation timing matches
+  the ToS), a deliberate webhook event list, Pay's emails decided (D9).
+- Badge gone, cap open, the waitlist emailed (D7), and a stranger can complete
+  the full loop on production: sign up → install gem → monitor `up` → break
+  the job → `down` email → fix → `recovered` email.
