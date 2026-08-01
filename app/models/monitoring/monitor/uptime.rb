@@ -36,6 +36,14 @@ module Monitoring
             (acc[row.monitor_id] ||= []) << row.kind
           end
         end
+
+        # The oldest day a rollup can still be written for: uptime_days_to_roll
+        # clamps a never-rolled monitor's backfill here, so no day before this one
+        # will ever gain an UptimeDayStat. PingEvent.prune! reads the same rule —
+        # without it the two deadlock (M11): the rollup can't reach those days and
+        # prune's "only delete rolled-up days" check won't release them, so their
+        # raw pings sit there being warn-logged for ever.
+        def uptime_backfill_horizon = Stablemate::PING_RETENTION.ago.to_date
       end
 
       # The complete days that still need a rollup for this monitor: from the day
@@ -44,7 +52,7 @@ module Monitoring
       # iterates this and delegates to roll_up_uptime — the day-range rule lives
       # here on the record, not in the job.
       def uptime_days_to_roll(through: Date.current - 1)
-        earliest    = [ created_at.to_date, Stablemate::PING_RETENTION.ago.to_date ].max
+        earliest    = [ created_at.to_date, self.class.uptime_backfill_horizon ].max
         last_rolled = uptime_day_stats.maximum(:day)
         start_day   = last_rolled ? last_rolled + 1 : earliest
 
