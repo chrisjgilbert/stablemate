@@ -95,9 +95,26 @@ class Project
       # Mirrors the model validations so an invalid entry is classified BEFORE
       # the cap check and never reaches create!. The create path still rescues
       # any residual validation failure as a belt-and-braces "invalid".
+      #
+      # Read as NUMBERS, not through to_i: to_i turns both nil and "soon" into a
+      # perfectly valid grace of 0, so entries the model's numericality
+      # validations reject passed the shape check and — at the cap — came back
+      # as "limit_reached", telling the operator to buy slots for an entry that
+      # could never have registered. (M8)
       def valid_shape?(entry)
-        entry.expected_interval_seconds.to_i.positive? &&
-          entry.grace_period_seconds.to_i >= 0
+        interval = numeric(entry.expected_interval_seconds)
+        grace = numeric(entry.grace_period_seconds)
+
+        return false if interval.nil? || grace.nil?
+
+        interval.positive? && !grace.negative?
+      end
+
+      # The value as a number, or nil when it isn't one — the same set the
+      # model's numericality validation accepts (nil and non-numeric strings are
+      # not numbers; a numeric string is).
+      def numeric(value)
+        Float(value.to_s, exception: false)
       end
 
       # The contract (§3.3) is graceful & partial: one malformed entry must never
