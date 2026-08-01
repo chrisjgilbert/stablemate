@@ -22,6 +22,11 @@ class User < ApplicationRecord
     verified_at
   end
 
+  # Close the account for good: cancel Stripe, then delete every trace of the
+  # user. More than a `destroy!` (see User::Closure for why the order matters), so
+  # it's an operation object reached through the entity that owns it.
+  def close_account! = Closure.new(self).close_account!
+
   # Signed, short-lived token for the password-reset link (Rails 8 standard).
   # Keyed off the password salt so the token self-invalidates once the password
   # changes — preventing reuse after a reset. Used by PasswordsController.
