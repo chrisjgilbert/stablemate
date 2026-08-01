@@ -10,21 +10,49 @@ module Api
     class BaseController < ActionController::API
       include ActionController::RateLimiting
 
-      # Bound the bearer API so a compromised or buggy key can't hammer the sync
-      # bulk-write (WU-9). Generous enough never to throttle a healthy gem cadence;
-      # keyed on the presented token (fallback IP). Dedicated in-process store so it
-      # holds under the test env's null_store (mirrors PingsController). Over-limit
-      # returns the same opaque JSON shape, no enumeration signal.
+      # --- Rate limiting (WU-9) ------------------------------------------------
+      # Two layers, both generous enough never to throttle a healthy gem cadence:
+      #
+      #   PER_KEY — bounds ONE credential, so a compromised or buggy key can't
+      #     hammer the sync bulk-write. Keyed on the presented token, which is
+      #     caller-supplied: an enumerating scanner mints a fresh bucket with
+      #     every made-up token, so this layer alone bounds nobody who isn't
+      #     re-presenting the same header (M10).
+      #   PER_IP  — bounds the whole client whatever it presents, which is what
+      #     actually caps unauthenticated enumeration. It runs before
+      #     authenticate_api_key!, so a scanner is rejected without a DB lookup.
+      #
+      # Both layers answer over-limit with the same plain 429 + {"error":
+      # "rate_limited"}. The ping endpoint deliberately answers its per-IP layer
+      # with the opaque 404 instead, because there the response itself is the
+      # oracle (200 vs 404 distinguishes a real token); here every auth failure
+      # already returns an identical 401 whether or not the token exists, so a 429
+      # discloses nothing about token validity — it only says "this IP is
+      # throttled". An honest, documented 429 is also what a legitimate client
+      # sharing an egress IP needs in order to back off; a fake 401 would send the
+      # gem down the "your key is broken" path instead.
+      #
+      # Dedicated in-process store so both bounds hold under the test env's
+      # null_store (mirrors PingsController).
       #
       # NOTE: the store is per-process, so the effective ceiling scales with the
       # worker count (limit x processes). That's a coarse abuse bound, not a global
       # counter — acceptable here (and consistent with the ping limiter); a truly
       # global bound would key off the shared Solid Cache instead.
+      PER_KEY_LIMIT  = 120
+      PER_KEY_WINDOW = 1.minute
+      PER_IP_LIMIT   = 300
+      PER_IP_WINDOW  = 1.minute
       RATE_LIMIT_STORE = ActiveSupport::Cache::MemoryStore.new
-      rate_limit to: 120, within: 1.minute,
+
+      RATE_LIMITED = -> { render json: { error: "rate_limited" }, status: :too_many_requests }
+
+      rate_limit to: PER_KEY_LIMIT, within: PER_KEY_WINDOW, name: "per-key",
                  by: -> { request.authorization.presence || request.remote_ip },
-                 with: -> { render json: { error: "rate_limited" }, status: :too_many_requests },
-                 store: RATE_LIMIT_STORE
+                 with: RATE_LIMITED, store: RATE_LIMIT_STORE
+      rate_limit to: PER_IP_LIMIT, within: PER_IP_WINDOW, name: "per-ip",
+                 by: -> { request.remote_ip },
+                 with: RATE_LIMITED, store: RATE_LIMIT_STORE
 
       before_action :authenticate_api_key!
 
