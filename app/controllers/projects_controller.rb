@@ -30,6 +30,13 @@ class ProjectsController < ApplicationController
     else
       render :new, status: :unprocessable_entity
     end
+  rescue ActiveRecord::RecordNotUnique
+    # Double-submit: two identical creates in flight both pass the uniqueness
+    # validation (neither row is committed yet) and the loser's INSERT hits the
+    # (user_id, name) unique index. Re-render the SAME friendly error an ordinary
+    # duplicate produces rather than 500ing on the index.
+    @project.errors.add(:name, :taken)
+    render :new, status: :unprocessable_entity
   end
 
   def edit
