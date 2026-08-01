@@ -19,6 +19,16 @@ class User
     # `canceled` and `incomplete_expired` are terminal.
     TERMINAL_STATUSES = %w[canceled incomplete_expired].freeze
 
+    # …but a subscription that has never taken a payment must not block the user
+    # from trying again. `incomplete` means the first payment never completed —
+    # an abandoned or failed SCA challenge — so nothing has been charged, and
+    # Stripe expires it to `incomplete_expired` on its own within ~24h. Counting
+    # it as live would answer a customer actively trying to pay us with "You're
+    # already on Pro." for a day: a certain lost upgrade, guarding against a
+    # double charge that cannot happen. It stays "live" for CANCELLATION, where
+    # tearing down a dangling attempt is free and correct.
+    UNBILLABLE_STATUSES = %w[incomplete].freeze
+
     included do
       # Make the User a Pay billable: pay_customers / subscriptions / charges.
       pay_customer
@@ -59,7 +69,7 @@ class User
     # a dunning retry on the old subscription can succeed days later, so allowing
     # a second Checkout means two live Pro subscriptions and double billing (F5).
     def live_pro_subscription?
-      live_pro_subscriptions.exists?
+      live_pro_subscriptions.where.not(status: UNBILLABLE_STATUSES).exists?
     end
 
     # Recompute `plan` from the Pay subscription mirror and persist it. THE ONLY

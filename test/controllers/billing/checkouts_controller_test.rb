@@ -58,6 +58,27 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # …but `incomplete` is NOT that case. It is a subscription whose very first
+  # payment never completed (typically an abandoned or failed SCA challenge): it
+  # has never billed, and Stripe expires it to incomplete_expired within ~24h. A
+  # user in that state is someone actively trying to pay us — blocking their
+  # retry with "You're already on Pro." is a certain lost upgrade, traded against
+  # a double-billing risk that cannot occur (nothing has been charged, and the
+  # stale attempt expires on its own).
+  test "an incomplete Pro subscription does not block the user retrying checkout" do
+    with_billing_enabled do
+      Stablemate.stub_price_id_pro("price_pro_123") do
+        give_pro_subscription!(status: "incomplete")
+        sign_in @user
+
+        url = stub_stripe_checkout_session
+        post billing_checkout_path
+
+        assert_redirected_to url
+      end
+    end
+  end
+
   # The flip side: a genuinely finished subscription must not block a fresh one, or
   # a churned customer could never come back.
   test "a canceled Pro subscription does not block a new checkout" do
