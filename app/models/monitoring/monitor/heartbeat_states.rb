@@ -39,6 +39,15 @@ module Monitoring
         # (plan-downgrade) deliberately does not (PRD §3.3). Backs
         # User#at_monitor_cap? / #remaining_monitor_slots.
         scope :counting_toward_cap, -> { where.not(status: "suspended") }
+
+        # next_due_at is derived from (last contact + interval), so an interval
+        # edit has to re-derive it or the OLD cadence keeps driving detection:
+        # loosening hourly -> daily would still fire a false `down` an hour
+        # later, and tightening would leave detection blind for up to the old
+        # interval. Grace edits apply instantly (the overdue scope reads the live
+        # column) — this removes that asymmetry. On the model rather than in the
+        # edit action so every write path (form, gem sync, console) gets it.
+        before_save :recompute_next_due_at, if: :expected_interval_seconds_changed?
       end
 
       def pending?   = status == "pending"
@@ -63,9 +72,8 @@ module Monitoring
       # (WU-10): days before it are no-data, never phantom-up; never moved
       # afterward. Assigns only — the calling operation saves inside its lock.
       def register_contact(received_at)
-        self.last_ping_at = received_at
-        self.next_due_at  =
-          expected_interval_seconds.blank? ? nil : received_at + expected_interval_seconds.seconds
+        self.last_ping_at  = received_at
+        self.next_due_at   = due_after(received_at)
         self.first_ping_at ||= received_at
       end
 
@@ -122,6 +130,24 @@ module Monitoring
           resolve_open_incident!
         end
       end
+
+      private
+        # When the ping cadence changes, re-derive the due time from the last
+        # contact we actually had — the same formula register_contact uses, so
+        # the two can't drift. A never-pinged monitor has nothing to measure
+        # from, so next_due_at stays nil (register_contact writes the first one)
+        # rather than being invented from now. Recomputing for a paused or
+        # suspended monitor is harmless: the detection scopes only scan `up`.
+        def recompute_next_due_at
+          self.next_due_at = due_after(last_ping_at) if last_ping_at.present?
+        end
+
+        # The moment the next ping is expected, given a contact at `contact_at`.
+        def due_after(contact_at)
+          return nil if expected_interval_seconds.blank?
+
+          contact_at + expected_interval_seconds.seconds
+        end
     end
   end
 end
