@@ -146,6 +146,45 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     refute @project.monitors.exists?(registration_key: "bad")
   end
 
+  # M8 — the shape check exists so a malformed entry is classified BEFORE the cap
+  # check. It read the numbers through to_i, where nil and garbage both become 0
+  # and sailed through as a valid grace, so at the cap a malformed entry came back
+  # as "limit_reached" — telling the operator to buy more slots for an entry that
+  # would never have registered anyway.
+  test "a malformed grace_period_seconds reports invalid, not limit_reached, at the cap" do
+    @project.sync_monitors(entries: (1..4).map { |i| entry("k#{i}") })
+    assert @user.reload.at_monitor_cap?
+
+    result = @project.sync_monitors(entries: [
+      { registration_key: "nil_grace", name: "N", expected_interval_seconds: 3600, grace_period_seconds: nil },
+      { registration_key: "junk_grace", name: "J", expected_interval_seconds: 3600, grace_period_seconds: "soon" },
+      { registration_key: "junk_interval", name: "I", expected_interval_seconds: "hourly", grace_period_seconds: 300 }
+    ])
+
+    assert_equal [ "invalid" ], result[:skipped].map { |s| s[:reason] }.uniq
+    assert_equal %w[nil_grace junk_grace junk_interval], result[:skipped].map { |s| s[:registration_key] }
+  end
+
+  # Under the cap the model's own validations already refuse these, so the shape
+  # check must agree with them: same classification, and no monitor created.
+  test "a malformed entry is invalid under the cap too" do
+    result = @project.sync_monitors(entries: [
+      { registration_key: "nil_grace", name: "N", expected_interval_seconds: 3600, grace_period_seconds: nil }
+    ])
+
+    assert_equal [ { registration_key: "nil_grace", reason: "invalid" } ], result[:skipped]
+    refute @project.monitors.exists?(registration_key: "nil_grace")
+  end
+
+  # A zero grace is legitimate ("ping exactly on time"), and must not be swept up
+  # with the malformed ones.
+  test "a zero grace_period_seconds is a valid shape" do
+    result = @project.sync_monitors(entries: [ entry("prompt", grace: 0) ])
+
+    assert_empty result[:skipped]
+    assert_equal 0, @project.monitors.find_by(registration_key: "prompt").grace_period_seconds
+  end
+
   test "an invalid update is skipped without wiping the existing monitor" do
     @project.sync_monitors(entries: [ entry("keep", interval: 3600) ])
     result = @project.sync_monitors(entries: [
