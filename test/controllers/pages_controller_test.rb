@@ -161,6 +161,21 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
     assert_match(/Last updated/, response.body)
   end
 
+  # The repository ships TWO licences, deliberately and differently: the app is
+  # AGPLv3 (LICENSE) and the companion gem is MIT (gem/LICENSE,
+  # gem/stablemate.gemspec, gem/README.md — "intentionally more permissive than
+  # the Stablemate server"). Of everything on these two pages, a misstated
+  # licence is the claim a reader is most likely to rely on and act upon.
+  test "the terms state each licence this repository actually ships" do
+    repo = ApplicationController.helpers.stablemate_repo_url
+
+    get terms_path
+    assert_select "a[href=?]", "#{repo}/blob/main/LICENSE"
+    assert_select "a[href=?]", "#{repo}/blob/main/gem/LICENSE"
+    assert_match(/AGPL/, response.body)
+    assert_match(/MIT/, response.body)
+  end
+
   test "the privacy policy names what the code actually collects, keeps and shares" do
     get privacy_path
     # Retention and truncation come from the constants, never a hardcoded figure.
