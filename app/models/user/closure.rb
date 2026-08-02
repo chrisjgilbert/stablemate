@@ -20,6 +20,13 @@ class User
   #      re-declares `pay_customers` with the `dependent:` Pay omits). Rails wraps
   #      a destroy and its dependents in one transaction, so the account can never
   #      end up as a user row with no billing records or vice versa.
+  #
+  # …plus the one row no association reaches: a `waitlist_signups` entry for the
+  # same address. Someone who joined the waitlist and was later let in has their
+  # email in two tables, and only one of them hangs off the user. The privacy
+  # policy promises deletion removes every trace, so the sweep has to be
+  # deliberate — matched on the (normalised) address, never anyone else's, and
+  # inside the same transaction as the destroy so the account can't half-vanish.
   class Closure
     def initialize(user)
       @user = user
@@ -27,7 +34,11 @@ class User
 
     def close_account!
       @user.cancel_pro_subscription! if Stablemate.billing_enabled?
-      @user.destroy!
+
+      User.transaction do
+        WaitlistSignup.where(email_address: @user.email_address).delete_all
+        @user.destroy!
+      end
     end
   end
 end

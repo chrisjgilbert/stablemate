@@ -61,6 +61,7 @@ class User::ClosureTest < ActiveSupport::TestCase
       payment_method, charge = add_billing_history!(subscription)
       project = @user.projects.sole
       monitor_ids = project.monitors.ids
+      waitlist_entry = WaitlistSignup.create!(email_address: @user.email_address)
       stub_stripe_error(:delete, "/v1/subscriptions/#{subscription.processor_id}", status: 404)
 
       assert_raises(Pay::Error) { @user.close_account! }
@@ -73,6 +74,7 @@ class User::ClosureTest < ActiveSupport::TestCase
       # "Delete nothing" has to mean the app-side rows too, not just the pay_* ones.
       assert Project.exists?(project.id)
       assert_equal monitor_ids.sort, project.monitors.reload.ids.sort
+      assert WaitlistSignup.exists?(waitlist_entry.id), "an aborted closure must leave the waitlist row alone"
     end
   end
 
@@ -108,6 +110,23 @@ class User::ClosureTest < ActiveSupport::TestCase
       assert_not Incident.exists?(incident.id)
       assert_not UptimeDayStat.exists?(stat.id)
       assert_not Notification.exists?(notification.id)
+    end
+  end
+
+  # The waitlist is the one table holding a user's email that no association
+  # reaches — a user who joined the waitlist before being let in would otherwise
+  # leave that address behind after "delete everything". The privacy policy
+  # promises the whole trace goes, so closure sweeps it too (launch-readiness §0,
+  # chunk 1's carried-forward retention decision).
+  test "closing an account also forgets the matching waitlist entry" do
+    with_billing_disabled do
+      mine = WaitlistSignup.create!(email_address: @user.email_address.upcase)
+      theirs = WaitlistSignup.create!(email_address: "someone-else@example.com")
+
+      @user.close_account!
+
+      assert_not WaitlistSignup.exists?(mine.id), "the closed account's waitlist entry must go too"
+      assert WaitlistSignup.exists?(theirs.id), "nobody else's waitlist entry may be touched"
     end
   end
 end
