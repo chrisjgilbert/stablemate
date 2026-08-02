@@ -89,7 +89,7 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
   test "repeated wrong-password deletes are throttled" do
     sign_in @user
 
-    AccountsController::CREDENTIAL_ATTEMPT_LIMIT.times do
+    AccountCredentials::ATTEMPT_LIMIT.times do
       delete account_path, params: { current_password: "not-my-password" }
       assert_response :unprocessable_entity
     end
@@ -104,7 +104,7 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
   test "the delete and password-change forms share one attempt budget" do
     sign_in @user
 
-    AccountsController::CREDENTIAL_ATTEMPT_LIMIT.times do
+    AccountCredentials::ATTEMPT_LIMIT.times do
       delete account_path, params: { current_password: "not-my-password" }
     end
 
@@ -117,7 +117,7 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
   # out (and an attacker rotating IPs must not get a fresh budget).
   test "the throttle is per account, not global" do
     sign_in @user
-    AccountsController::CREDENTIAL_ATTEMPT_LIMIT.times do
+    AccountCredentials::ATTEMPT_LIMIT.times do
       delete account_path, params: { current_password: "not-my-password" }
     end
     delete account_path, params: { current_password: "not-my-password" }
