@@ -184,8 +184,10 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
       /#{ActiveSupport::NumberHelper.number_to_delimited(Stablemate::ERROR_MESSAGE_LIMIT)} characters/,
       response.body
     )
-    # Every subprocessor that actually receives data.
-    %w[Hetzner Cloudflare Stripe Postmark Honeybadger Slack].each do |processor|
+    # Every subprocessor that actually receives data, and that the repository can
+    # show receiving it (deploy.yml, config/initializers/pay.rb, honeybadger.yml,
+    # User::SignupAlert / WaitlistSignup::SlackAlert).
+    %w[Hetzner Cloudflare Stripe Honeybadger Slack].each do |processor|
       assert_match(/#{processor}/, response.body, "#{processor} must be disclosed as a subprocessor")
     end
     # The two strictly-necessary cookies, by name.
@@ -194,5 +196,33 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
     # The rights section has to tell a UK reader where to complain.
     assert_match(/Information Commissioner/, response.body)
     assert_match(/Last updated/, response.body)
+  end
+
+  # The SMTP provider IS a subprocessor and has to be disclosed — but which one
+  # is still an open owner decision (launch-readiness D2), and nothing in the
+  # repository names it: `.env.example` offers four as examples and production.rb
+  # takes whatever `SMTP_*` supplies. So it is disclosed as a category and left
+  # visibly unfinished, exactly like the controller's identity. Naming a
+  # processor we cannot show receiving data is the failure mode this page exists
+  # to avoid.
+  test "the privacy policy discloses email delivery without guessing the provider" do
+    get privacy_path
+
+    assert css_select("li").any? { |item| item.text.include?("delivery of our email") },
+      "email delivery must be disclosed as a subprocessor even before it is named"
+    assert_select ".legal .todo", 2,
+      "the operating entity and the SMTP provider are both still open — neither may read as settled"
+  end
+
+  # §2's account of what an error report carries is a claim about
+  # config/initializers/honeybadger.rb. They move together or the page is wrong.
+  test "the privacy policy describes error reports the way the filter behaves" do
+    get privacy_path
+
+    report = css_select("li").find { |item| item.text.include?("Error reports") }
+    assert report, "the policy must say what an error report can carry"
+    [ /Passwords/, /API keys/, /ping tokens/, /session cookies/ ].each do |stripped|
+      assert_match stripped, report.text, "what Honeybadger strips must be stated"
+    end
   end
 end
