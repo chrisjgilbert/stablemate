@@ -13,17 +13,16 @@
         <%= current_user.email_address %>
       </div>
     </div>
-    <% if current_user.verified? %>
-      <span class="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[11px] font-semibold bg-up-bg text-up-text shrink-0"
-            data-testid="verified-badge">
-        <span class="w-1.5 h-1.5 rounded-full bg-up-dot"></span> Verified
-      </span>
-    <% else %>
-      <span class="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[11px] font-semibold bg-pending-bg text-pending-text shrink-0"
-            data-testid="verified-badge">
-        <span class="w-1.5 h-1.5 rounded-full bg-pending-dot"></span> Unverified
-      </span>
-    <% end %>
+    <%# One badge with the state in ternaries — the two branches differed only in
+        three colour tokens and one word. shared/_status_badge was considered and
+        rejected: it speaks monitor-status vocabulary (up/down/paused/pending),
+        which is the wrong language for whether an email address is confirmed. %>
+    <% verified = current_user.verified? %>
+    <span class="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[11px] font-semibold shrink-0 <%= verified ? "bg-up-bg text-up-text" : "bg-pending-bg text-pending-text" %>"
+          data-testid="verified-badge">
+      <span class="w-1.5 h-1.5 rounded-full <%= verified ? "bg-up-dot" : "bg-pending-dot" %>"></span>
+      <%= verified ? "Verified" : "Unverified" %>
+    </span>
   </div>
 
   <%# Billing lives on its own page; link there only when the hosted tier is
