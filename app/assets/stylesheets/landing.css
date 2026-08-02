@@ -265,6 +265,29 @@ html:has(.lp){background:var(--paper)}
 .lp .faq dd a:hover{color:var(--rails-deep);border-bottom-color:var(--rails)}
 @media(max-width:760px){.lp .faq{grid-template-columns:1fr}}
 
+/* ---- legal documents: /terms + /privacy (WS-C) ----
+   Long-form prose on the same tokens as everything else on .lp — set at the
+   reading measure rather than the full 1060px wrap, because these are the only
+   pages anyone actually reads top to bottom. */
+.lp .legal{max-width:var(--measure);font-size:1.02rem;line-height:1.62;color:var(--ink-soft)}
+.lp .legal h2{font-family:var(--display);font-weight:700;font-size:1.45rem;color:var(--ink);
+  letter-spacing:-.01em;margin:46px 0 12px}
+.lp .legal h3{font-family:var(--display);font-weight:700;font-size:1.08rem;color:var(--ink);margin:26px 0 8px}
+.lp .legal p{margin:0 0 14px}
+.lp .legal ul{margin:0 0 16px;padding-left:1.15rem}
+.lp .legal li{margin:0 0 10px}
+.lp .legal strong{color:var(--ink);font-weight:600}
+.lp .legal a{color:var(--rails);text-decoration:none;border-bottom:1px solid var(--rule-strong)}
+.lp .legal a:hover{color:var(--rails-deep);border-bottom-color:var(--rails)}
+.lp .legal code{font-family:var(--mono);font-size:.84em;background:var(--paper-3);
+  padding:1px 5px;border-radius:4px;color:var(--ink)}
+.lp .legal__meta{font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--ink-faint);
+  border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:12px 0;margin:0 0 6px}
+/* Deliberately loud: an unfinished clause in a contract must never read as a
+   finished one. Same intent as the pricing page's "TBC" price placeholder. */
+.lp .legal .todo{font-family:var(--mono);font-size:.82em;color:var(--rails-deep);
+  background:var(--paper-3);border:1px dashed var(--rails);border-radius:4px;padding:1px 6px}
+
 /* ---- colophon ---- */
 .lp .colophon{border-top:1px solid var(--rule);padding:46px 0 60px;display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:32px}
 .lp .colophon .brand{font-size:20px}
