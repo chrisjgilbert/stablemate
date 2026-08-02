@@ -7,37 +7,19 @@
 # User#close_account! (see User::Closure); this controller only decides what the
 # user is shown.
 class AccountsController < ApplicationController
-  # Both credential checks under /account — this delete confirmation and the
-  # nested password change — re-verify the current password, which makes each an
-  # online password oracle for the one attacker that prompt exists to stop:
-  # somebody who already holds a stolen session cookie. Unlimited guesses hand
-  # them the account credential itself (and, since every guess costs a bcrypt
-  # hash, a cheap CPU amplifier). The unauthenticated credential surfaces are
-  # already bounded (SessionsController, PasswordsController, RegistrationsController);
-  # holding a cookie must not buy an exemption.
-  #
-  # ONE budget, keyed by user and shared across both controllers via `scope:`, so
-  # alternating between the two forms can't double it. Dedicated in-process store
-  # so the bound holds under the test env's null_store, mirroring
-  # PingsController/RegistrationsController.
-  RATE_LIMIT_STORE = ActiveSupport::Cache::MemoryStore.new
-  CREDENTIAL_ATTEMPT_LIMIT = 10
-  CREDENTIAL_ATTEMPT_WINDOW = 3.minutes
-  CREDENTIAL_ATTEMPT_SCOPE = :account_credentials
-  THROTTLED_MESSAGE = "Too many attempts. Please try again in a few minutes.".freeze
+  # The password prompt below is one of two credential checks under /account; the
+  # attempt budget it shares with the other (Accounts::PasswordsController) and
+  # the failure re-render both live in AccountCredentials.
+  include AccountCredentials
 
-  # Runs after require_authentication (an inherited before_action, so it is
-  # registered first), which is what makes Current.user safe to key on here.
-  rate_limit to: CREDENTIAL_ATTEMPT_LIMIT, within: CREDENTIAL_ATTEMPT_WINDOW, only: :destroy,
-    by: -> { Current.user.id }, scope: CREDENTIAL_ATTEMPT_SCOPE, store: RATE_LIMIT_STORE,
-    with: -> { render_show(status: :too_many_requests, alert: THROTTLED_MESSAGE) }
+  rate_limit_account_credentials only: :destroy
 
   def show
   end
 
   def destroy
     unless current_user.authenticate(params[:current_password].to_s)
-      return render_show(status: :unprocessable_entity, alert: "That password is incorrect.")
+      return render_account(WRONG_PASSWORD_MESSAGE)
     end
 
     current_user.close_account!
@@ -51,13 +33,8 @@ class AccountsController < ApplicationController
     # live. Same rescue pair as Billing::DowngradesController — cancel_now! wraps
     # Stripe's own errors in Pay::Error.
     Rails.logger.error("[account] closure failed (user=#{current_user.id}): #{e.class}: #{e.message}")
-    render_show(status: :service_unavailable,
-      alert: "We couldn't cancel your subscription, so nothing was deleted. Please try again or email support.")
+    render_account(
+      "We couldn't cancel your subscription, so nothing was deleted. Please try again or email support.",
+      status: :service_unavailable)
   end
-
-  private
-    def render_show(status:, alert:)
-      flash.now[:alert] = alert
-      render :show, status: status
-    end
 end
