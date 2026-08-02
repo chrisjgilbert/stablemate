@@ -1,4 +1,12 @@
-<% password_digest = BCrypt::Password.create("password1234") %>
+<%# Cost 4 (BCrypt's minimum), not the default 12. Every sign_in, every
+    current-password re-check and every "the old password still works" assertion
+    in the suite VERIFIES this digest, and bcrypt's verification cost is baked
+    into the digest itself — ActiveModel::SecurePassword.min_cost only lowers the
+    cost of digests the app CREATES, so it does nothing for a fixture. At cost 12
+    one `authenticate` is ~260ms, and the /account throttle tests alone drive it
+    ten times apiece. This is still a real bcrypt digest going through the real
+    has_secure_password path; only the work factor is dialled down. %>
+<% password_digest = BCrypt::Password.create("password1234", cost: BCrypt::Engine::MIN_COST) %>
 
 alice:
   email_address: alice@example.com
