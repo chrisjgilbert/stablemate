@@ -11,6 +11,7 @@ require_relative "test_helpers/session_test_helper"
 require "webmock/minitest"
 WebMock.disable_net_connect!(allow_localhost: true)
 require_relative "test_helpers/stripe_api_stubs"
+require_relative "test_helpers/pay_subscription_mirror"
 
 # Toggle the hosted-tier billing config-gate around a block. Stripe keys drive
 # Stablemate.billing_enabled? at runtime; rather than poke ENV/credentials we
@@ -121,6 +122,7 @@ module ActiveSupport
 
     include BillingGateTestHelper
     include SlackGateTestHelper
+    include PaySubscriptionMirror
 
     # Rate-limit stores are dedicated in-process MemoryStores that persist across
     # tests within a worker; clear them before each test so ordinary per-test

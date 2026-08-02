@@ -11,19 +11,10 @@ class User::SubscriptionTest < ActiveSupport::TestCase
     @project.monitors.delete_all
   end
 
-  def give_active_pro!(status: "active")
-    customer = @user.set_payment_processor(:stripe)
-    customer.update!(processor_id: "cus_#{SecureRandom.hex(4)}")
-    customer.subscriptions.create!(
-      name: "pro", processor_id: "sub_#{SecureRandom.hex(4)}",
-      processor_plan: "price_pro", status: status, quantity: 1
-    )
-  end
-
   test "subscribed_to_pro? reflects the active Pay subscription mirror" do
     with_billing_enabled do
       refute @user.subscribed_to_pro?
-      give_active_pro!
+      give_pro_subscription!
       assert @user.reload.subscribed_to_pro?
     end
   end
@@ -37,7 +28,7 @@ class User::SubscriptionTest < ActiveSupport::TestCase
     with_billing_enabled do
       refute @user.live_pro_subscription?
 
-      give_active_pro!(status: "past_due")
+      give_pro_subscription!(status: "past_due")
       @user.reload
 
       assert @user.live_pro_subscription?
@@ -48,7 +39,7 @@ class User::SubscriptionTest < ActiveSupport::TestCase
 
   test "live_pro_subscription? ignores terminal subscriptions" do
     with_billing_enabled do
-      give_active_pro!(status: "canceled")
+      give_pro_subscription!(status: "canceled")
       refute @user.reload.live_pro_subscription?
 
       @user.pay_subscriptions.update_all(status: "incomplete_expired")
@@ -124,7 +115,7 @@ class User::SubscriptionTest < ActiveSupport::TestCase
   test "re-upgrading to pro clears the choose-N lock and its deadline" do
     with_billing_enabled do
       @user.update!(plan: "free", awaiting_downgrade_choice: true, downgrade_choice_deadline_at: 3.days.from_now)
-      give_active_pro!
+      give_pro_subscription!
 
       @user.sync_plan_from_subscription! # active sub ⇒ pro
 
@@ -251,7 +242,7 @@ class User::SubscriptionTest < ActiveSupport::TestCase
   # first is User::Closure's job and is tested there.
   test "destroying the user alone takes every pay_* row with it" do
     with_billing_enabled do
-      subscription = give_active_pro!(status: "canceled")
+      subscription = give_pro_subscription!(status: "canceled")
       customer = subscription.customer
       payment_method = customer.payment_methods.create!(processor_id: "pm_#{SecureRandom.hex(4)}",
         payment_method_type: "card", default: true, data: { brand: "Visa", last4: "4242" })

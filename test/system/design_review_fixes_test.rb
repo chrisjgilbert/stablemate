@@ -10,13 +10,9 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
 
   setup { @alice = users(:alice); @project = @alice.projects.sole }
 
+  # This file's user is @alice, and the caller names the subscription it stubs.
   def give_active_pro_subscription!(sub_id)
-    customer = @alice.set_payment_processor(:stripe)
-    customer.update!(processor_id: "cus_sys_#{SecureRandom.hex(4)}")
-    customer.subscriptions.create!(
-      name: "pro", processor_id: sub_id,
-      processor_plan: "price_pro", status: "active", quantity: 1
-    )
+    give_pro_subscription!(user: @alice, subscription_id: sub_id)
   end
 
   # S-DR1 (WU-2, H1) — pausing a DOWN monitor clears its incident, and after a
