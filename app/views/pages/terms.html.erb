@@ -1,4 +1,3 @@
-<% content_for :title, "Terms of Service — Stablemate" %>
 <%#
   Terms of Service (launch-readiness §4 / WS-C). Static marketing-layout page,
   same "Omakase" system as home/pricing — no new CSS system, no client JS; the
@@ -23,250 +22,237 @@
 <% pro_limit = Stablemate::PRO_PLAN_MONITOR_LIMIT %>
 <% grace_days = (Stablemate::DOWNGRADE_GRACE_PERIOD / 1.day).to_i %>
 
-<%= render "nav" %>
+<%= render layout: "legal_document", locals: {
+      heading: "Terms of Service",
+      standfirst: "The agreement between you and us for the Stablemate service we host at stablemate.dev. Plain English, and short enough to actually read."
+    } do %>
+  <p class="legal__meta">
+    Last updated <time datetime="2026-08-02">2 August 2026</time><br>
+    Questions about these terms: <a href="mailto:support@stablemate.dev">support@stablemate.dev</a><br>
+    See also our <%= link_to "Privacy Policy", privacy_path %>.
+  </p>
 
-<section class="section">
-  <div class="wrap sec-intro">
-    <p class="kicker">Legal</p>
-    <h1 class="flow h2">Terms of Service</h1>
-    <p class="sub">The agreement between you and us for the Stablemate service we host at stablemate.dev. Plain English, and short enough to actually read.</p>
-  </div>
-</section>
+  <h2>1. Who we are, and what these terms cover</h2>
+  <p>
+    Stablemate is a monitoring service for scheduled jobs. These terms are between you and
+    <span class="todo">[operating entity, company number and registered address — to be completed before launch]</span>
+    (&ldquo;Stablemate&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;), and they govern <strong>the managed service we run at stablemate.dev</strong> only.
+  </p>
+  <p>
+    By creating an account or using the service you accept these terms. If you are agreeing on behalf of a
+    company or other organisation, you confirm you are allowed to bind it, and &ldquo;you&rdquo; means that organisation.
+  </p>
+  <p>
+    Stablemate is also open-source software you can run yourself. Section 7 explains why these terms do not
+    apply to that.
+  </p>
 
-<section class="section" style="padding-top:0">
-  <div class="wrap">
-    <article class="legal">
-      <p class="legal__meta">
-        Last updated <time datetime="2026-08-02">2 August 2026</time><br>
-        Questions about these terms: <a href="mailto:support@stablemate.dev">support@stablemate.dev</a><br>
-        See also our <%= link_to "Privacy Policy", privacy_path %>.
-      </p>
+  <h2>2. What the service does</h2>
+  <p>
+    You register a monitor for a scheduled job. Your job calls a unique ping URL each time it runs. If a ping
+    does not arrive within the interval and grace period you configured, or if your job reports a failure, we
+    record an incident and email you. When the job pings successfully again, we email you that it recovered.
+    We also keep a history of pings and a per-day uptime record.
+  </p>
+  <p>
+    That is the whole product. Stablemate watches for the <em>absence</em> of a signal you send us — it does not
+    run your jobs, cannot fix them, and cannot tell you anything your jobs do not report.
+  </p>
 
-      <h2>1. Who we are, and what these terms cover</h2>
-      <p>
-        Stablemate is a monitoring service for scheduled jobs. These terms are between you and
-        <span class="todo">[operating entity, company number and registered address — to be completed before launch]</span>
-        (&ldquo;Stablemate&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;), and they govern <strong>the managed service we run at stablemate.dev</strong> only.
-      </p>
-      <p>
-        By creating an account or using the service you accept these terms. If you are agreeing on behalf of a
-        company or other organisation, you confirm you are allowed to bind it, and &ldquo;you&rdquo; means that organisation.
-      </p>
-      <p>
-        Stablemate is also open-source software you can run yourself. Section 7 explains why these terms do not
-        apply to that.
-      </p>
+  <h2>3. Your account</h2>
+  <ul>
+    <li>You need a working email address. Alerts, verification and account notices go to it, so keep it current.</li>
+    <li>You are responsible for everything done through your account, and for keeping your password safe.</li>
+    <li>
+      <strong>Ping tokens and API keys are secrets.</strong> Anyone holding a monitor&rsquo;s ping token can mark it
+      healthy; anyone holding an API key can read and change your monitors. Treat them like passwords, keep them
+      out of public repositories, and rotate them if they leak.
+    </li>
+    <li>The service is not intended for children. You must be at least 16 to create an account.</li>
+    <li>You can delete your account at any time from your account page. See section 9.</li>
+  </ul>
 
-      <h2>2. What the service does</h2>
-      <p>
-        You register a monitor for a scheduled job. Your job calls a unique ping URL each time it runs. If a ping
-        does not arrive within the interval and grace period you configured, or if your job reports a failure, we
-        record an incident and email you. When the job pings successfully again, we email you that it recovered.
-        We also keep a history of pings and a per-day uptime record.
-      </p>
-      <p>
-        That is the whole product. Stablemate watches for the <em>absence</em> of a signal you send us — it does not
-        run your jobs, cannot fix them, and cannot tell you anything your jobs do not report.
-      </p>
+  <h2>4. Acceptable use</h2>
+  <p>Don&rsquo;t:</p>
+  <ul>
+    <li>use the service unlawfully, or to monitor anything unlawful;</li>
+    <li>probe, scan, overload or attempt to break the service, or try to reach data that isn&rsquo;t yours &mdash; including guessing other people&rsquo;s ping tokens or API keys;</li>
+    <li>use the ping endpoint as anything other than a heartbeat &mdash; it is not a general-purpose logging, storage or messaging endpoint;</li>
+    <li>send us personal data, credentials or other sensitive information inside monitor names, project names or reported error messages (see the Privacy Policy &mdash; we store what you send, verbatim);</li>
+    <li>resell or white-label the hosted service, or share one account across separate organisations to work around plan limits.</li>
+  </ul>
+  <p>
+    The ping endpoint and the sign-in and API surfaces are rate-limited. The limits are set well above any
+    legitimate schedule, but automated retry loops can hit them; a throttled request is rejected, not billed.
+  </p>
 
-      <h2>3. Your account</h2>
-      <ul>
-        <li>You need a working email address. Alerts, verification and account notices go to it, so keep it current.</li>
-        <li>You are responsible for everything done through your account, and for keeping your password safe.</li>
-        <li>
-          <strong>Ping tokens and API keys are secrets.</strong> Anyone holding a monitor&rsquo;s ping token can mark it
-          healthy; anyone holding an API key can read and change your monitors. Treat them like passwords, keep them
-          out of public repositories, and rotate them if they leak.
-        </li>
-        <li>The service is not intended for children. You must be at least 16 to create an account.</li>
-        <li>You can delete your account at any time from your account page. See section 9.</li>
-      </ul>
+  <h2>5. Plans, payment and cancellation</h2>
+  <h3>Plans</h3>
+  <ul>
+    <li><strong>Free</strong> &mdash; up to <%= free_limit %> monitors, no card required, for as long as you want it.</li>
+    <li><strong>Pro</strong> &mdash; up to <%= pro_limit %> monitors, billed monthly in advance.</li>
+  </ul>
+  <p>
+    Paused monitors still count towards your plan&rsquo;s allowance; only deleting one frees the slot. Prices are
+    exclusive of VAT and any other sales tax, which is calculated and added at checkout where it applies.
+  </p>
 
-      <h2>4. Acceptable use</h2>
-      <p>Don&rsquo;t:</p>
-      <ul>
-        <li>use the service unlawfully, or to monitor anything unlawful;</li>
-        <li>probe, scan, overload or attempt to break the service, or try to reach data that isn&rsquo;t yours &mdash; including guessing other people&rsquo;s ping tokens or API keys;</li>
-        <li>use the ping endpoint as anything other than a heartbeat &mdash; it is not a general-purpose logging, storage or messaging endpoint;</li>
-        <li>send us personal data, credentials or other sensitive information inside monitor names, project names or reported error messages (see the Privacy Policy &mdash; we store what you send, verbatim);</li>
-        <li>resell or white-label the hosted service, or share one account across separate organisations to work around plan limits.</li>
-      </ul>
-      <p>
-        The ping endpoint and the sign-in and API surfaces are rate-limited. The limits are set well above any
-        legitimate schedule, but automated retry loops can hit them; a throttled request is rejected, not billed.
-      </p>
+  <h3>Payment</h3>
+  <p>
+    Payments are taken by <a href="https://stripe.com" rel="noopener">Stripe</a>. Card details go straight to
+    Stripe and never touch our servers. Your subscription renews automatically each month until it is cancelled.
+    If a payment fails, Stripe retries it on its usual schedule; see &ldquo;If a payment fails&rdquo; below.
+  </p>
 
-      <h2>5. Plans, payment and cancellation</h2>
-      <h3>Plans</h3>
-      <ul>
-        <li><strong>Free</strong> &mdash; up to <%= free_limit %> monitors, no card required, for as long as you want it.</li>
-        <li><strong>Pro</strong> &mdash; up to <%= pro_limit %> monitors, billed monthly in advance.</li>
-      </ul>
-      <p>
-        Paused monitors still count towards your plan&rsquo;s allowance; only deleting one frees the slot. Prices are
-        exclusive of VAT and any other sales tax, which is calculated and added at checkout where it applies.
-      </p>
+  <h3>Cancelling &mdash; there are two routes, and they behave differently</h3>
+  <ul>
+    <li>
+      <strong>Downgrading inside Stablemate</strong> (Billing &rarr; Downgrade to Free) cancels your subscription
+      <strong>immediately</strong>. You move to the Free plan there and then, and <strong>we do not refund the
+      unused part of the month</strong>. If you have more than <%= free_limit %> monitors at that point you must
+      choose which <%= free_limit %> stay active; the rest are <em>suspended</em>, not deleted, and come back if
+      you upgrade again.
+    </li>
+    <li>
+      <strong>Cancelling in the Stripe billing portal</strong> (Billing &rarr; Manage payment details) takes effect
+      on the schedule Stripe&rsquo;s portal is configured for &mdash; normally <strong>at the end of the period you
+      have already paid for</strong>. You keep Pro until then, and your plan drops to Free when Stripe tells us
+      the subscription has ended.
+    </li>
+  </ul>
+  <p>
+    Either way, cancelling never deletes your monitors or their history. To delete your data, delete your
+    account (section 9).
+  </p>
 
-      <h3>Payment</h3>
-      <p>
-        Payments are taken by <a href="https://stripe.com" rel="noopener">Stripe</a>. Card details go straight to
-        Stripe and never touch our servers. Your subscription renews automatically each month until it is cancelled.
-        If a payment fails, Stripe retries it on its usual schedule; see &ldquo;If a payment fails&rdquo; below.
-      </p>
+  <h3>If a payment fails, or a subscription ends unexpectedly</h3>
+  <p>
+    Your plan drops to Free, but nothing is suspended straight away &mdash; a billing blip must never silently stop
+    your monitoring. Instead, if you are over the Free allowance, you get <strong><%= grace_days %> days</strong> to
+    choose which <%= free_limit %> monitors stay active. Everything keeps running during that window. If the
+    window passes without a choice, we keep your <%= free_limit %> oldest monitors active and suspend the rest.
+    Suspended monitors are retained, never deleted, and reactivate if you go back to Pro.
+  </p>
 
-      <h3>Cancelling &mdash; there are two routes, and they behave differently</h3>
-      <ul>
-        <li>
-          <strong>Downgrading inside Stablemate</strong> (Billing &rarr; Downgrade to Free) cancels your subscription
-          <strong>immediately</strong>. You move to the Free plan there and then, and <strong>we do not refund the
-          unused part of the month</strong>. If you have more than <%= free_limit %> monitors at that point you must
-          choose which <%= free_limit %> stay active; the rest are <em>suspended</em>, not deleted, and come back if
-          you upgrade again.
-        </li>
-        <li>
-          <strong>Cancelling in the Stripe billing portal</strong> (Billing &rarr; Manage payment details) takes effect
-          on the schedule Stripe&rsquo;s portal is configured for &mdash; normally <strong>at the end of the period you
-          have already paid for</strong>. You keep Pro until then, and your plan drops to Free when Stripe tells us
-          the subscription has ended.
-        </li>
-      </ul>
-      <p>
-        Either way, cancelling never deletes your monitors or their history. To delete your data, delete your
-        account (section 9).
-      </p>
+  <h3>Refunds and price changes</h3>
+  <p>
+    We don&rsquo;t offer pro-rata refunds for a mid-month downgrade. If something goes materially wrong on our side,
+    email us &mdash; we would rather sort it out than argue about it. Nothing here affects any statutory rights you
+    have as a consumer. We may change our prices with at least 30 days&rsquo; notice by email; the new price applies
+    from your next renewal, and you can cancel before it takes effect.
+  </p>
 
-      <h3>If a payment fails, or a subscription ends unexpectedly</h3>
-      <p>
-        Your plan drops to Free, but nothing is suspended straight away &mdash; a billing blip must never silently stop
-        your monitoring. Instead, if you are over the Free allowance, you get <strong><%= grace_days %> days</strong> to
-        choose which <%= free_limit %> monitors stay active. Everything keeps running during that window. If the
-        window passes without a choice, we keep your <%= free_limit %> oldest monitors active and suspend the rest.
-        Suspended monitors are retained, never deleted, and reactivate if you go back to Pro.
-      </p>
+  <h2>6. Availability &mdash; this is not a guarantee</h2>
+  <p>
+    <strong>Stablemate is provided on a best-efforts basis. There is no SLA, no uptime guarantee and no
+    service-level agreement of any kind, on any plan.</strong> We say this bluntly because of what the product
+    is: a monitoring tool creates a temptation to treat it as a safety net, and it is not one.
+  </p>
+  <p>Specifically, we do not promise that:</p>
+  <ul>
+    <li>the service will be available or uninterrupted &mdash; we may take it down for maintenance, sometimes without notice;</li>
+    <li>every ping will be recorded, or recorded promptly;</li>
+    <li>every alert will be sent, delivered, or delivered quickly &mdash; email delivery depends on third parties and on your own mail provider, neither of which we control;</li>
+    <li>an alert that is not sent means your job is healthy.</li>
+  </ul>
+  <p>
+    Do not make Stablemate the only thing standing between you and a serious loss. If a job matters that much,
+    it needs more than one safeguard.
+  </p>
 
-      <h3>Refunds and price changes</h3>
-      <p>
-        We don&rsquo;t offer pro-rata refunds for a mid-month downgrade. If something goes materially wrong on our side,
-        email us &mdash; we would rather sort it out than argue about it. Nothing here affects any statutory rights you
-        have as a consumer. We may change our prices with at least 30 days&rsquo; notice by email; the new price applies
-        from your next renewal, and you can cancel before it takes effect.
-      </p>
+  <h2>7. Self-hosting and the licence</h2>
+  <p>
+    The Stablemate application is released under the
+    <a href="<%= stablemate_repo_url %>/blob/main/LICENSE" rel="noopener">GNU AGPL v3</a>. The companion Ruby gem
+    is released separately, under the deliberately more permissive
+    <a href="<%= stablemate_repo_url %>/blob/main/gem/LICENSE" rel="noopener">MIT licence</a>, so you can add it
+    to a closed-source application. You are free to run your own instance under those licences, with no account
+    with us, no monitor limits and no payment.
+  </p>
+  <p>
+    <strong>These terms cover only the service we host.</strong> If you self-host, your rights and obligations
+    come from those licences, not from this page; we provide no support, no warranty and no service for your
+    instance, and we receive none of your data. Each licence&rsquo;s own disclaimer of warranty applies to the
+    software itself.
+  </p>
 
-      <h2>6. Availability &mdash; this is not a guarantee</h2>
-      <p>
-        <strong>Stablemate is provided on a best-efforts basis. There is no SLA, no uptime guarantee and no
-        service-level agreement of any kind, on any plan.</strong> We say this bluntly because of what the product
-        is: a monitoring tool creates a temptation to treat it as a safety net, and it is not one.
-      </p>
-      <p>Specifically, we do not promise that:</p>
-      <ul>
-        <li>the service will be available or uninterrupted &mdash; we may take it down for maintenance, sometimes without notice;</li>
-        <li>every ping will be recorded, or recorded promptly;</li>
-        <li>every alert will be sent, delivered, or delivered quickly &mdash; email delivery depends on third parties and on your own mail provider, neither of which we control;</li>
-        <li>an alert that is not sent means your job is healthy.</li>
-      </ul>
-      <p>
-        Do not make Stablemate the only thing standing between you and a serious loss. If a job matters that much,
-        it needs more than one safeguard.
-      </p>
+  <h2>8. Your data</h2>
+  <p>
+    What we collect, why, how long we keep it and who processes it on our behalf is set out in our
+    <%= link_to "Privacy Policy", privacy_path %>, which forms part of these terms.
+  </p>
+  <p>
+    Your monitoring data is yours. We use it to run the service for you and for nothing else &mdash; we do not sell
+    it, and we do not use it to train anything. You can export your monitors at any time through the API, or ask
+    us for a copy.
+  </p>
 
-      <h2>7. Self-hosting and the licence</h2>
-      <p>
-        The Stablemate application is released under the
-        <a href="<%= stablemate_repo_url %>/blob/main/LICENSE" rel="noopener">GNU AGPL v3</a>. The companion Ruby gem
-        is released separately, under the deliberately more permissive
-        <a href="<%= stablemate_repo_url %>/blob/main/gem/LICENSE" rel="noopener">MIT licence</a>, so you can add it
-        to a closed-source application. You are free to run your own instance under those licences, with no account
-        with us, no monitor limits and no payment.
-      </p>
-      <p>
-        <strong>These terms cover only the service we host.</strong> If you self-host, your rights and obligations
-        come from those licences, not from this page; we provide no support, no warranty and no service for your
-        instance, and we receive none of your data. Each licence&rsquo;s own disclaimer of warranty applies to the
-        software itself.
-      </p>
+  <h2>9. Suspension and termination</h2>
+  <p>
+    <strong>You</strong> can close your account at any time from Account &rarr; Delete this account. That cancels any
+    active subscription immediately, with no refund for the unused part of the month, and permanently deletes
+    your account and its data as described in the Privacy Policy. It cannot be undone.
+  </p>
+  <p>
+    <strong>We</strong> may suspend or close an account that breaches these terms, that we reasonably believe is
+    being used unlawfully or abusively, or where we are required to by law. Where it is practical and lawful to
+    do so we will tell you first and give you a chance to put it right. We may also stop offering the managed
+    service entirely, in which case we will give you reasonable notice and a fair refund of anything you have
+    paid for a period you will not get.
+  </p>
 
-      <h2>8. Your data</h2>
-      <p>
-        What we collect, why, how long we keep it and who processes it on our behalf is set out in our
-        <%= link_to "Privacy Policy", privacy_path %>, which forms part of these terms.
-      </p>
-      <p>
-        Your monitoring data is yours. We use it to run the service for you and for nothing else &mdash; we do not sell
-        it, and we do not use it to train anything. You can export your monitors at any time through the API, or ask
-        us for a copy.
-      </p>
+  <h2>10. Changes to the service and to these terms</h2>
+  <p>
+    The product will change &mdash; features get added, and occasionally removed. If we make a change that materially
+    reduces what you are paying for, or a material change to these terms, we will email you at least 30 days
+    beforehand. Continuing to use the service after a change takes effect means you accept it; if you don&rsquo;t,
+    cancel or delete your account.
+  </p>
 
-      <h2>9. Suspension and termination</h2>
-      <p>
-        <strong>You</strong> can close your account at any time from Account &rarr; Delete this account. That cancels any
-        active subscription immediately, with no refund for the unused part of the month, and permanently deletes
-        your account and its data as described in the Privacy Policy. It cannot be undone.
-      </p>
-      <p>
-        <strong>We</strong> may suspend or close an account that breaches these terms, that we reasonably believe is
-        being used unlawfully or abusively, or where we are required to by law. Where it is practical and lawful to
-        do so we will tell you first and give you a chance to put it right. We may also stop offering the managed
-        service entirely, in which case we will give you reasonable notice and a fair refund of anything you have
-        paid for a period you will not get.
-      </p>
+  <h2>11. Liability</h2>
+  <p>
+    The service is provided &ldquo;as is&rdquo;. To the fullest extent the law allows, we exclude all implied warranties
+    and conditions.
+  </p>
+  <p>We are not liable for:</p>
+  <ul>
+    <li>loss of profit, revenue, business, goodwill, anticipated savings or opportunity;</li>
+    <li>loss or corruption of data;</li>
+    <li>indirect or consequential loss of any kind;</li>
+    <li>
+      any loss arising because an alert was missed, late, wrong or undelivered, or because a monitor was not
+      watching what you assumed it was watching.
+    </li>
+  </ul>
+  <p>
+    Where we are liable, our total liability to you for all claims in any 12-month period is limited to the
+    greater of the fees you paid us in the 12 months before the claim arose, and £100.
+  </p>
+  <p>
+    Nothing in these terms limits or excludes liability for death or personal injury caused by negligence, for
+    fraud or fraudulent misrepresentation, or for anything else that cannot lawfully be limited or excluded. If
+    you are a consumer, your statutory rights are unaffected.
+  </p>
 
-      <h2>10. Changes to the service and to these terms</h2>
-      <p>
-        The product will change &mdash; features get added, and occasionally removed. If we make a change that materially
-        reduces what you are paying for, or a material change to these terms, we will email you at least 30 days
-        beforehand. Continuing to use the service after a change takes effect means you accept it; if you don&rsquo;t,
-        cancel or delete your account.
-      </p>
+  <h2>12. General</h2>
+  <p>
+    If any part of these terms turns out to be unenforceable, the rest still stands. Not enforcing something
+    straight away doesn&rsquo;t mean we have given it up. You may not transfer your rights under these terms without
+    our consent; we may transfer ours if the service is sold or reorganised, and will tell you if that happens.
+    Nobody other than you and us has any rights under these terms.
+  </p>
 
-      <h2>11. Liability</h2>
-      <p>
-        The service is provided &ldquo;as is&rdquo;. To the fullest extent the law allows, we exclude all implied warranties
-        and conditions.
-      </p>
-      <p>We are not liable for:</p>
-      <ul>
-        <li>loss of profit, revenue, business, goodwill, anticipated savings or opportunity;</li>
-        <li>loss or corruption of data;</li>
-        <li>indirect or consequential loss of any kind;</li>
-        <li>
-          any loss arising because an alert was missed, late, wrong or undelivered, or because a monitor was not
-          watching what you assumed it was watching.
-        </li>
-      </ul>
-      <p>
-        Where we are liable, our total liability to you for all claims in any 12-month period is limited to the
-        greater of the fees you paid us in the 12 months before the claim arose, and £100.
-      </p>
-      <p>
-        Nothing in these terms limits or excludes liability for death or personal injury caused by negligence, for
-        fraud or fraudulent misrepresentation, or for anything else that cannot lawfully be limited or excluded. If
-        you are a consumer, your statutory rights are unaffected.
-      </p>
+  <h2>13. Governing law</h2>
+  <p>
+    These terms and any dispute arising out of them are governed by <strong>the laws of England and Wales</strong>,
+    and the courts of England and Wales have exclusive jurisdiction. If you are a consumer resident elsewhere in
+    the UK or in the EU, you keep the benefit of any mandatory protections of your home country&rsquo;s law, and may
+    bring proceedings there.
+  </p>
 
-      <h2>12. General</h2>
-      <p>
-        If any part of these terms turns out to be unenforceable, the rest still stands. Not enforcing something
-        straight away doesn&rsquo;t mean we have given it up. You may not transfer your rights under these terms without
-        our consent; we may transfer ours if the service is sold or reorganised, and will tell you if that happens.
-        Nobody other than you and us has any rights under these terms.
-      </p>
-
-      <h2>13. Governing law</h2>
-      <p>
-        These terms and any dispute arising out of them are governed by <strong>the laws of England and Wales</strong>,
-        and the courts of England and Wales have exclusive jurisdiction. If you are a consumer resident elsewhere in
-        the UK or in the EU, you keep the benefit of any mandatory protections of your home country&rsquo;s law, and may
-        bring proceedings there.
-      </p>
-
-      <h2>14. Contact</h2>
-      <p>
-        <a href="mailto:support@stablemate.dev">support@stablemate.dev</a> &mdash; for anything at all, including the
-        things in section 5 you would rather not have to argue about.
-      </p>
-    </article>
-  </div>
-</section>
-
-<%= render "colophon" %>
+  <h2>14. Contact</h2>
+  <p>
+    <a href="mailto:support@stablemate.dev">support@stablemate.dev</a> &mdash; for anything at all, including the
+    things in section 5 you would rather not have to argue about.
+  </p>
+<% end %>

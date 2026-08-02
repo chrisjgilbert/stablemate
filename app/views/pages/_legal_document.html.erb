@@ -1,0 +1,34 @@
+<%# locals: (heading:, standfirst:) %>
+<%#
+  Page furniture for a published legal document (WS-C). /terms and /privacy are
+  the same page with different prose — same marketing nav, same "Legal" kicker
+  and standfirst, same reading-measure `.legal` article, same colophon — so the
+  chrome lives here once and each document file is just its own text. It is a
+  partial LAYOUT: the documents render it with a block, and the block is what
+  lands inside `<article class="legal">`.
+
+  The "last updated" line deliberately stays in each document rather than moving
+  here: the two are amended separately, so one shared date would be a claim we
+  couldn't keep true.
+%>
+<% content_for :title, "#{heading} — Stablemate" %>
+
+<%= render "nav" %>
+
+<section class="section">
+  <div class="wrap sec-intro">
+    <p class="kicker">Legal</p>
+    <h1 class="flow h2"><%= heading %></h1>
+    <p class="sub"><%= standfirst %></p>
+  </div>
+</section>
+
+<section class="section" style="padding-top:0">
+  <div class="wrap">
+    <article class="legal">
+      <%= yield %>
+    </article>
+  </div>
+</section>
+
+<%= render "colophon" %>
