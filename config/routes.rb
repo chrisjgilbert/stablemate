@@ -91,6 +91,12 @@ Rails.application.routes.draw do
   # billing surface (unlike the Billing:: namespace, which 404s when keyless).
   get "pricing", to: "pages#pricing"
 
+  # Public legal documents (launch-readiness §4 / WS-C). Same shape as /pricing:
+  # published to everyone, signed in or not, and deliberately outside the billing
+  # config-gate — a self-hoster's users read the same terms as anyone else's.
+  get "terms",   to: "pages#terms"
+  get "privacy", to: "pages#privacy"
+
   # Defines the root path route ("/"). Anonymous visitors get the marketing
   # landing page; signed-in users are redirected to their dashboard. (phase-4)
   root "pages#home"

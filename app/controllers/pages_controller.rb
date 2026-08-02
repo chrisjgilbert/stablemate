@@ -1,12 +1,14 @@
 class PagesController < ApplicationController
-  # The marketing landing and pricing pages are public. Signed-in users skip the
-  # landing page and go straight to their dashboard; pricing stays visible to
-  # everyone, signed in or not — it's marketing, not app chrome.
-  allow_unauthenticated_access only: %i[home pricing]
+  # Every page here is public. Signed-in users skip the landing page and go
+  # straight to their dashboard; pricing and the two legal documents stay visible
+  # to everyone, signed in or not — they're publications, not app chrome.
+  PUBLIC_PAGES = %i[home pricing terms privacy].freeze
 
-  # Both render full-bleed — their own nav/footer and full-width sections — so
+  allow_unauthenticated_access only: PUBLIC_PAGES
+
+  # They render full-bleed — their own nav/footer and full-width sections — so
   # they opt out of the constrained authenticated app chrome.
-  layout "landing", only: %i[home pricing]
+  layout "landing", only: PUBLIC_PAGES
 
   def home
     if authenticated?
@@ -18,5 +20,14 @@ class PagesController < ApplicationController
   end
 
   def pricing
+  end
+
+  # The legal pair (WS-C). Static documents — no ivars, no branching: everything
+  # a reader sees is in the view, and the figures it quotes come from the
+  # Stablemate constants so the policy can't drift from the code.
+  def terms
+  end
+
+  def privacy
   end
 end

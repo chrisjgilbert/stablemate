@@ -1,0 +1,273 @@
+<% content_for :title, "Privacy Policy — Stablemate" %>
+<%#
+  Privacy Policy (launch-readiness §4 / WS-C). Static marketing-layout page, same
+  system as terms.html.erb.
+
+  THE RULE FOR THIS FILE: every sentence is a claim about what the code does, and
+  each one was checked against the code before it was written — not against a
+  template. The inventory below maps to:
+    * users (email_address, password_digest, plan, verified_at, downgrade state)
+    * sessions (ip_address, user_agent) — Authentication#start_new_session_for
+    * ping_events (source_ip, duration_ms, error) — PingsController + PingEvent
+    * incidents (error) — Monitor#open_incident!, deliberately outliving pruning
+    * projects/monitors names, api_keys (digest + last4), waitlist_signups
+    * PING_RETENTION / ERROR_MESSAGE_LIMIT, rendered from the constants
+    * cookies: signed permanent :session_id + Rails' _stablemate_session
+    * subprocessors: Hetzner + Cloudflare (deploy.yml/production.rb), Stripe
+      (Pay), Postmark (SMTP — owner decision D2), Honeybadger (config/
+      honeybadger.yml), Slack (User::SignupAlert + WaitlistSignup::SlackAlert, D4)
+  If any of those change, this page changes in the same PR. An unverifiable
+  sentence in a privacy policy is a liability, so don't add one.
+
+  ⚠️ OWNER ACTION before launch: the controller identity in §1 is a visible
+  placeholder, same as the Terms — fill in the registered name/address, and add
+  an ICO registration number if one is required.
+%>
+<% retention_days = ping_retention_days %>
+<% error_limit = number_with_delimiter(Stablemate::ERROR_MESSAGE_LIMIT) %>
+
+<%= render "nav" %>
+
+<section class="section">
+  <div class="wrap sec-intro">
+    <p class="kicker">Legal</p>
+    <h1 class="flow h2">Privacy Policy</h1>
+    <p class="sub">What we collect, why, how long we keep it, and who else sees it. Written against the actual code, so it says what really happens.</p>
+  </div>
+</section>
+
+<section class="section" style="padding-top:0">
+  <div class="wrap">
+    <article class="legal">
+      <p class="legal__meta">
+        Last updated <time datetime="2026-08-02">2 August 2026</time><br>
+        Privacy questions and requests: <a href="mailto:support@stablemate.dev">support@stablemate.dev</a><br>
+        See also our <%= link_to "Terms of Service", terms_path %>.
+      </p>
+
+      <h2>1. Who this applies to</h2>
+      <p>
+        This policy covers <strong>the managed Stablemate service at stablemate.dev</strong>. The data controller is
+        <span class="todo">[operating entity and registered address — to be completed before launch]</span>. You can
+        reach us at <a href="mailto:support@stablemate.dev">support@stablemate.dev</a>.
+      </p>
+      <p>
+        <strong>If you self-host Stablemate</strong>, none of your data reaches us: your instance talks to your own
+        database and your own email provider. You are the controller of it, and this policy does not apply.
+      </p>
+
+      <h2>2. What we collect, and why</h2>
+
+      <h3>Your account</h3>
+      <ul>
+        <li><strong>Email address</strong> &mdash; it is your login, and where alerts and account email go.</li>
+        <li>
+          <strong>Password</strong> &mdash; stored only as a bcrypt hash. We never hold your actual password and
+          cannot recover it for you.
+        </li>
+        <li><strong>Plan and billing state</strong> &mdash; which plan you are on, whether your email is verified, and whether a downgrade choice is pending.</li>
+      </ul>
+
+      <h3>Sign-in sessions</h3>
+      <p>
+        Every time you sign in we create a session record holding <strong>your IP address and your browser&rsquo;s
+        user-agent string</strong>, with the time it was created. It is what keeps you signed in, and it is our record
+        of account access if something looks wrong.
+      </p>
+
+      <h3>The monitoring data you send us</h3>
+      <ul>
+        <li><strong>Project and monitor names</strong>, and the schedule you configure for each monitor.</li>
+        <li>
+          <strong>Every ping</strong>: when it arrived, the <strong>source IP address</strong> it came from, and
+          optionally a duration your job reports.
+        </li>
+        <li>
+          <strong>Error text your job reports.</strong> If a job pings us to say it failed, we store the message
+          verbatim, truncated to <%= error_limit %> characters. We also email it to you in the alert.
+        </li>
+        <li>
+          <strong>Incidents.</strong> When a monitor goes down we open an incident record, which keeps its own copy of
+          that error text. Incidents are deliberately kept longer than raw pings, so your outage history survives.
+        </li>
+        <li>
+          <strong>API keys.</strong> Only a SHA-256 hash and the last four characters are stored; the key itself is
+          shown to you once and never again.
+        </li>
+      </ul>
+      <p>
+        Names and error messages are free text that you control. <strong>Please don&rsquo;t put personal data, customer
+        identifiers or secrets in them</strong> &mdash; we store exactly what you send, and it will appear in alert
+        emails.
+      </p>
+
+      <h3>Billing</h3>
+      <p>
+        Handled by Stripe. <strong>Card details go directly to Stripe and never touch our servers.</strong> We store
+        Stripe&rsquo;s identifiers for your customer and subscription, plus a summary of charges and the brand and last
+        four digits of the card, so the billing page can show you something meaningful.
+      </p>
+
+      <h3>The waitlist</h3>
+      <p>
+        While sign-ups are capped, joining the waitlist stores <strong>your email address and nothing else</strong> &mdash;
+        no account, no password, no session.
+      </p>
+
+      <h3>Operational data</h3>
+      <ul>
+        <li>
+          <strong>Server logs</strong> containing request metadata such as IP addresses, paths and timings, kept for a
+          short period for debugging and abuse prevention.
+        </li>
+        <li>
+          <strong>Error reports.</strong> When the application raises an unexpected error, a report is sent to our
+          error-tracking provider. It can include the failing request&rsquo;s URL and parameters, the IP address and
+          browser, and a stack trace. Passwords are stripped before it is sent.
+        </li>
+      </ul>
+
+      <h3>What we do not collect</h3>
+      <p>
+        No analytics, no advertising, no tracking pixels, no third-party scripts, no profiling and no automated
+        decision-making. We do not buy data about you, and we never sell or share yours.
+      </p>
+
+      <h2>3. Cookies</h2>
+      <p>
+        Stablemate sets exactly <strong>two cookies, both first-party and both strictly necessary</strong>. There is no
+        cookie banner because there is nothing here to consent to.
+      </p>
+      <ul>
+        <li>
+          <code>session_id</code> &mdash; a signed, long-lived cookie holding the identifier of your sign-in session.
+          It is what keeps you signed in. HTTP-only, <code>SameSite=Lax</code>, and marked secure over HTTPS.
+        </li>
+        <li>
+          <code>_stablemate_session</code> &mdash; Rails&rsquo; own session cookie, used for the page you were heading to
+          before signing in, one-off status messages, and cross-site request forgery protection.
+        </li>
+      </ul>
+      <p>Signing out deletes the session cookie and the session record behind it.</p>
+
+      <h2>4. Our lawful bases (UK GDPR)</h2>
+      <ul>
+        <li><strong>Performance of a contract</strong> &mdash; running your account, receiving pings, sending alerts, taking payment.</li>
+        <li>
+          <strong>Legitimate interests</strong> &mdash; keeping the service secure and abuse-free (session IPs, ping
+          source IPs, rate limiting), fixing errors, and knowing when someone signs up.
+        </li>
+        <li><strong>Legal obligation</strong> &mdash; keeping records of payments and tax for as long as the law requires.</li>
+      </ul>
+      <p>We don&rsquo;t rely on consent for anything, because we don&rsquo;t do marketing email, analytics or tracking.</p>
+
+      <h2>5. How long we keep it</h2>
+      <ul>
+        <li>
+          <strong>Raw ping records: <%= retention_days %> days.</strong> A daily job prunes anything older. One
+          nuance, so this is honest: a day&rsquo;s pings are only pruned once that day&rsquo;s uptime figure has been
+          calculated, so pruning can lag a little rather than deleting data we haven&rsquo;t summarised yet.
+        </li>
+        <li>
+          <strong>Daily uptime figures: kept for as long as the monitor exists.</strong> These are counts of up and
+          down seconds per monitor per day &mdash; the <%= retention_days %>-day chart and the overall percentage are
+          built from them.
+        </li>
+        <li><strong>Incidents (including the copied error text): for the life of the monitor.</strong></li>
+        <li><strong>Sessions: until you sign out</strong>, or the account is deleted.</li>
+        <li><strong>Waitlist entries: until sign-ups open and you have been invited</strong>, or until you ask us to remove yours &mdash; whichever is first. If you go on to create an account and later delete it, the waitlist entry goes too.</li>
+        <li><strong>Everything else: for the life of your account.</strong></li>
+      </ul>
+
+      <h3>Deleting your account deletes everything</h3>
+      <p>
+        Account &rarr; Delete this account is self-serve, immediate and irreversible. It cancels any active
+        subscription, then removes your user record, your sessions, your projects and monitors, and every ping,
+        incident, uptime figure, alert record and API key belonging to them &mdash; <strong>plus any waitlist entry for
+        the same email address</strong>. Nothing is soft-deleted and there is no recovery window.
+      </p>
+      <p>
+        The one thing we cannot delete for you is Stripe&rsquo;s own copy: Stripe keeps its record of your customer and
+        past payments to meet its legal and accounting obligations. Ask us and we will request deletion of whatever
+        Stripe is able to remove.
+      </p>
+
+      <h2>6. Who else processes your data</h2>
+      <p>
+        We use a small number of providers to run the service. They act on our instructions, and none of them is
+        allowed to use your data for their own purposes.
+      </p>
+      <ul>
+        <li><strong>Hetzner</strong> (Germany) &mdash; the servers and database. Everything above lives here at rest.</li>
+        <li><strong>Cloudflare</strong> &mdash; DNS, TLS and the proxy in front of the site. Sees the metadata of every request, including IP addresses.</li>
+        <li><strong>Stripe</strong> &mdash; payments and subscriptions. Receives your email address, card details (directly from you) and billing/tax location.</li>
+        <li><strong>Postmark</strong> &mdash; delivery of our email. Receives your email address and the contents of the message, which for a down alert includes the monitor&rsquo;s name and any error text your job reported.</li>
+        <li><strong>Honeybadger</strong> &mdash; error reporting, as described in section 2.</li>
+        <li>
+          <strong>Slack</strong> &mdash; our own private team channel. So that we notice new customers,
+          <strong>an automated message containing the email address is posted there when someone signs up or joins
+          the waitlist</strong>. Nothing else about you is sent to Slack.
+        </li>
+      </ul>
+      <p>
+        Some of these providers are based outside the UK. Where data is transferred, we rely on the safeguards those
+        providers offer for international transfers &mdash; standard contractual clauses, the UK Addendum, or the UK
+        extension to the EU&ndash;US Data Privacy Framework as applicable.
+      </p>
+
+      <h2>7. Security</h2>
+      <ul>
+        <li>Everything is served over HTTPS.</li>
+        <li>Passwords are bcrypt-hashed; API keys are stored only as SHA-256 digests; ping tokens are random secrets.</li>
+        <li>Session cookies are signed and HTTP-only, so page scripts can&rsquo;t read them.</li>
+        <li>Sign-in, sign-up, password reset and the public ping endpoint are all rate-limited, and an unknown token gets the same blank answer as a wrong one.</li>
+        <li>Access to the production database is limited to the people who operate the service.</li>
+      </ul>
+      <p>
+        No system is perfectly secure. If you find a vulnerability, please email
+        <a href="mailto:support@stablemate.dev">support@stablemate.dev</a> before disclosing it publicly.
+      </p>
+
+      <h2>8. Your rights</h2>
+      <p>Under UK data protection law you can ask us to do the following, free of charge, and we will respond within one month.</p>
+      <ul>
+        <li>
+          <strong>Access</strong> &mdash; a copy of the data we hold about you. You can also pull your monitors yourself
+          at any time through the API with a project API key; email us for anything beyond that.
+        </li>
+        <li>
+          <strong>Rectification</strong> &mdash; correct anything wrong. You can change your password on your account
+          page. <strong>Changing your email address is not yet self-serve:</strong> email
+          <a href="mailto:support@stablemate.dev">support@stablemate.dev</a> from the address on the account and we
+          will change it for you.
+        </li>
+        <li><strong>Erasure</strong> &mdash; self-serve, from Account &rarr; Delete this account. If you only joined the waitlist, email us and we will remove your entry.</li>
+        <li><strong>Portability</strong> &mdash; ask us and we will send your account&rsquo;s data in a machine-readable format.</li>
+        <li><strong>Restriction and objection</strong> &mdash; ask us to pause or stop a particular use of your data.</li>
+      </ul>
+      <p>
+        If you think we have got something wrong, please tell us first &mdash; but you also have the right to complain to
+        the <strong>Information Commissioner&rsquo;s Office</strong>, the UK supervisory authority, at
+        <a href="https://ico.org.uk/make-a-complaint/" rel="noopener">ico.org.uk</a>. If you are in the EU, you may
+        complain to your local supervisory authority instead.
+      </p>
+
+      <h2>9. Children</h2>
+      <p>Stablemate is a developer tool, is not directed at children, and is not for anyone under 16.</p>
+
+      <h2>10. Changes to this policy</h2>
+      <p>
+        If we change how we handle your data, we will update this page and its &ldquo;last updated&rdquo; date, and email
+        you before anything material takes effect.
+      </p>
+
+      <h2>11. Contact</h2>
+      <p>
+        <a href="mailto:support@stablemate.dev">support@stablemate.dev</a> &mdash; for any question, request or
+        complaint about your data.
+      </p>
+    </article>
+  </div>
+</section>
+
+<%= render "colophon" %>
