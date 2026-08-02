@@ -198,20 +198,30 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
     assert_match(/Last updated/, response.body)
   end
 
-  # The SMTP provider IS a subprocessor and has to be disclosed — but which one
-  # is still an open owner decision (launch-readiness D2), and nothing in the
-  # repository names it: `.env.example` offers four as examples and production.rb
-  # takes whatever `SMTP_*` supplies. So it is disclosed as a category and left
-  # visibly unfinished, exactly like the controller's identity. Naming a
-  # processor we cannot show receiving data is the failure mode this page exists
-  # to avoid.
-  test "the privacy policy discloses email delivery without guessing the provider" do
+  # The SMTP provider is a subprocessor and has to be named. Postmark is the
+  # owner's decision (D2, settled 2026-08-02) rather than anything derivable from
+  # the repo — `.env.example` offers several as examples and production.rb takes
+  # whatever `SMTP_*` supplies — which makes it the one entry on the page whose
+  # truth depends on ops matching the decision. Pinned here so it can't quietly
+  # drift back to a guess or away from what production actually sends through.
+  test "the privacy policy names the email subprocessor" do
     get privacy_path
 
     assert css_select("li").any? { |item| item.text.include?("delivery of our email") },
-      "email delivery must be disclosed as a subprocessor even before it is named"
-    assert_select ".legal .todo", 2,
-      "the operating entity and the SMTP provider are both still open — neither may read as settled"
+      "email delivery must be disclosed as a subprocessor"
+    assert_select "li", text: /Postmark/,
+      count: 1
+  end
+
+  # Exactly one placeholder may remain: the operating entity, which nobody but the
+  # owner can supply. It stays visibly unfinished so it cannot be published by
+  # accident — if this count ever grows, something was left open that shouldn't be.
+  test "the only unfinished item on the legal pages is the operating entity" do
+    get privacy_path
+    assert_select ".legal .todo", 1
+
+    get terms_path
+    assert_select ".legal .todo", 1
   end
 
   # §2's account of what an error report carries is a claim about
