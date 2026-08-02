@@ -56,16 +56,20 @@ Honeybadger.configure do |config|
   end
 end
 
+# Deferred to after_initialize rather than run here, because it has to read the
+# list filter_parameter_logging.rb builds: initializers run in filename order, so
+# `f` before `h` is luck rather than a contract. (The before_notify hook above
+# stays where it is — a notice can be raised during boot, so it registers as
+# early as it can.)
 Rails.application.config.after_initialize do
   # Rails replaces config.filter_parameters in place with a precompiled Regexp
   # the first time a request is served. We run before that, so we get keywords —
   # but pass a Regexp through as a Regexp rather than to_s'ing it, because
   # Honeybadger escapes strings: a stringified Regexp would be a filter that
   # matches nothing at all, and it would fail silently.
-  inherited = (Honeybadger.config[:"request.filter_keys"].to_a +
-    Rails.application.config.filter_parameters +
-    [ "HTTP_COOKIE" ])
+  filter_keys = Honeybadger.config[:"request.filter_keys"].to_a +
+    Rails.application.config.filter_parameters + [ "HTTP_COOKIE" ]
 
   Honeybadger.config[:"request.filter_keys"] =
-    inherited.map { |key| key.is_a?(Regexp) ? key : key.to_s }.uniq
+    filter_keys.map { |key| key.is_a?(Regexp) ? key : key.to_s }.uniq
 end
