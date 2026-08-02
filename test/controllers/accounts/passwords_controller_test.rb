@@ -17,6 +17,14 @@ class Accounts::PasswordsControllerTest < ActionDispatch::IntegrationTest
     }
   end
 
+  # What every rejected change must look like from outside. The second half is the
+  # one that matters: WU-11 is precisely the bug where the response said one thing
+  # and the stored digest another, so "422" alone would have passed happily.
+  def assert_password_unchanged
+    assert_response :unprocessable_entity
+    assert @user.reload.authenticate("password1234"), "the old password must still work"
+  end
+
   test "anonymous users are redirected to sign in" do
     patch account_password_path, params: { current_password: "x", password: "y" }
     assert_redirected_to new_session_path
@@ -26,9 +34,8 @@ class Accounts::PasswordsControllerTest < ActionDispatch::IntegrationTest
     sign_in @user
     change_password(current: "not-my-password")
 
-    assert_response :unprocessable_entity
+    assert_password_unchanged
     assert_match "That password is incorrect.", response.body
-    assert @user.reload.authenticate("password1234")
   end
 
   # WU-11 — why a blank password would otherwise report success:
@@ -37,8 +44,7 @@ class Accounts::PasswordsControllerTest < ActionDispatch::IntegrationTest
     sign_in @user
     change_password(password: "")
 
-    assert_response :unprocessable_entity
-    assert @user.reload.authenticate("password1234")
+    assert_password_unchanged
   end
 
   # WU-11 one step along — a NON-SCALAR password (see PasswordsController#update).
@@ -52,8 +58,7 @@ class Accounts::PasswordsControllerTest < ActionDispatch::IntegrationTest
       current_password: "password1234", password: [ "newpassword12" ]
     }
 
-    assert_response :unprocessable_entity
-    assert @user.reload.authenticate("password1234")
+    assert_password_unchanged
     assert Session.exists?(other.id), "a rejected change must not sign other sessions out"
   end
 
@@ -61,16 +66,14 @@ class Accounts::PasswordsControllerTest < ActionDispatch::IntegrationTest
     sign_in @user
     change_password(password: "newpassword12", confirmation: "somethingelse")
 
-    assert_response :unprocessable_entity
-    assert @user.reload.authenticate("password1234")
+    assert_password_unchanged
   end
 
   test "a too-short password is a 422 and changes nothing" do
     sign_in @user
     change_password(password: "short")
 
-    assert_response :unprocessable_entity
-    assert @user.reload.authenticate("password1234")
+    assert_password_unchanged
   end
 
   test "a valid change sets the new password and keeps this session signed in" do
