@@ -1,9 +1,11 @@
 require "test_helper"
 
 # Account closure (launch-readiness §5 / WS-D). Deletion means more than
-# `destroy!`: a Stripe subscription must never outlive its account, and Pay
-# declares no `dependent:` on `pay_customers`, so the pay_* rows have to be taken
-# down explicitly or they are left orphaned with a nil owner.
+# `destroy!` for one reason: a Stripe subscription must never outlive its
+# account, so it is cancelled FIRST and a failure there deletes nothing. (The
+# pay_* rows go via the `dependent:` User::Subscription re-declares on
+# `pay_customers`, proved in that concern's own test — this file proves the
+# cancel-then-destroy ordering, which is what the operation is for.)
 #
 # Stripe is exercised at the HTTP boundary (the real SDK + Pay run against
 # stubbed api.stripe.com responses) rather than by stubbing Pay's methods, so the
@@ -37,7 +39,7 @@ class User::ClosureTest < ActiveSupport::TestCase
     ]
   end
 
-  test "with billing on it cancels at Stripe, destroys the pay customers, then the user" do
+  test "with billing on it cancels at Stripe first, then destroys the user and the pay rows" do
     with_billing_enabled do
       subscription = make_pro!
       customer_id = subscription.customer_id
@@ -48,10 +50,10 @@ class User::ClosureTest < ActiveSupport::TestCase
 
       assert_requested :delete, %r{api\.stripe\.com/v1/subscriptions/#{subscription.processor_id}}
       assert_not User.exists?(@user.id), "the user row should be gone"
-      assert_not Pay::Customer.exists?(customer_id), "the Pay::Customer must be destroyed explicitly"
-      # Every pay_* row hangs off the customer, so this is the whole cascade the
-      # explicit destroy is buying. A survivor here is a row of card/receipt data
-      # with a nil owner — and the thing Pay's webhook handlers then blow up on.
+      assert_not Pay::Customer.exists?(customer_id), "the Pay::Customer must go with the account"
+      # Every pay_* row hangs off the customer. A survivor here is a row of
+      # card/receipt data with a nil owner — and the thing Pay's webhook handlers
+      # then blow up on.
       assert_not Pay::Subscription.exists?(subscription.id), "Pay::Customer cascades to its subscriptions"
       assert_not Pay::PaymentMethod.exists?(payment_method.id), "the card on file must go too"
       assert_not Pay::Charge.exists?(charge.id), "the receipts must go too"

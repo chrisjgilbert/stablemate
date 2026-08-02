@@ -236,4 +236,34 @@ class User::SubscriptionTest < ActiveSupport::TestCase
       end
     end
   end
+
+  # Pay declares `has_many :pay_customers` with NO `dependent:` (verified in pay
+  # 11.7), so a bare destroy leaves every pay_* row behind with a nil owner — card
+  # and receipt data with no account, and the thing Pay's webhook handlers then
+  # blow up on. User::Closure used to compensate at the call site, which meant the
+  # invariant held only for callers going through close_account!: a console
+  # `user.destroy` or a future admin path orphaned them silently. The cascade
+  # belongs on the association, so it is true of every destroy — hence NO
+  # close_account! here.
+  #
+  # A `canceled` subscription keeps this network-free: Pay's own
+  # `before_destroy :cancel_if_active` would otherwise call Stripe. Cancelling
+  # first is User::Closure's job and is tested there.
+  test "destroying the user alone takes every pay_* row with it" do
+    with_billing_enabled do
+      subscription = give_active_pro!(status: "canceled")
+      customer = subscription.customer
+      payment_method = customer.payment_methods.create!(processor_id: "pm_#{SecureRandom.hex(4)}",
+        payment_method_type: "card", default: true, data: { brand: "Visa", last4: "4242" })
+      charge = customer.charges.create!(processor_id: "ch_#{SecureRandom.hex(4)}",
+        subscription: subscription, amount: 900, currency: "usd")
+
+      @user.destroy!
+
+      assert_not Pay::Customer.exists?(customer.id)
+      assert_not Pay::Subscription.exists?(subscription.id)
+      assert_not Pay::PaymentMethod.exists?(payment_method.id)
+      assert_not Pay::Charge.exists?(charge.id)
+    end
+  end
 end
