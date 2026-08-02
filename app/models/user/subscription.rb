@@ -33,6 +33,27 @@ class User
       # Make the User a Pay billable: pay_customers / subscriptions / charges.
       pay_customer
 
+      # Re-declare Pay's own associations, this time WITH the cascade. Pay 11.7
+      # ships `has_many :pay_customers, class_name: "Pay::Customer", as: :owner`
+      # and no `dependent:` option, so a plain `user.destroy` leaves every pay_*
+      # row behind with a nil owner: card and receipt data belonging to nobody,
+      # and an orphaned Pay::Customer that incoming webhooks then trip over.
+      # Declaring it here makes the invariant hold for EVERY destroy — a console
+      # session, a future admin path — not just callers who go through
+      # User#close_account!. Each Pay::Customer already cascades to its own
+      # subscriptions / charges / payment methods, so this is the whole chain.
+      #
+      # The two `:through` associations have to be repeated verbatim after it:
+      # redefining an association moves it to the END of the reflection hash, and
+      # a has_many :through whose through-association is declared after it raises
+      # HasManyThroughOrderError. They are Pay's lines unchanged — only the
+      # `dependent:` above is ours.
+      has_many :pay_customers, class_name: "Pay::Customer", as: :owner, inverse_of: :owner,
+        dependent: :destroy
+      has_many :pay_charges, through: :pay_customers, class_name: "Pay::Charge", source: :charges
+      has_many :pay_subscriptions, through: :pay_customers, class_name: "Pay::Subscription",
+        source: :subscriptions
+
       # Pay reads the Stripe customer email from `owner.email`; Rails 8 auth stores it
       # as email_address.
       alias_attribute :email, :email_address
