@@ -227,16 +227,7 @@ declaration order is irrelevant. But `/ping/KEY/` (trailing slash) falls through
 to the **one-segment** route as `ping_token: "KEY"` → opaque 404. Documented, not
 fixed; a trailing slash is a typo and 404 is the correct answer.
 
-Before shipping, audit:
-
-```sql
-SELECT id, project_id, registration_key FROM monitors
-WHERE registration_key ~ '[^A-Za-z0-9_.\-]';
-SELECT count(*) FROM monitors WHERE source = 'gem' AND registration_key IS NULL;
-```
-
-Any hit in the first is a monitor that goes dark on the new form. The second
-should be 0 — but run it, per the migration note above.
+Run the format audit in §5 before the route ships.
 
 ### 3.3 Lookup, and the cross-tenant guarantee
 
@@ -359,7 +350,6 @@ gem-sourced monitors, keeping the literal token URL for manual ones.
 - `Client#ping(registration_key)` / `#report_failure(registration_key, message:)`
   build their own URL. `ERB::Util.url_encode` on the key.
 - A boot gate + log line when `ping_key` is absent (§4.4).
-- `X-Stablemate-Version` on sync (§5).
 
 ### 4.2 The key set comes from `tuples`, not `class_to_keys`
 
@@ -423,14 +413,14 @@ non-zero exit is a feature — `abort`s with the remediation. Boot logs at **ERR
 skips Layer 1 with no fallback retained:
 
 ```
-[stablemate] 0.2.0 needs a ping_key and none is configured — pings are DISABLED
-and every monitor in this project will alert as DOWN within one interval + grace.
-Add `c.ping_key = Rails.application.credentials.dig(:stablemate, :ping_key)` to
+[stablemate] no ping_key configured — pings are DISABLED and every monitor in
+this project will alert as DOWN within one interval + grace. Add
+`c.ping_key = Rails.application.credentials.dig(:stablemate, :ping_key)` to
 config/initializers/stablemate.rb (or set STABLEMATE_PING_KEY). Find it at
 <endpoint>/projects → your project → Ping key. Registration still works without it.
 ```
 
-Version, consequence, exact fix, where to get it, what still works.
+Consequence, exact fix, where to get it, what still works.
 
 ### 4.5 `register_on_boot = false` survives, with a better meaning
 
@@ -456,38 +446,42 @@ silently flips that message.
 
 ## 5 · Sequencing
 
-| | Old server | New server |
-|---|---|---|
-| **Old gem** | status quo | **safe** — the old gem uses whatever `ping_url` string the server returns, so the server can migrate the URL form unilaterally |
-| **New gem** | **catastrophic** — no two-segment route, all pings 404, misleading logs, fleet-wide false downs | works |
+**There is no migration to manage.** The gem's only consumer is a side project
+the maintainer controls, so it is updated in the same pass. Server and gem ship
+together; a broken intermediate state costs one redeploy of an app we own.
 
-**Server ships first, always.** And there is currently no way to enforce or even
-observe it: sync sends no version header, `VERSION` has sat at `0.1.0`, and
-consumers pin by git `ref:`, so `Gemfile.lock` reads identically before and after.
-Add `X-Stablemate-Version` to sync **now** and log it server-side — otherwise the
-legacy path can never be proven unused and can never be deleted. Bump to `0.2.0`.
+This removes what would otherwise be the most expensive part of the change: no
+version-negotiation header, no bake period to prove the fetch-and-cache path
+unused before deleting it, no dual-mode gem, no deprecation window, no
+compatibility matrix. `VERSION` goes to `0.2.0` because the public API changes,
+not because anything needs to detect it.
 
-Operator migration: copy the ping key from the project page → add to credentials
-(or set `STABLEMATE_PING_KEY`) → bump the `ref:` → deploy → verify `last_ping_at`
-moves before walking away. Crontabs are untouched; token URLs keep working.
+Two things that look like migration concerns but are **not**, and therefore stay:
 
-The degraded window is between deploy and the first successful ping, and it is
-**silent if the key is wrong**. Its length is `interval + grace` — for a daily job
-with gem defaults, ~27 hours. §4.3's `:rejected` logging is what closes that, and
-it is why §4.3 is not optional.
+- **The token URL form is kept** — for the manual-monitor population, not for
+  back-compat. See §7.5.
+- **The ping-key `last4` cross-check** (§7.2) — it catches a permanent failure
+  mode, not a transitional one.
 
-Cheap cross-check worth adding: have sync return the project's ping-key `last4`
-(no escalation — a bearer key already reads every `ping_url` in that project) and
-have the gem log a loud mismatch at boot. That converts "wrong key, silent for 27
-hours" into "wrong key, one line at deploy", and catches the new failure mode in
-§7.2.
+The only sequencing that survives is the trivial kind: apply the server migration
+before pointing a gem at the new route.
+
+Still worth running once against production before the route ships, since
+`registration_key` is about to become a URL path segment:
+
+```sql
+SELECT id, project_id, registration_key FROM monitors
+WHERE registration_key ~ '[^A-Za-z0-9_.\-]';
+```
+
+Any hit is a monitor whose keyed URL will not round-trip. With the §3.2 route
+constraint in place, only `/` is genuinely fatal.
 
 ## 6 · Public API removed
 
 `Stablemate.ping_urls`, `.merge_ping_urls` and `Subscriber#initialize(ping_urls:)`
-are documented public API for hand-wired hosts. Pre-1.0 permits removing them; the
-CHANGELOG must say so explicitly, since a `ref:` bump gives consumers no version
-signal.
+are documented public API for hand-wired hosts. Pre-1.0 and no third-party
+consumers, so they go without ceremony.
 
 `gem/README.md`'s "Manual fallback" section (§77-82) is deleted. Its documented
 entry point — a hand-created monitor whose `registration_key` is a job class name
@@ -531,9 +525,16 @@ system in all three. "Your network is blocked" is a new way to be wrong.
 Nothing forces `api_key` and `ping_key` to name the same project. Paste project
 A's API key and project B's ping key: syncs create monitors in A, pings land in B,
 A's monitors go permanently down, and every symptom reads as "your job is down".
-This is a **new** class of misconfiguration, structurally impossible today. The
-`last4` cross-check in §5 is the mitigation and should ship with the gem, not
-after.
+This is a **new** class of misconfiguration, structurally impossible today — and
+it is permanent, not transitional, so it needs a permanent guard.
+
+Mitigation, shipped with the gem rather than after it: sync returns the project's
+ping-key `last4` (no escalation — a bearer key already reads every `ping_url` in
+that project) and the gem logs a loud mismatch at boot. Combined with §4.3's
+once-per-key `:rejected` logging, that converts "wrong key, silent until
+`interval + grace` elapses" — ~27 hours for a daily job — into one line at deploy.
+Both halves are load-bearing: §4.3 catches a key that is wrong everywhere, this
+catches a key that is valid but points somewhere else.
 
 ### 7.3 Blast radius
 
@@ -554,19 +555,31 @@ scope.
 the rescue so a malformed `recurring.yml` cannot silently leave the subscriber
 unattached for the process lifetime, and surface it through `Stablemate.health`.
 
-### 7.5 "One interface" is not reached
+### 7.5 "One interface" is not reached — and this is not a back-compat concession
 
-UI-created monitors have no `registration_key` and cannot be given one, so the
-token form stays permanently. This is **two credentials for two disjoint
-populations** — gem-registered monitors (slug-addressable) and hand-wired ones
-(token-only) — and should be documented as "one interface per population" rather
-than pretending at convergence.
+With no migration to manage, the obvious move is to collapse to a single URL form
+and delete `ping_token`, `rotate_ping_token!` and both rotate controllers. That
+was considered and **rejected on product grounds**, so it does not become
+available later either:
 
-Reaching one interface honestly would mean a UI-settable, format-validated
-`registration_key` plus a backfill for existing manual monitors, which re-opens
-`projects.md` §13-S3 (slugs were dropped from V1 because name-derived slugs
-collide and go blank on non-ASCII). **Deferred**, and not needed to fix anything
-here.
+- UI-created monitors have no `registration_key`. Reaching one form means making
+  it UI-settable and format-validated, which re-opens `projects.md` §13-S3 —
+  slugs were dropped from V1 because name-derived ones collide within a project
+  and go blank on non-ASCII names.
+- **The ping key is shown-once (§2.2), so the dashboard could no longer display a
+  working URL at all** — only a `$STABLEMATE_PING_KEY` template. "Create a monitor
+  in the UI, copy the URL, paste it into a bash script" is a core onboarding path
+  and it needs an opaque, complete, copy-pasteable string. Making the ping key
+  displayable to fix this would undo §2.2 and hand back the rotation hazard.
+- It would delete the only narrowly-scoped ping credential the product has. Per
+  §7.3 the project key's blast radius is the design's sharpest cost; the
+  per-monitor token is what bounds it for anyone who wants that.
+
+So this is **two credentials for two disjoint populations** — gem-registered
+monitors (slug-addressable, config-as-code) and hand-wired ones (token-only,
+copy-paste) — and it is Healthchecks' shape for the same reason. Document it as
+"one interface per population" rather than pretending at convergence, and do not
+carry it as debt.
 
 ## 8 · Test plan
 
