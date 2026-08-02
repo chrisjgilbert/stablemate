@@ -5,11 +5,11 @@
   <p class="mt-1 text-[13px] text-muted">Your sign-in details, and how to leave.</p>
 </div>
 
-<div class="rounded-xl border border-border bg-surface p-5 shadow-sm" data-testid="account-panel">
+<div class="rounded-xl border border-border bg-surface p-5 shadow-sm">
   <div class="flex items-center justify-between gap-4">
     <div class="min-w-0">
       <div class="text-[13px] text-muted">Email address</div>
-      <div class="mt-0.5 font-mono text-[14px] text-ink truncate" data-testid="account-email">
+      <div class="mt-0.5 font-mono text-[14px] text-ink truncate">
         <%= current_user.email_address %>
       </div>
     </div>
@@ -18,8 +18,7 @@
         rejected: it speaks monitor-status vocabulary (up/down/paused/pending),
         which is the wrong language for whether an email address is confirmed. %>
     <% verified = current_user.verified? %>
-    <span class="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[11px] font-semibold shrink-0 <%= verified ? "bg-up-bg text-up-text" : "bg-pending-bg text-pending-text" %>"
-          data-testid="verified-badge">
+    <span class="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[11px] font-semibold shrink-0 <%= verified ? "bg-up-bg text-up-text" : "bg-pending-bg text-pending-text" %>">
       <span class="w-1.5 h-1.5 rounded-full <%= verified ? "bg-up-dot" : "bg-pending-dot" %>"></span>
       <%= verified ? "Verified" : "Unverified" %>
     </span>
@@ -32,8 +31,7 @@
     <div class="mt-4 pt-4 border-t border-hairline flex items-center justify-between gap-4">
       <div class="text-[13px] text-muted">Plan and payment details</div>
       <%= link_to "Billing", billing_subscription_path,
-            class: "h-8 px-3 inline-flex items-center rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline",
-            data: { testid: "account-billing-link" } %>
+            class: "h-8 px-3 inline-flex items-center rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
     </div>
   <% end %>
 </div>
@@ -64,7 +62,6 @@
             class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
     </div>
     <%= form.submit "Change password",
-          data: { testid: "change-password-submit" },
           class: "h-9 px-4 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
   <% end %>
 </div>
@@ -99,7 +96,6 @@
             class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
     </div>
     <%= form.submit "Delete my account",
-          data: { testid: "delete-account" },
           class: "h-9 px-4 rounded-lg bg-down-text text-white text-[13px] font-semibold hover:opacity-90 cursor-pointer" %>
   <% end %>
 </div>
