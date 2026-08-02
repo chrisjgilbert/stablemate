@@ -36,9 +36,8 @@
   <% end %>
 </div>
 
-<%# Signed-in password change. The current password is required so a hijacked
-    session can't lock the real owner out; PasswordsController's token flow stays
-    the route for someone who has forgotten it. %>
+<%# Signed-in password change: the current password is required so a hijacked
+    session can't lock the real owner out (Accounts::PasswordsController). %>
 <div class="mt-5 rounded-xl border border-border bg-surface p-5 shadow-sm" data-testid="change-password">
   <h2 class="text-[14px] font-bold text-ink">Change password</h2>
   <p class="text-[13px] text-muted mt-1 mb-4">

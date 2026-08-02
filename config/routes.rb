@@ -13,9 +13,9 @@ Rails.application.routes.draw do
   get "verify/:token", to: "email_verifications#show", as: :email_verification
 
   # The signed-in account page: who you are, and how to leave (WS-D). The nested
-  # password resource is the SIGNED-IN change (current password required) and is
-  # deliberately distinct from the unauthenticated token-reset flow in
-  # `resources :passwords` above — a sub-resource, not a custom verb on either.
+  # password resource is a sub-resource rather than a custom verb, and is NOT the
+  # `resources :passwords` flow above — see Accounts::PasswordsController for the
+  # distinction.
   resource :account, only: %i[show destroy] do
     resource :password, only: :update, module: :accounts
   end

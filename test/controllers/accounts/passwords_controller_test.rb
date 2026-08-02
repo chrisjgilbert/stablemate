@@ -1,7 +1,7 @@
 require "test_helper"
 
-# The SIGNED-IN password change (launch-readiness §5 / WS-D) — a sub-resource of
-# the account, deliberately distinct from PasswordsController's unauthenticated
+# The SIGNED-IN password change (launch-readiness §5 / WS-D) — see
+# Accounts::PasswordsController for how it differs from the unauthenticated
 # token-reset flow. The current password is required, so a stolen session cookie
 # alone can't lock the real owner out.
 class Accounts::PasswordsControllerTest < ActionDispatch::IntegrationTest
@@ -31,10 +31,8 @@ class Accounts::PasswordsControllerTest < ActionDispatch::IntegrationTest
     assert @user.reload.authenticate("password1234")
   end
 
-  # A blank password is a silent no-op in has_secure_password: it neither clears
-  # nor sets the digest, so `update` returns true and we would claim success
-  # while the old password still works (the WU-11 bug, same guard as the reset
-  # flow).
+  # WU-11 — why a blank password would otherwise report success:
+  # PasswordsController#update.
   test "a blank new password is a 422 and changes nothing" do
     sign_in @user
     change_password(password: "")
@@ -43,12 +41,9 @@ class Accounts::PasswordsControllerTest < ActionDispatch::IntegrationTest
     assert @user.reload.authenticate("password1234")
   end
 
-  # The same failure mode one step along: a NON-SCALAR password (password[]=… or
-  # password[x]=…) sails past `.blank?` on the raw param, but strong parameters
-  # drop it, so `update` is handed an empty hash, returns true — and we would
-  # report "Password changed", sign every other session out, and leave the old
-  # password working. Guarding the raw param instead of the permitted one is what
-  # opens the gap.
+  # WU-11 one step along — a NON-SCALAR password (see PasswordsController#update).
+  # The extra assertion here is this controller's own: a rejected change must not
+  # take the user's other sessions down with it.
   test "a non-scalar new password is a 422 and changes nothing" do
     other = @user.sessions.create!(user_agent: "other device", ip_address: "10.0.0.1")
     sign_in @user
