@@ -27,6 +27,24 @@ class AuthenticationTest < ApplicationSystemTestCase
     assert_no_link "Coming soon"
   end
 
+  # The WS-C consent line (D3: linked text, no checkbox). Cheap browser coverage
+  # of the one place a user is told what signing up commits them to — including
+  # that both links actually open the documents. The legal pages get no system
+  # test of their own: a static document is not a flow (launch-readiness §4).
+  test "the sign-up form's consent line links to the terms and the privacy policy" do
+    visit sign_up_path
+    assert_text "By creating an account you agree"
+
+    click_on "Terms of Service"
+    assert_current_path terms_path
+    assert_text "Terms of Service"
+
+    visit sign_up_path
+    click_on "Privacy Policy"
+    assert_current_path privacy_path
+    assert_text "Privacy Policy"
+  end
+
   # S2 — sign in returns to dashboard; sign out returns to sign in and protects routes.
   test "S2: sign in and sign out, protecting routes after sign out" do
     sign_in users(:alice)
