@@ -138,6 +138,17 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href^=?]", "mailto:support@stablemate.dev", minimum: 1
   end
 
+  # The colophon is the only route to the legal pair from the marketing pages,
+  # and every .lp page renders it — including the legal pages themselves, so a
+  # reader can get from one document to the other without the back button.
+  test "the marketing footer links to both legal documents from every marketing page" do
+    [ root_path, pricing_path, terms_path, privacy_path ].each do |path|
+      get path
+      assert_select ".colophon a[href=?]", terms_path, { minimum: 1 }, "#{path}'s footer should link to /terms"
+      assert_select ".colophon a[href=?]", privacy_path, { minimum: 1 }, "#{path}'s footer should link to /privacy"
+    end
+  end
+
   # The specifics a reader (and a regulator) needs to find, and that the rest of
   # the codebase has to keep true. Each is asserted because it is a *claim about
   # the code*, not decoration.

@@ -49,6 +49,26 @@ class LandingPageTest < ApplicationSystemTestCase
     assert_current_path pricing_path
   end
 
+  # The colophon is the only way into the legal pair from the marketing pages
+  # (WS-C), so both links must be there and must actually resolve. The static
+  # pages get no system test of their own — a document is not a flow — but
+  # reaching them is.
+  test "the footer links reach the terms and the privacy policy" do
+    visit root_path
+    within "footer" do
+      click_on "Terms of Service"
+    end
+    assert_current_path terms_path
+    assert_text "Governing law"
+
+    visit root_path
+    within "footer" do
+      click_on "Privacy Policy"
+    end
+    assert_current_path privacy_path
+    assert_text "Cookies"
+  end
+
   test "signed-in visitors are sent from the root to their dashboard" do
     sign_in users(:alice)
     visit root_path
