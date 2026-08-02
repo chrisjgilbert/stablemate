@@ -19,13 +19,17 @@
   If any of those change, this page changes in the same PR. An unverifiable
   sentence in a privacy policy is a liability, so don't add one.
 
-  ⚠️ OWNER ACTION before launch — TWO visible placeholders, both deliberate:
-    1. §1's controller identity (same as the Terms) — fill in the registered
-       name/address, and add an ICO registration number if one is required.
-    2. §6's SMTP provider (D2). Nothing in the repository names one: .env.example
-       lists four as examples and production.rb takes whatever SMTP_* supplies,
-       so the policy discloses the *category* and leaves the name open rather
-       than asserting a processor we can't show receiving data.
+  ⚠️ OWNER ACTION before launch — ONE visible placeholder:
+    §1's controller identity (same as the Terms) — fill in the registered
+    name/address, and add an ICO registration number if one is required.
+
+  §6 names Postmark as the email subprocessor on the OWNER'S DECISION
+  (D2, settled 2026-08-02), not on anything derivable from this repo:
+  .env.example lists several providers as examples and production.rb takes
+  whatever SMTP_* supplies. That makes it the one entry here whose truth
+  depends on ops rather than code — so when SMTP is actually configured
+  (WS-F), confirm the credentials really are Postmark's, and if the provider
+  ever changes, change this line in the same breath.
 %>
 <% retention_days = ping_retention_days %>
 <% error_limit = number_with_delimiter(Stablemate::ERROR_MESSAGE_LIMIT) %>
@@ -208,9 +212,8 @@
         <li><strong>Cloudflare</strong> &mdash; DNS, TLS and the proxy in front of the site. Sees the metadata of every request, including IP addresses.</li>
         <li><strong>Stripe</strong> &mdash; payments and subscriptions. Receives your email address, card details (directly from you) and billing/tax location.</li>
         <li>
-          <strong>Our email provider</strong> <span class="todo">[SMTP provider — to be named before launch]</span>
-          &mdash; delivery of our email. Receives your email address and the contents of the message, which for a
-          down alert includes the monitor&rsquo;s name and any error text your job reported.
+          <strong>Postmark</strong> &mdash; delivery of our email. Receives your email address and the contents of
+          the message, which for a down alert includes the monitor&rsquo;s name and any error text your job reported.
         </li>
         <li><strong>Honeybadger</strong> &mdash; error reporting, as described in section 2.</li>
         <li>

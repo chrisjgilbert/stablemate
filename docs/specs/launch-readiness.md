@@ -252,7 +252,9 @@ and the sign-up form should reference them.
     incident error copies (deliberately outlive ping pruning); monitor/project
     names.
   - Retention: ping events pruned after `PING_RETENTION` = 90 days
-    (`PrunePingEventsJob`); uptime day stats kept indefinitely; sessions until
+    (`PrunePingEventsJob`); uptime day stats for as long as the monitor exists
+    (they cascade with it — the earlier "kept indefinitely" here was wrong, and
+    the published policy states the accurate version); sessions until
     sign-out/deletion.
   - Waitlist: `WaitlistSignup` stores email addresses indefinitely, and
     `WaitlistSignup::SlackAlert` posts each one to the team Slack — D4 covers
