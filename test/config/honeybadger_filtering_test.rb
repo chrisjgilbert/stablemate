@@ -18,6 +18,15 @@ require "test_helper"
 # The assertions below build the REAL notice payload rather than a double: every
 # one of those leaks lived in a field a `notice.url` stub cannot see.
 class HoneybadgerFilteringTest < ActiveSupport::TestCase
+  # Rails REPLACES config.filter_parameters IN PLACE with a single precompiled
+  # Regexp the first time the app serves a request (Rails::Application
+  # #filter_parameters, via env_config). Read at test time, this list is
+  # therefore whatever the suite happened to do first: keywords in isolation, one
+  # opaque Regexp once any request or system test has run in the same process —
+  # which is why the parity assertion below has to snapshot it here, at load,
+  # before a single test has executed.
+  RAILS_FILTER_PARAMETERS = Rails.application.config.filter_parameters.dup.freeze
+
   PING_TOKEN = "pingtokenaaaabbbbccccddddeeee1111"
   SESSION_COOKIE = "sessioncookieffff2222gggg3333hhhh"
   RAILS_SESSION_COOKIE = "railssessioniiii4444jjjj5555kkkk"
@@ -26,10 +35,19 @@ class HoneybadgerFilteringTest < ActiveSupport::TestCase
   test "Honeybadger filters everything Rails filters" do
     filtered = Honeybadger.config[:"request.filter_keys"].map(&:to_s)
 
-    Rails.application.config.filter_parameters.each do |key|
+    RAILS_FILTER_PARAMETERS.each do |key|
       assert_includes filtered, key.to_s,
         "#{key} is filtered from our logs but would still be sent to Honeybadger"
     end
+  end
+
+  # The corollary of the snapshot above: we inherit Rails' list at boot, so it
+  # must still be keywords by then. A precompiled Regexp coerced to a String is
+  # the silent failure — Honeybadger escapes it and the filter matches nothing,
+  # so every key we thought we were inheriting would quietly stop being filtered.
+  test "the inherited list is keywords, not a stringified Regexp" do
+    assert_empty Honeybadger.config[:"request.filter_keys"].grep(/\A\(\?/),
+      "a Rails filter that reaches us precompiled must stay a Regexp, not become inert text"
   end
 
   test "Honeybadger filters the cookie header, which no param list covers" do
