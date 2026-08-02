@@ -17,16 +17,6 @@ class User::ClosureTest < ActiveSupport::TestCase
     @user = users(:bob)
   end
 
-  # Give the user a Stripe Pay::Customer with a live Pro subscription mirror.
-  def make_pro!(status: "active")
-    customer = @user.set_payment_processor(:stripe)
-    customer.update!(processor_id: "cus_#{SecureRandom.hex(6)}")
-    customer.subscriptions.create!(
-      name: "pro", processor_id: "sub_#{SecureRandom.hex(6)}",
-      processor_plan: "price_pro", status: status, quantity: 1
-    )
-  end
-
   # The rest of what a paying customer accumulates: a card on file and a receipt.
   # Both carry personal data (last4, amounts), so both have to go with the account.
   def add_billing_history!(subscription)
@@ -41,7 +31,7 @@ class User::ClosureTest < ActiveSupport::TestCase
 
   test "with billing on it cancels at Stripe first, then destroys the user and the pay rows" do
     with_billing_enabled do
-      subscription = make_pro!
+      subscription = give_pro_subscription!
       customer_id = subscription.customer_id
       payment_method, charge = add_billing_history!(subscription)
       stub_stripe_subscription_cancel(subscription.processor_id)
@@ -66,7 +56,7 @@ class User::ClosureTest < ActiveSupport::TestCase
   # abort and delete NOTHING rather than half-close the account.
   test "a Stripe cancel failure aborts cleanly and deletes nothing" do
     with_billing_enabled do
-      subscription = make_pro!
+      subscription = give_pro_subscription!
       customer_id = subscription.customer_id
       payment_method, charge = add_billing_history!(subscription)
       project = @user.projects.sole

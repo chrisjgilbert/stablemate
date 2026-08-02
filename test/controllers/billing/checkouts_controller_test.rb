@@ -9,15 +9,10 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
 
   setup { @user = users(:bob) }
 
-  # Give the user a Pro subscription in Pay's mirror (mirrors the downgrades test
-  # helper). Default `active` ⇒ subscribed_to_pro? is true.
+  # Fixed ids so the Stripe stubs and assert_requested matchers below can name the
+  # same subscription; otherwise the shared helper (PaySubscriptionMirror).
   def give_pro_subscription!(status: "active")
-    customer = @user.set_payment_processor(:stripe)
-    customer.update!(processor_id: "cus_test_123")
-    customer.subscriptions.create!(
-      name: "pro", processor_id: "sub_test_123",
-      processor_plan: "price_pro", status: status, quantity: 1
-    )
+    super(status: status, customer_id: "cus_test_123", subscription_id: "sub_test_123")
   end
 
   def give_active_pro_subscription! = give_pro_subscription!

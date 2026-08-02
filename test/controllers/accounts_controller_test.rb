@@ -11,16 +11,6 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     @user = users(:alice)
   end
 
-  # Give the user a Stripe Pay::Customer with a live Pro subscription mirror.
-  def make_pro!
-    customer = @user.set_payment_processor(:stripe)
-    customer.update!(processor_id: "cus_#{SecureRandom.hex(6)}")
-    customer.subscriptions.create!(
-      name: "pro", processor_id: "sub_#{SecureRandom.hex(6)}",
-      processor_plan: "price_pro", status: "active", quantity: 1
-    )
-  end
-
   test "anonymous users are redirected to sign in" do
     get account_path
     assert_redirected_to new_session_path
@@ -154,7 +144,7 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     sign_in @user
 
     with_billing_enabled do
-      subscription = make_pro!
+      subscription = give_pro_subscription!
       customer_id = subscription.customer_id
       stub_stripe_subscription_cancel(subscription.processor_id)
 
@@ -172,7 +162,7 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     sign_in @user
 
     with_billing_enabled do
-      subscription = make_pro!
+      subscription = give_pro_subscription!
       stub_stripe_error(:delete, "/v1/subscriptions/#{subscription.processor_id}", status: 404)
 
       delete account_path, params: { current_password: "password1234" }

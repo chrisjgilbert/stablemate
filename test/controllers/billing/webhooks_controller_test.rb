@@ -41,15 +41,10 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
       headers: { "Stripe-Signature" => header, "Content-Type" => "application/json" }
   end
 
-  # Give the user a Stripe Pay::Customer and an active Pro subscription mirror so
-  # subscribed_to_pro? is true (no Stripe API calls).
+  # As every webhook payload below is addressed to a customer id, this returns
+  # that id rather than the subscription.
   def make_pro!(processor_id: "cus_#{SecureRandom.hex(6)}")
-    customer = @user.set_payment_processor(:stripe)
-    customer.update!(processor_id: processor_id)
-    customer.subscriptions.create!(
-      name: "pro", processor_id: "sub_#{SecureRandom.hex(6)}",
-      processor_plan: "price_pro", status: "active", quantity: 1
-    )
+    give_pro_subscription!(customer_id: processor_id)
     processor_id
   end
 

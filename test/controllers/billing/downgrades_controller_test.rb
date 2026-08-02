@@ -19,16 +19,12 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
     n.times.map { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
   end
 
-  # Give the user a real active Pro subscription mirror so the downgrade actually
-  # reaches Stripe to cancel (cancel_now!) — exercised end-to-end against a stub.
+  # Fixed ids, and the subscription's id returned: the downgrade actually reaches
+  # Stripe to cancel (cancel_now!), so every test here has to stub and assert on
+  # that same subscription.
   def give_active_pro_subscription!(subscription_id: "sub_dg_123", status: "active")
-    customer = @user.set_payment_processor(:stripe)
-    customer.update!(processor_id: "cus_dg_123")
-    customer.subscriptions.create!(
-      name: "pro", processor_id: subscription_id,
-      processor_plan: "price_pro", status: status, quantity: 1
-    )
-    subscription_id
+    give_pro_subscription!(status: status, customer_id: "cus_dg_123",
+      subscription_id: subscription_id).processor_id
   end
 
   test "new renders the picker listing active monitors" do

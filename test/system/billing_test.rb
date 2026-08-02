@@ -19,15 +19,10 @@ class BillingTest < ApplicationSystemTestCase
     @project.monitors.delete_all
   end
 
-  # Give the user an active Pro Pay subscription mirror (no Stripe API), then run
-  # the same sync the verified webhook would — flipping plan to pro.
+  # Populate Pay's mirror, then run the same sync the verified webhook would —
+  # flipping plan to pro. No Stripe API call either way.
   def flip_to_pro_via_webhook!
-    customer = @user.set_payment_processor(:stripe)
-    customer.update!(processor_id: "cus_sys_#{SecureRandom.hex(4)}")
-    customer.subscriptions.create!(
-      name: "pro", processor_id: "sub_sys_#{SecureRandom.hex(4)}",
-      processor_plan: "price_pro", status: "active", quantity: 1
-    )
+    give_pro_subscription!
     @user.sync_plan_from_subscription!
   end
 
