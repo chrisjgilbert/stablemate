@@ -9,20 +9,23 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
   ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze
   FREE  = Stablemate::FREE_PLAN_MONITOR_LIMIT
 
-  setup do
-    @user = users(:bob)
-    @project = @user.projects.sole
-    @project.monitors.delete_all
-  end
+  setup { @user = users(:bob) }
 
-  # Put the user in the grace state exactly as sync_plan_from_subscription! would:
+  # Put a user in the grace state exactly as sync_plan_from_subscription! would:
   # over the Free cap, awaiting a choice, deadline set, nothing suspended.
-  def start_grace!(monitor_count)
+  # Returns the monitors it created.
+  #
+  # `opens_at` moves when the WINDOW opens, and therefore when it expires — which
+  # is how a second user can be set up as still inside their grace while @user's
+  # has already run out.
+  def start_grace!(monitor_count, user: @user, opens_at: Time.current)
+    project = user.projects.sole
+    project.monitors.delete_all
     monitors = nil
     with_billing_enabled do
-      @user.update!(plan: "pro")
-      monitors = monitor_count.times.map { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
-      @user.sync_plan_from_subscription! # no active sub ⇒ free + grace
+      user.update!(plan: "pro")
+      monitors = monitor_count.times.map { |i| project.monitors.create!(name: "M#{i}", **ATTRS) }
+      travel_to(opens_at) { user.sync_plan_from_subscription! } # no active sub ⇒ free + grace
     end
     monitors
   end
@@ -109,17 +112,9 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
   # first, which would raise RecordNotFound and abandon everyone after them in
   # the batch.
   test "a record deleted mid-batch is skipped, and the rest of the batch still settles" do
-    overdue = start_grace!(FREE + 2)
-
+    start_grace!(FREE + 2)
     alice = users(:alice)
-    alice_project = alice.projects.sole
-    alice_project.monitors.delete_all
-    alice_monitors = nil
-    with_billing_enabled do
-      alice.update!(plan: "pro")
-      alice_monitors = (FREE + 2).times.map { |i| alice_project.monitors.create!(name: "A#{i}", **ATTRS) }
-      alice.sync_plan_from_subscription!
-    end
+    alice_monitors = start_grace!(FREE + 2, user: alice)
 
     travel_to Stablemate::DOWNGRADE_GRACE_PERIOD.from_now + 1.hour do
       # The batch as the job loaded it, ordered so the doomed record is walked
@@ -143,15 +138,8 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
     overdue = start_grace!(FREE + 2)
 
     alice = users(:alice)
-    alice_project = alice.projects.sole
-    alice_project.monitors.delete_all
-    with_billing_enabled do
-      alice.update!(plan: "pro")
-      (FREE + 1).times { |i| alice_project.monitors.create!(name: "A#{i}", **ATTRS) }
-      travel_to Stablemate::DOWNGRADE_GRACE_PERIOD.from_now - 2.days do
-        alice.sync_plan_from_subscription! # her window opens later, so her deadline stays in the future
-      end
-    end
+    # Her window opens later, so her deadline is still in the future below.
+    start_grace!(FREE + 1, user: alice, opens_at: Stablemate::DOWNGRADE_GRACE_PERIOD.from_now - 2.days)
 
     travel_to Stablemate::DOWNGRADE_GRACE_PERIOD.from_now + 1.hour do
       EnforceOverdueDowngradesJob.perform_now
