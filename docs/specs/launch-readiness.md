@@ -29,7 +29,7 @@ boxes here → next chunk.
 |---|-------|--------|--------|-----|
 | 0 | Launch-readiness spec + verification campaign + 27 bug fixes | — | **MERGED** | #62 |
 | 0 | Billing dependency upgrade | WS-A | **MERGED** | #63 |
-| 1 | Account page — deletion + password change | WS-D | **NOT STARTED** | — |
+| 1 | Account page — deletion + password change | WS-D | **MERGED** | #64 |
 | 2 | Legal pages — Terms + Privacy + consent | WS-C | **NOT STARTED** | — |
 | 3 | Findings follow-ups + Honeybadger secret move | launch-findings tail | **NOT STARTED** | — |
 | 4 | Dependabot backlog | WS-B | **NOT STARTED** | — |
@@ -39,15 +39,30 @@ MFA'd RubyGems account — owner action, though the repo-side prep can ride in a
 chunk), WS-F (ops, entirely off-repo), and WS-G (the launch switch, which must
 be last and needs D6).
 
-### Chunk 1 — Account page (WS-D)
-- [ ] `resource :account` → `AccountsController#show/destroy` + nested password sub-resource
-- [ ] `User::Closure` operation (`close_account!`), **explicitly destroying `pay_customers`**
-- [ ] Stripe-failure policy: abort cleanly, delete nothing
-- [ ] Signed-in password change (current password required)
-- [ ] Webhook tolerates an event for a deleted customer (request test)
-- [ ] `enforce_downgrade_fallback!`'s `reload` survives a user deleted mid-batch
-- [ ] Browser-driven system test for the deletion flow
-- [ ] Review → `/simplify` → `/verify` → CI → PR → merge
+### Chunk 1 — Account page (WS-D) — **MERGED (#64)**
+- [x] `resource :account` → `AccountsController#show/destroy` + nested password sub-resource
+- [x] `User::Closure` operation (`close_account!`) — the `pay_customers` cascade ended up
+      declared on the association instead, so it holds for *every* deletion path
+- [x] Stripe-failure policy: abort cleanly, delete nothing
+- [x] Signed-in password change (current password required; this session survives, others die)
+- [x] Webhook tolerates an event for a deleted customer — it already did; now pinned
+- [x] `enforce_downgrade_fallback!`'s `reload` survives a user deleted mid-batch
+- [x] Browser-driven system test for deletion **and** password change
+- [x] Review → `/simplify` → `/verify` → CI → PR → merge
+
+Three defects the gates caught that a green suite would not have:
+1. **Security, also on `main`:** the password guard read the raw param but wrote the
+   permitted one, so `password[]=x` reported success with the password unchanged —
+   in both the signed-in change and the unauthenticated reset.
+2. **Correctness, introduced here:** closing an account cascades away all of a
+   user's monitors, and a vanished row aborted the whole detection sweep (a real
+   overdue monitor was left `up`). Fixed at the iteration layer for all sweeps.
+3. **Production:** deletion cascaded ping events row-by-row inside the request —
+   ~65s for a Free account, 20+ min and ~650MB for a Pro one. Now bulk deletes.
+
+Carried forward: **`waitlist_signups` survives account closure** — a deleted
+user's email persists there, which contradicts the "delete every trace" framing.
+A retention decision, settled with the privacy policy in chunk 2.
 
 ### Chunk 2 — Legal pages (WS-C)
 - [ ] `/terms` and `/privacy` on the marketing layout, public
