@@ -162,4 +162,30 @@ class RegistrationsControllerTest < ActionDispatch::IntegrationTest
       assert cookies[:session_id].present?
     end
   end
+
+  # Consent (WS-C / D3): linked text above the submit button, no checkbox. This
+  # is the only place the agreement is presented, so both links have to be here
+  # and have to point at the real documents.
+  test "the sign-up form says what creating an account agrees to, and links to it" do
+    get sign_up_path
+    assert_response :success
+    assert_select "[data-testid=signup-consent]" do
+      assert_select "a[href=?]", terms_path
+      assert_select "a[href=?]", privacy_path
+    end
+    assert_match(/By creating an account you agree/, response.body)
+  end
+
+  # Waitlist mode creates no account, so the account-creation wording would be a
+  # lie there — but we do store the address (and post it to our team Slack), so
+  # that branch gets the Privacy Policy on its own.
+  test "waitlist mode links the privacy policy instead of the account-creation consent" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
+      get sign_up_path
+      assert_response :success
+      assert_select "[data-testid=waitlist-consent] a[href=?]", privacy_path
+      assert_select "[data-testid=signup-consent]", count: 0
+      assert_no_match(/By creating an account you agree/, response.body)
+    end
+  end
 end

@@ -24,6 +24,13 @@
           <%= form.email_field :email_address, required: true, autofocus: true, autocomplete: "email",
                 class: "w-full h-[38px] px-3 rounded-lg border border-border font-mono text-[13px] focus:outline-brand" %>
         </div>
+        <%# Joining the waitlist creates no account, so the Terms don't bind
+            anyone yet — but we do store the address (and alert our team Slack
+            with it), so this branch carries the Privacy Policy on its own. %>
+        <p class="text-[12px] text-muted leading-relaxed" data-testid="waitlist-consent">
+          We'll only use your address to invite you.
+          See our <%= link_to "Privacy Policy", privacy_path, class: "text-brand font-medium" %>.
+        </p>
         <%= form.submit "Join the waitlist",
               class: "w-full h-[38px] rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
       <% end %>
@@ -47,6 +54,14 @@
           <%= form.password_field :password_confirmation, required: true, autocomplete: "new-password", maxlength: 72,
                 class: "w-full h-[38px] px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
         </div>
+        <%# Consent as linked text above the submit button — no checkbox (D3, the
+            standard SaaS pattern): submitting the form IS the agreement, so an
+            unticked box would only be a second way to fail sign-up. %>
+        <p class="text-[12px] text-muted leading-relaxed" data-testid="signup-consent">
+          By creating an account you agree to our
+          <%= link_to "Terms of Service", terms_path, class: "text-brand font-medium" %>
+          and <%= link_to "Privacy Policy", privacy_path, class: "text-brand font-medium" %>.
+        </p>
         <%= form.submit "Create account",
               class: "w-full h-[38px] rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
       <% end %>
