@@ -11,6 +11,16 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     @user = users(:alice)
   end
 
+  # Spend the whole shared credential budget on wrong guesses, so the next attempt
+  # — from either form — is over the limit. Every attempt WITHIN the budget must
+  # still be answered normally, which is asserted here rather than at each caller.
+  def exhaust_credential_attempts!
+    AccountCredentials::ATTEMPT_LIMIT.times do
+      delete account_path, params: { current_password: "not-my-password" }
+      assert_response :unprocessable_entity
+    end
+  end
+
   test "anonymous users are redirected to sign in" do
     get account_path
     assert_redirected_to new_session_path
@@ -79,10 +89,7 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
   test "repeated wrong-password deletes are throttled" do
     sign_in @user
 
-    AccountCredentials::ATTEMPT_LIMIT.times do
-      delete account_path, params: { current_password: "not-my-password" }
-      assert_response :unprocessable_entity
-    end
+    exhaust_credential_attempts!
 
     delete account_path, params: { current_password: "not-my-password" }
     assert_response :too_many_requests
@@ -94,9 +101,7 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
   test "the delete and password-change forms share one attempt budget" do
     sign_in @user
 
-    AccountCredentials::ATTEMPT_LIMIT.times do
-      delete account_path, params: { current_password: "not-my-password" }
-    end
+    exhaust_credential_attempts!
 
     patch account_password_path,
       params: { current_password: "not-my-password", password: "newpassword12" }
@@ -107,9 +112,7 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
   # out (and an attacker rotating IPs must not get a fresh budget).
   test "the throttle is per account, not global" do
     sign_in @user
-    AccountCredentials::ATTEMPT_LIMIT.times do
-      delete account_path, params: { current_password: "not-my-password" }
-    end
+    exhaust_credential_attempts!
     delete account_path, params: { current_password: "not-my-password" }
     assert_response :too_many_requests
 
@@ -118,11 +121,10 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity
   end
 
+  # What is unique here is the SESSION outcome: closing your account has to log
+  # you out of it too. What the closure cascades over is User::ClosureTest's.
   test "destroy with the correct password closes the account and signs the user out" do
     sign_in @user
-    project = @user.projects.sole
-    monitor = project.monitors.first
-    api_key, = ApiKey.issue(project: project, name: "gem")
 
     with_billing_disabled do
       delete account_path, params: { current_password: "password1234" }
@@ -130,9 +132,6 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
 
     assert_redirected_to root_path
     assert_not User.exists?(@user.id)
-    assert_not Project.exists?(project.id)
-    assert_not Monitoring::Monitor.exists?(monitor.id)
-    assert_not ApiKey.exists?(api_key.id)
     assert_equal 0, Session.where(user_id: @user.id).count
 
     # The cookie is gone too: a protected page now bounces to sign in.
@@ -140,19 +139,19 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to new_session_path
   end
 
-  test "destroy takes the pay_* rows down with the account" do
+  # The happy path with money attached: a live subscription is cancelled and the
+  # request still ends in a redirect, not the 503 below.
+  test "destroy succeeds for an account with a live subscription" do
     sign_in @user
 
     with_billing_enabled do
       subscription = give_pro_subscription!
-      customer_id = subscription.customer_id
       stub_stripe_subscription_cancel(subscription.processor_id)
 
       delete account_path, params: { current_password: "password1234" }
 
       assert_redirected_to root_path
-      assert_not Pay::Customer.exists?(customer_id), "orphaned pay_customers break later webhooks"
-      assert_not Pay::Subscription.exists?(subscription.id)
+      assert_not User.exists?(@user.id)
     end
   end
 
@@ -169,7 +168,6 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
 
       assert_response :service_unavailable
       assert User.exists?(@user.id)
-      assert Pay::Subscription.exists?(subscription.id)
       assert_match "couldn&#39;t cancel your subscription", response.body
     end
   end
