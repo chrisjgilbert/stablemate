@@ -261,8 +261,10 @@ html:has(.lp){background:var(--paper)}
 .lp .faq{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:30px 44px}
 .lp .faq dt{font-family:var(--display);font-weight:700;font-size:1.14rem;color:var(--ink);margin:0 0 8px}
 .lp .faq dd{margin:0;color:var(--ink-soft);font-size:1rem;line-height:1.55}
-.lp .faq dd a{color:var(--rails);text-decoration:none;border-bottom:1px solid var(--rule-strong)}
-.lp .faq dd a:hover{color:var(--rails-deep);border-bottom-color:var(--rails)}
+/* Prose link — shared with the legal documents below, which read the same way:
+   red, ruled underline, no browser blue. One rule so the two can't drift. */
+.lp .faq dd a,.lp .legal a{color:var(--rails);text-decoration:none;border-bottom:1px solid var(--rule-strong)}
+.lp .faq dd a:hover,.lp .legal a:hover{color:var(--rails-deep);border-bottom-color:var(--rails)}
 @media(max-width:760px){.lp .faq{grid-template-columns:1fr}}
 
 /* ---- legal documents: /terms + /privacy (WS-C) ----
@@ -277,8 +279,7 @@ html:has(.lp){background:var(--paper)}
 .lp .legal ul{margin:0 0 16px;padding-left:1.15rem}
 .lp .legal li{margin:0 0 10px}
 .lp .legal strong{color:var(--ink);font-weight:600}
-.lp .legal a{color:var(--rails);text-decoration:none;border-bottom:1px solid var(--rule-strong)}
-.lp .legal a:hover{color:var(--rails-deep);border-bottom-color:var(--rails)}
+/* Links come from the shared prose-link rule in the FAQ block above. */
 .lp .legal code{font-family:var(--mono);font-size:.84em;background:var(--paper-3);
   padding:1px 5px;border-radius:4px;color:var(--ink)}
 .lp .legal__meta{font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--ink-faint);
