@@ -97,16 +97,31 @@ companion gem is AGPL when it is **MIT**.
 - [ ] Enter the Terms/Privacy URLs into Stripe Checkout's branding settings.
 
 ### Chunk 3 — Follow-ups + secret hygiene
-- [ ] Honeybadger key out of `config/honeybadger.yml` into ENV/credentials
-      (**rotation itself is owner action**)
-- [ ] `release_downgrade_lock_if_within_cap!` wired into monitor destroy
-- [ ] `past_due` user no longer shown an "Upgrade to Pro" button that bounces
-- [ ] `live_today_stat` memoized; `broadcast_status_update` after commit
-- [ ] `Signup` builds the user before taking the advisory lock (bcrypt outside)
-- [ ] `status_before_suspension` backfill for the migration cohort
-- [ ] System test for the new grace-banner / downgrade-page states
-- [ ] `docs/integrating.md` drift (API-keys location, F2 precedence rule)
-- [ ] Review → `/simplify` → `/verify` → CI → PR → merge
+- [x] Honeybadger key out of `config/honeybadger.yml` into ENV/credentials
+      (**rotation itself is owner action — the key is in git history forever**)
+- [x] `release_downgrade_lock_if_within_cap!` wired into monitor destroy — on the
+      record, so project destroy and console deletes get it too
+- [x] `past_due` user no longer shown an "Upgrade to Pro" button that bounces —
+      one `billed_for_pro?` question now answers all four upgrade CTAs
+- [x] `live_today_stat` memoized; `broadcast_status_update` after commit
+- [x] `Signup` builds the user before taking the advisory lock (bcrypt outside)
+- [x] `status_before_suspension` — **decided: no backfill.** Nothing in the schema
+      records whether a suspended monitor had been paused, so a migration could
+      only guess, and guessing "paused" would silently stop monitoring live jobs —
+      worse than the un-pause it would prevent. The cohort is empty in production
+      (`suspend!` is reachable only behind the Stripe gate, which has never been
+      live). Documented at `Suspension#reactivate!` and pinned by a test.
+- [x] System test for the new grace-banner / downgrade-page states
+- [x] `docs/integrating.md` drift (API-keys location, F2 precedence rule)
+- [x] Review → `/simplify` → `/verify` → CI → PR → merge
+
+Two things worth remembering from this chunk:
+1. **The committed Honeybadger key was a self-hosting privacy problem**, not just
+   repo hygiene — every self-hosted instance was reporting *its* exceptions, with
+   its own users' data, into the owner's Honeybadger project. That stops here.
+2. **A `past_due` customer was in a dead end**: their plan reads Free while Stripe
+   dunned them, so the billing page offered an Upgrade the controller refuses
+   *while hiding* the Manage-card link that would have fixed the payment.
 
 ### Chunk 4 — Dependabot backlog (WS-B)
 - [ ] solid_queue 1.5.0 (#61) — eye the recurring-task changelog
