@@ -260,24 +260,46 @@ same reason as the type column: it can be forgotten.
 ```ruby
 namespace :api do
   namespace :v1 do
-    resources :monitors, only: %i[index show], param: :registration_key do
-      resource :pings, only: :create, module: "monitors",
-               constraints: { registration_key: %r{[^/]+} }
-    end
+    resources :monitors, only: %i[index show]
+    post "monitors/:registration_key/pings", to: "monitors/pings#create",
+         constraints: { registration_key: %r{[^/]+} }, format: false, as: :monitor_pings
   end
 end
 ```
 
-**That constraint is required.** Rails excludes dots from dynamic URL segments by
-default. Task names come from a user's `recurring.yml` and nothing validates their
-format anywhere in the app. Tested against this app's own router:
+**Declare it standalone, not nested.** The obvious version — nesting
+`resource :pings` inside `resources :monitors, param: :registration_key` — is
+wrong in three ways, all verified against this app's router:
+
+- `param: :registration_key` also changes **`show`**, so `GET /api/v1/monitors/42`
+  arrives as `registration_key: "42"` while `Api::V1::BaseController#find_monitor`
+  still reads `params[:id]`. A silent breaking change to an endpoint this work has
+  no business touching.
+- Rails prefixes a nested parent's parameter, so the segment is actually
+  `:monitor_registration_key`. The constraint, written against `registration_key`,
+  names a segment that does not exist.
+- Because the constraint never applies, dotted task names break anyway.
+
+The standalone form leaves `show` on `:id` and puts the constraint on the segment
+it is meant to guard.
+
+**The constraint and `format: false` are both required.** Rails excludes dots from
+dynamic URL segments by default and treats a trailing `.foo` as a format.
+Task names come from a user's `recurring.yml` and nothing validates their format
+anywhere in the app. Verified behaviour with the declaration above:
 
 ```
-# without the constraint
-/api/v1/monitors/reports.daily/pings  =>  RoutingError
-# with it
-/api/v1/monitors/reports.daily/pings  =>  registration_key: "reports.daily"
+GET  /api/v1/monitors/42                        => show,   id: "42"          (unchanged)
+POST /api/v1/monitors/plain/pings               => create, registration_key: "plain"
+POST /api/v1/monitors/reports.daily/pings       => create, registration_key: "reports.daily"
+POST /api/v1/monitors/%E6%97%A5%E6%9C%AC/pings  => create, registration_key: "日本"
+POST /api/v1/monitors//pings                    => RoutingError
 ```
+
+One trap when testing this: `recognize_path` resolves the controller class, so
+these all raise `RoutingError` until `Api::V1::Monitors::PingsController` exists —
+which looks exactly like a broken route. Stub the class before concluding the
+routing is wrong.
 
 Note this is a **better** failure than the URL-credential design had: there, a
 dotted task name silently checked in a *different monitor in the same project*.
