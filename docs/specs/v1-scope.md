@@ -20,7 +20,7 @@ Section numbers in the left column are **`README.md`'s**; those in the right are
 
 | Where (in `README.md`) | What changes |
 |---|---|
-| Decision #4, *"Gem ping reliability — fire-and-forget, errors swallowed"* | **Amended.** Errors are no longer swallowed: a `401` is logged once and a `404` once per task name (§6.4). "Never blocks the job" and "a transient outage is absorbed by the grace period" both survive intact. |
+| Decision #4, *"Gem ping reliability — fire-and-forget, errors swallowed"* | **Amended.** Errors are no longer swallowed: a `401` is logged once and a `404` once per task name (§6.5). "Never blocks the job" and "a transient outage is absorbed by the grace period" both survive intact. |
 | Decision #6, *"`registration_key` = the recurring.yml task key… the registrar writes it"* | **Amended.** It stops being an internal idempotency key and becomes the monitor's **public address**. A backfill becomes a second writer, and it becomes character-set sensitive. |
 | Decision #3, *"No gate on monitor creation"* | **Narrowed.** Survives only as a statement about `bin/rails stablemate:sync`. |
 | §2 Security defaults, the whole `ping_token` bullet | **Void.** Every clause — plaintext by design, the dashboard showing it, the API re-serving it, the uninformative 404, per-token rate limiting, rotation — describes surfaces this removes. |
@@ -83,7 +83,7 @@ there is nothing to fetch, cache, or go stale. §3.2's second half (the header
 credential) is a security improvement, not an incident fix, and §3.1 and §3.3 are
 product decisions that ride along. All are worth doing; this document should not
 pretend they are all incident fixes. The two railtie defects below are also
-untouched by it, and are handled in §6.4 and §9.2. Once addresses are local, a failed registration degrades from *"all
+untouched by it, and are handled in §6.5 and §9.2. Once addresses are local, a failed registration degrades from *"all
 monitoring silently dead until restart"* to *"a schedule change wasn't picked up
 this deploy."*
 
@@ -376,6 +376,40 @@ What moves across from the public controller: the oversized-duration guard, the
 array-shaped-parameter guard, and the success-or-failure rule. What does not: the
 deliberately uninformative 404s and their reasoning.
 
+**It needs its own `rescue_from`, and this is a correctness bug if omitted.**
+`Api::V1::BaseController` has one; this controller cannot inherit it. Without it,
+an `ActionController::API` controller answers a full HTML Rails error page —
+measured: a monitor with a NULL `expected_interval_seconds` (the column is
+nullable) reaches `save!` inside `check_in!` and returns **422 with
+`text/html`**. The gem classifies 422 as transient, absorbs it in the grace
+period, and the monitor then goes down with an email saying it *missed its
+check-in* — §9.1's exact complaint, manufactured by an unhandled exception.
+Mandate `rescue_from` for at least `RecordInvalid` and `RecordNotFound`,
+rendering JSON.
+
+**Name the whole response contract**, since none of it can be inherited:
+
+| Case | Response |
+|---|---|
+| success | `200 {"ok": true}` |
+| missing / unknown / revoked key | `401 {"error": "unauthorized"}` |
+| valid key, unknown task | `404 {"error": "not_found"}` |
+| over either rate limit | `429 {"error": "rate_limited"}` |
+| unhandled | JSON, never HTML |
+
+Do **not** carry over the old endpoint's opaque-404 throttle handler. It existed
+because 200-versus-404 was the token oracle; now every auth failure is an
+identical 401, so a 429 discloses nothing — and a fake 404 would send the gem
+down the "not registered" branch instead of the transient one.
+
+Two smaller omissions: `source_ip` comes from `request.remote_ip`, and its meaning
+now depends on `trusted_proxies` because the endpoint sits behind kamal-proxy
+rather than being public — which matters because §9.3 proposes making leaks
+investigable from that column. And the request body may be form-encoded or JSON;
+pick one and state it. Path parameters win over body parameters, so a body-supplied
+`registration_key` cannot override the path — that is worth a test rather than
+luck.
+
 ### 5.3 Rate limiting
 
 Two layers, and **the order matters in the opposite direction to the obvious
@@ -419,8 +453,18 @@ entire controller to one counter. The interpolated form
 `"#{@current_ping_key}|#{params[...]}"` collapses to one counter per task name
 instead — narrower, still wrong.
 
-Pick the ceiling deliberately; the current per-token limit is 30/min, and it
-bounds the alert-flood in §9.3. Put it on the controller, alongside
+**The numbers, stated rather than implied:** per-monitor 30/minute, per-IP
+300/minute, both in a dedicated `ActiveSupport::Cache::MemoryStore` — the test
+environment uses `null_store`, so a shared store silently disables both layers in
+tests. Measured at these values: 40 tasks checking in twice a minute under one key
+pass unthrottled; the per-monitor bound, not the per-IP one, is what a
+small-job-count app meets first.
+
+**Say the thing a Kamal operator needs to know:** the app and its job workers sit
+behind one proxy, so **the whole host shares a single per-IP bucket**. 300/minute
+is the machine's total check-in budget, not one process's.
+
+The per-monitor ceiling also bounds the alert-flood in §9.3. Put it on the controller, alongside
 `PingsController::PER_TOKEN_LIMIT` and `Api::V1::BaseController::PER_KEY_LIMIT` —
 that is where every rate-limit constant in this app already lives. (Not in
 `config/initializers/stablemate.rb`: this server's file of that name holds the
@@ -439,7 +483,7 @@ otherwise lack: enumerating every task name in the project. Job names leak
 business logic — `payroll_export`, `gdpr_purge` — and turn blind forgery into
 targeted forgery.
 
-We accept it, because §6.4 needs the `404` to say "run `stablemate:sync`" and
+We accept it, because §6.5 needs the `404` to say "run `stablemate:sync`" and
 that is the failure this design exists to make visible. State it as an accepted
 cost rather than claiming it leaks nothing.
 
@@ -534,6 +578,22 @@ monitor by hand whose registration key equals a job class name — describes
 something the interface can no longer do anyway (§3.3). Remove both.
 `test_unmapped_perform_does_not_ping` is the invariant that must stay green.
 
+**Two shipped tests die with it** and must be deleted rather than repaired:
+`subscriber_test.rb:147` (`test_manual_fallback_pings_by_job_class_name`) and
+`:163` (`test_subscribes_to_real_active_job_notifications`, which uses the manual
+fallback as its vehicle and needs a different one).
+
+**Say where the union happens.** "May-register" is `recurring.yml` tasks plus
+`c.monitors`, but the intersection snippet reads `registrar.tuples`. If
+`c.monitors` is folded into the registrar — the natural place — then
+`registrar.tuples` is contaminated and the snippet's own allow-list is wrong.
+**The registrar stays `recurring.yml`-only; `Registration#sync!` merges the two.**
+
+**Add a fixture.** On every shipped fixture the intersection is a no-op —
+`reportable == class_to_keys` exactly, because none of them has a task with a
+`class:` and an underivable schedule. §11 requires a test for precisely that case,
+so it needs a fifth fixture to exist at all.
+
 **`c.monitors` also needs translating.** The server's entry struct reads
 `registration_key` / `name` / `expected_interval_seconds` / `grace_period_seconds`;
 `{ interval:, grace: }` matches none of them and has no key field, so untranslated
@@ -547,7 +607,47 @@ Default `grace` the way the registrar already does — `max(interval * 0.15,
 task rather than getting zero grace. Document seconds as the canonical unit, since
 `1.day` requires ActiveSupport and the gem supports a plain-Ruby host.
 
-### 6.4 Reading the response, and boot
+### 6.4 How a check-in is sent
+
+§6 previously specified only the edges — which tasks may report, when the command
+exits non-zero, where it runs, what gets logged — and never the middle. This is
+the middle.
+
+`Client#ping` and `#report_failure` stop taking a URL and take a task key:
+
+```ruby
+def ping(registration_key)
+  post_form(check_in_uri(registration_key), {}, headers: ping_headers)
+end
+
+def check_in_uri(registration_key)
+  URI.join(config.endpoint, "/api/v1/monitors/#{ERB::Util.url_encode(registration_key)}/pings")
+end
+
+def ping_headers
+  { "Authorization" => "Bearer #{config.ping_key}" }
+end
+```
+
+Three things to pin down, because each has a wrong-looking-right answer:
+
+- **The encoder is `ERB::Util.url_encode`.** `CGI.escape` and
+  `URI.encode_www_form_component` turn a space into `+`, which decodes as a
+  literal `+` in a path segment — so a task named `"my task"` would 404 forever
+  while §5.1's route table passed, since none of its examples contain a space.
+- **The body stays form-encoded**, as `report_failure` already sends it, so
+  `status` and `message` keep working unchanged.
+- **Response classification lives in `Client#classify`**, not in
+  `Subscriber#deliver`. `classify` already owns the three-way split; the change is
+  which three states. `Subscriber#deliver` keeps only "act on what the client
+  said", and loses `trigger_resync` entirely.
+
+`Subscriber` also sheds more than the address lookup: the `ping_urls:`, `resync:`
+and `resync_interval:` keywords, `@resync_mutex`, `@last_resync_at`, `url_for`,
+and the `:stale` branch of `deliver`. `dispatch` stops resolving a URL and passes
+the key through.
+
+### 6.5 Reading the response, and boot
 
 - `401` — the key is wrong or revoked. Log **once**, loudly.
 - `404` — this task is not registered. Log **once per task name**, naming the
@@ -604,11 +704,13 @@ Five things this gets right, four of which an earlier draft got wrong:
   `class_to_keys:`; there is no `reportable:` parameter. §6.3's intersection
   produces a map of the same shape, so it substitutes directly.
 
-Two naming corrections while here: there is **no `log_error` helper** — `Logging`
-provides only `log_warn`/`log_info`, and they are private instance methods, so
-`Stablemate.log_error` would not resolve even if one existed. Either add
-`log_error` to `Logging` and call it from an including object, or use
-`Stablemate.logger.error` with an explicit `[stablemate]` prefix as above.
+**On logging at error level.** There is no `log_error` helper — `Logging` provides
+only `log_warn`/`log_info` — and adding one does not by itself make
+`Stablemate.log_error` work: `Stablemate.singleton_class.include?(Logging)` is
+`false`, so the module has no such method to call. Either add `log_error` to
+`Logging` and invoke it from an object that includes the module, or call
+`Stablemate.logger.error` directly with an explicit `[stablemate]` prefix, as the
+snippet above does. The railtie already uses the latter shape.
 
 `handle_event` also needs a rescue. It is the only public handler without one —
 `handle_retry` and `handle_discard` both have one — and an exception raised in a
@@ -730,7 +832,7 @@ or a deliberate shutdown.
 
 ### 9.2 The catch-all around gem startup
 
-§6.4 makes this loud — the rescue now logs — but it does not make it recoverable:
+§6.5 makes this loud — the rescue now logs — but it does not make it recoverable:
 a broken `recurring.yml` still leaves the listener unattached for the life of the
 process. Narrowing the rescue so the failure is contained, rather than taking the
 listener with it, is the remaining work. It must still catch `Psych::SyntaxError`,
@@ -868,7 +970,13 @@ scope; if it stays, it should be because the price is about to be set.
   broken implementation); and **one throttled monitor must not consume another
   monitor's budget** — the layer-order bug in §5.3. Plus: an unauthenticated flood
   is bounded.
-- **Routing.** A dotted task name arrives intact.
+- **Routing.** A dotted task name arrives intact, and a body-supplied
+  `registration_key` cannot override the path parameter.
+- **Every response is JSON.** In particular, a monitor that fails validation
+  during check-in returns JSON rather than an HTML error page (§5.2) — this is
+  what stops a server-side fault being reported to the user as a missed check-in.
+- **Gem: the URL encoder round-trips.** A task name containing a space must reach
+  the server intact, which `CGI.escape` would not achieve (§6.4).
 - **Backfill.** Duplicate names, a name deriving to blank, and a non-Latin name
   each produce a distinct, usable, slash-free key.
 - **Command.** Exits non-zero on all four register-nothing paths, prints the
