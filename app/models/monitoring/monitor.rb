@@ -75,14 +75,25 @@ module Monitoring
     # a ping or a detection sweep can replace just that fragment over Solid Cable,
     # with no client polling. (Broadcasts are wired explicitly from the
     # operations so they fire exactly on a real state change, not every save.)
+    #
+    # Deferred to after commit for the same reason Notifications::Dispatch is
+    # (F10): the webhook and choose-N reactivation paths reach here from inside
+    # ProcessedEvent.record_once's transaction, and Solid Queue is a SEPARATE
+    # database — a job enqueued pre-commit can be claimed by a worker that renders
+    # the monitor as it was BEFORE the change (a badge stuck on the old status),
+    # and a rollback (the designed Stripe-retry path) leaves an orphan job for a
+    # change that never happened. With no transaction open — the ping paths, which
+    # already broadcast outside their own with_lock — this runs inline, unchanged.
     def broadcast_status_update
-      %i[row badge].each do |fragment|
-        broadcast_replace_later_to(
-          self,
-          target: ActionView::RecordIdentifier.dom_id(self, fragment),
-          partial: "monitors/#{fragment}",
-          locals: { monitor: self }
-        )
+      ActiveRecord.after_all_transactions_commit do
+        %i[row badge].each do |fragment|
+          broadcast_replace_later_to(
+            self,
+            target: ActionView::RecordIdentifier.dom_id(self, fragment),
+            partial: "monitors/#{fragment}",
+            locals: { monitor: self }
+          )
+        end
       end
     end
 
