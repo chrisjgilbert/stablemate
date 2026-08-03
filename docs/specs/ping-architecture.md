@@ -277,6 +277,64 @@ Rails URL segment never spans a `/`. Declaration order does not matter. But
 
 Run the check in §5 before this ships.
 
+### 3.2.1 This URL is not RESTful, and that is deliberate
+
+Our own conventions say to find the noun hiding in the verb and to route
+everything as a standard resource. This URL breaks that in four ways. Three are
+intentional; naming them here is the justification our conventions require.
+
+**`/ping` reads as a verb.** Cosmetically true. The controller is already
+`PingsController#create`, so the internal shape is correct and only the path
+segment reads wrongly. Renaming it to `/pings` would invalidate every ping URL
+currently sitting in a customer's crontab, for no functional gain. Not worth it.
+
+**The credential is in the path rather than an `Authorization` header, and it
+identifies the monitor rather than merely proving who is asking.** The RESTful
+form would be `POST /monitors/{id}/pings` with a header. Compare what an operator
+has to paste:
+
+```sh
+curl -fsS https://stablemate.dev/ping/KEY/daily_digest
+curl -fsS -X POST -H "Authorization: Bearer KEY" https://stablemate.dev/projects/7/monitors/daily_digest/pings
+```
+
+The second is correct and nobody would use it. One copy-pasteable string that
+works with no flags *is* the interface, and many of the places it gets used —
+minimal containers, basic schedulers, health-check probes — cannot set headers at
+all. Every comparable service made the same choice: Healthchecks, Cronitor, Sentry
+and Dead Man's Snitch all put the credential in the URL.
+
+The cost is that the credential appears in the path, and Rails logs request paths
+verbatim — only query strings are filtered. So ping credentials are already in
+production logs today, and will be under the new scheme too. That is unchanged by
+this redesign, but §7.3's larger reach makes each logged line worth more.
+
+**`GET` changes state, and this one has a consequence worth stating plainly.**
+HTTP treats `GET` as safe, and anything that follows a link will issue one: chat
+apps generating link previews, mail providers rewriting and pre-fetching links,
+antivirus scanners, browser prefetch. A ping is not a read — it records a
+check-in, advances the monitor's clock, and **if the monitor is currently down it
+resolves the incident and sends a "recovered" email.** Paste a ping URL into a
+chat channel during a real outage and you will be told the outage is over.
+
+We keep `GET` anyway, because removing it means every user writes `curl -X POST`,
+and no comparable service asks that. The mitigations are:
+
+- Treat a complete ping URL as a password, and say so next to the copy button on
+  the monitor page — not merely in the docs.
+- The gem path is less exposed by construction: because the ping key is shown once
+  (§2.2), the monitor page displays a `$STABLEMATE_PING_KEY` template rather than
+  a working address, so a screenshot or pasted snippet of it cannot be fired. The
+  per-monitor token URL is displayed complete, so the risk remains there.
+
+**Possible follow-on, not proposed here.** Healthchecks serves pings from an
+entirely separate domain (`hc-ping.com`, distinct from `healthchecks.io`). That is
+not about REST, but it addresses the same instinct: session cookies never reach
+the ping host, its request logs can be configured separately from the app's — which
+matters when credentials are in the path — and rate limiting can be tuned
+independently. The cost is another DNS record, another certificate and more deploy
+configuration. Worth knowing about; not worth doing yet.
+
 ### 3.3 Keeping tenants separate
 
 Today a ping token is unique across the entire database, so a ping can only ever
