@@ -45,10 +45,10 @@ After this work:
 - **Monitors come from one place.** `bin/rails stablemate:sync` reads
   `config/recurring.yml`, plus anything declared in config, and registers it.
   Nothing registers at boot. Nothing is created in the browser.
-- **Check-ins go to one endpoint**, authenticated by one credential:
+- **Check-ins go to one endpoint**, authenticated by a check-in-only credential:
   ```
   POST /api/v1/monitors/{registration_key}/pings
-  Authorization: Bearer sm_live_…
+  Authorization: Bearer sm_ping_…
   ```
 - **The web interface is for looking, and for the two things only a human decides:**
   overriding a schedule, and pausing.
@@ -125,7 +125,9 @@ path-borne secret cannot:
   Anything that follows a link — chat previews, mail prefetch, scanners — could
   fire one. This endpoint is `POST` only.
 - **It becomes an ordinary REST resource.**
-- **Two specific faults never get written** (§5.3, §5.4).
+- **Two specific faults never get written** — the rate-limiter fault (§5.3) and
+  the URL-parsing fault (§5.1), both of which come from having a credential and a
+  task name as adjacent path segments.
 
 | Removed from the gem | ~Lines |
 |---|---|
@@ -164,54 +166,118 @@ the detail page shows which project a monitor belongs to.
 `api.md:127`, and the column is `null: false` with a default — so dropping it
 needs a migration and an API note.
 
-## 4 · One credential, not two
+## 4 · Two credentials
 
-An earlier draft added a project-scoped ping key so the gem would hold something
-that could not read or rewrite monitors. **V1 ships one credential: the existing
-API key.** The reasoning matters, because the earlier draft kept a conclusion
-whose premise it had already deleted.
+The check-in endpoint authenticates a **ping key** (`sm_ping_…`), a second
+project-scoped credential whose only capability is recording a check-in. The
+management API keeps the existing API key (`sm_live_…`).
 
-**Both credentials would live in the same place, always.** The configuration
-surface is a single `Stablemate.configure` block in
-`config/initializers/stablemate.rb`, loaded by every process that boots the app —
-so every web and job worker would hold both in the same object. The command must
-hold both by design, since it needs the API key to register and the ping key to
-print usable commands. And the one concrete shell-cron case, the nightly
-`pg_dump`, runs **as root on the same host as the app container** and already
-holds `RAILS_MASTER_KEY` and a full database dump.
+**An earlier draft of this document argued for one credential and was wrong.**
+Its reasoning is preserved here because the correction is the argument:
 
-**Both original objections to reusing the API key are already dead**, each to a
-change this document makes anyway. The `last_used_at` write is coarsened for
-`ApiKey` regardless (§5.2). The 120/min project-wide limiter comes from inheriting
-the API base controller, and the check-in controller deliberately does not inherit
-it (§5.2) — Rails scopes rate-limit buckets by `controller_path`, so a separate
-controller gets a separate bucket even presenting the identical token.
+> *"The capability delta is lateral, not a ladder… Each holds a capability the
+> other lacks; both independently defeat the product's core promise. There is no
+> 'the ping key is the safe one' story to tell."*
 
-**The capability delta is lateral, not a ladder.** This is the part that settles
-it. A leaked API key can rewrite `expected_interval_seconds` on every monitor —
-and `gem_may_write?` does not stop it, because it allows any write whose incoming
-value differs from what the gem last sent. Setting every interval to a hundred
-years **permanently and silently disables all alerting**, and unlike a forged
-check-in it persists after the attacker leaves. A leaked ping key can forge
-heartbeats and, via `status=1`, page the owner at will with arbitrary text. Each
-holds a capability the other lacks; **both independently defeat the product's core
-promise.** There is no "the ping key is the safe one" story to tell.
+That was tested rather than argued, and it failed. **It is a ladder, and the API
+key is the top rung.**
 
-**It is additive later, not a one-way door.** No credential ever enters the domain
-model — `check_in!` takes `received_at:`, `source_ip:`, `duration_ms:`, and nothing
-about which credential authenticated is persisted. So adding `PingKey` later is a
-new table, one `PingKey.authenticating(t) || ApiKey.authenticating(t)` line, and a
-deploy to drop the fallback. No backfill, no historical data to reinterpret.
+### Why, measured
 
-What this deletes from the earlier draft: a model, an issuance operation, a
-controller, two views, project-page wiring, a migration, ~185 lines of tests
-asserting behaviour already asserted about `ApiKey`, a second config gate of
-exactly the kind §2 blames for the incident, and the entire "two credentials that
-can disagree" failure mode — roughly 450–500 lines that buy nothing until the two
-credentials land in different trust domains.
+**An API key can durably silence alerting with one request.** `POST
+/api/v1/monitors/sync` may rewrite `expected_interval_seconds` on an existing
+monitor — `sync_params` permits it, `valid_shape?` checks only `positive?`, the
+model validates only `greater_than: 0`, and `gem_may_write?` allows any value
+differing from what the gem last sent. Observed: `3600 → 2_147_483_647`, HTTP 200.
+And `before_update :recompute_next_due_at` fires on the sync itself, so the
+monitor's next due date moves to 2094 **immediately** — no follow-up check-in
+needed, nothing visible, one request.
 
-**Revisit when** someone runs a check-in from a machine that should not hold the
-management key — a shell script on a different host, or a customer who asks.
+**An API key can also page the owner, in a worse form than the ping key can.**
+`monitor_mailer.rb:22` interpolates the monitor name straight into the subject:
+
+```ruby
+subject = "#{monitor.name} missed its check-in"
+```
+
+`validates :name, presence: true` is the only name validation and the column is an
+unbounded `varchar`. So the subject line is attacker-controlled and unbounded. The
+ping key's version of this capability — error text via `status=1` — lands in the
+*body*, hard-truncated to `ERROR_MESSAGE_LIMIT` in the model layer.
+
+The mailer documents the assumption this violates, in a comment written when the
+name was user-authored:
+
+> *"The subject carries only the monitor name, never the error (headers stay
+> injection-proof, lock-screen previews clean)."*
+
+**The capability sets are nested, not overlapping:**
+
+| | ping key | API key |
+|---|---|---|
+| page the owner with chosen text | body, truncated | **subject, unbounded** |
+| durably silence alerting | no | **yes, one request, invisible** |
+| enumerate every monitor and task name | no | **yes** |
+| rewrite name / interval / grace everywhere | no | **yes** |
+| emit a "recovered" email | yes | no |
+| write ping-event rows | yes | no |
+
+The ping key's two exclusives are transient — both are overwritten by the next
+legitimate check-in. Every durable capability belongs to the API key alone.
+
+### The axis the earlier draft never considered
+
+It reasoned about where credentials are *stored* and never about how often they
+are *transmitted*. `gem/lib/stablemate/configuration.rb:6` states the property
+being given up:
+
+```ruby
+# The sm_live_… API key (used for /api/v1 registration; NOT on the ping hot path).
+```
+
+Today the management key crosses the wire **once per deploy**. Under §3.2 it would
+ride an `Authorization` header on **every job completion, from every worker,
+forever** — through every egress proxy, tracing tool and retry buffer on the
+highest-volume path in the system. Storage co-location and transmission frequency
+are different exposure surfaces, and only the second one changes here.
+
+So the ping key is the ordinary least-privilege answer: the credential on the hot
+path cannot read your monitors, cannot rewrite them, and cannot silence them.
+
+### What it costs, and what stays true from the earlier draft
+
+Roughly 450–500 lines mirroring `ApiKey` — model, issuance, controller, views,
+project-page wiring, migration, tests, docs — plus §9.4's mismatch guard, which
+exists only because there are two.
+
+Two of the earlier draft's observations survive and are worth keeping:
+
+- **The two original objections to reusing the API key really are dead.** The
+  `last_used_at` write is coarsened for `ApiKey` regardless (§5.2), and the
+  120/min project-wide limiter is a property of inheriting the API base
+  controller, not of the credential — Rails resolves a limiter's scope from
+  `controller_path` at filter time, so any separate controller gets separate
+  buckets, inherited or not. Neither was ever an argument about credentials.
+- **Nothing about this is a one-way door.** No credential enters the domain model,
+  so the decision could be reversed in either direction later without a backfill.
+
+### Storage: hashed and shown once
+
+Same as `ApiKey` — SHA-256 digest plus `token_last4` for a masked list, raw value
+shown once at creation. Nothing needs to reconstruct it: the command prints
+ready-to-paste `curl` lines from the host's own config (§6.1), so the web
+interface never displays it.
+
+**This must not be a "type" column on `api_keys`.** Authentication looks a token
+up across the whole table, so one table means a ping key authenticates the
+management API unless every lookup remembers to filter — and forgetting is silent
+and permissive. Two tables make the mistake impossible rather than discouraged.
+
+**Share the hashing, not the lookup.** Extract `digest(raw)` only. If the shared
+module also owns the lookup and anyone writes `ApiKey.find_by(...)` inside it —
+the natural thing to type while moving code *out of* `ApiKey` — both models
+authenticate against `api_keys` and the separation silently collapses. Each model
+keeps its own three-line `authenticating`.
 
 ## 5 · Server design
 
@@ -252,12 +318,24 @@ you think.
 
 ### 5.2 The controller, authentication and tenancy
 
-`Api::V1::Monitors::PingsController` **must not inherit `Api::V1::BaseController`**
-— not for credential reasons any more, but so it declares its own rate limiter
-(§5.3), since `rate_limit` compiles to an anonymous `before_action` a subclass
-cannot skip by name. Inherit `ActionController::API`, which has no forgery
-protection to forget; `ActionController::Base` would reintroduce the trap
-`pings_controller.rb:5-10` documents, invisible in the test environment.
+`Api::V1::Monitors::PingsController` **must not inherit `Api::V1::BaseController`**,
+because that base authenticates an `ApiKey` and this endpoint authenticates a
+`PingKey`. That is a structural reason, and it is the right kind — an inherited
+`before_action :authenticate_api_key!` would have to be suppressed, and
+suppression can be forgotten.
+
+Note it is *not* a rate-limiting reason, contrary to an earlier draft. Rails
+resolves a limiter's scope from `controller_path` at filter time, so a subclass
+gets its own buckets whether it inherits or not; measured — 122 requests to
+`monitors#index` returned 429 while the same token on `syncs#create` returned 200.
+Inheritance was never what isolated the counters.
+
+Inherit `ActionController::API`, which has no forgery protection to forget;
+`ActionController::Base` would reintroduce the trap `pings_controller.rb:5-10`
+documents, invisible in the test environment. What must be reimplemented rather
+than inherited: `rescue_from ActiveRecord::RecordNotFound`, the `{"error": …}`
+response shape, and bearer-token extraction. Duplicate them deliberately and keep
+the shapes identical to `/api/v1`.
 
 It resolves the project from the key and reaches the monitor only through it:
 
@@ -285,15 +363,28 @@ deliberately uninformative 404s and their reasoning.
 
 ### 5.3 Rate limiting
 
-Two layers. **A per-IP layer first**, mirroring the one being deleted, because
-without it there is no pre-authentication bound at all — the per-monitor key is
-attacker-chosen on both halves, so an anonymous flood mints a fresh bucket per
-request and never trips. Measured: 50 anonymous requests produced 50 distinct
-buckets and zero throttling, each costing an indexed database query. The same
-flood against today's `/api/v1` hits 429 after 300. Self-hosters have no
-Cloudflare in front.
+Two layers, and **the order matters in the opposite direction to the obvious
+one.** Declare **per-monitor first, then per-IP.**
 
-Then per **monitor**, keyed on values readable before authentication:
+Rails' limiter increments its counter unconditionally and the layers run in
+declaration order, so a request already rejected by one layer still burns the
+next one's budget. With per-IP first, a single runaway task exhausts the
+host-wide bucket and throttles every other monitor on that host — measured: a
+healthy monitor got 429 under per-IP-first and 200 under the reverse.
+
+A per-IP layer is still required, because without it there is no
+pre-authentication bound at all: the per-monitor key is attacker-chosen on both
+halves, so an anonymous flood mints a fresh bucket per request and never trips.
+Measured: 50 anonymous requests produced 50 distinct buckets and zero throttling,
+each costing an indexed database query. The same flood against today's `/api/v1`
+hits 429 after 300, and self-hosters have no Cloudflare in front.
+
+The cost of putting per-monitor first is that per-IP no longer caps how many
+buckets a flood can mint (400 versus 300 in a probe). That is bounded by the
+store's own pruning, and by digesting and length-bounding the task-name half of
+the key — do both.
+
+The per-monitor layer is keyed on values readable before authentication:
 
 ```ruby
 by: -> { "#{Digest::SHA256.hexdigest(request.authorization.to_s.presence || request.remote_ip)}|#{params[:registration_key]}" }
@@ -322,12 +413,15 @@ alert-flood in §9.3.
 Authenticated, so the existing API conventions apply: `401` for a missing,
 unknown or revoked key; `404` for a valid key with an unknown task name.
 
-**Be honest about what that discloses.** An earlier draft claimed it "reveals
-nothing they could not learn from the monitors list." With one credential that is
-now true — the same key can call `GET /api/v1/monitors`. It was false when the
-ping key was separate, and if `PingKey` is ever added, the 200/404 split hands it
-a capability it otherwise lacks: enumerating every task name in the project.
-Record that as a condition on §4's "revisit when".
+**Be honest about what that discloses.** A ping key holder cannot call
+`GET /api/v1/monitors`, so the 200/404 split hands them a capability they
+otherwise lack: enumerating every task name in the project. Job names leak
+business logic — `payroll_export`, `gdpr_purge` — and turn blind forgery into
+targeted forgery.
+
+We accept it, because §6.4 needs the `404` to say "run `stablemate:sync`" and
+that is the failure this design exists to make visible. State it as an accepted
+cost rather than claiming it leaks nothing.
 
 ## 6 · Gem design
 
@@ -348,6 +442,11 @@ override. `enabled_in?` exists only in the railtie — the rake task never consu
 it. Run locally, it registers the *development* section into the production
 project and exits 0. That was a nuisance when boot sync corrected it; now
 whatever the last hand-run wrote is the entire monitor set.
+
+**It must hold both credentials.** The API key registers; the ping key is what it
+prints in the ready-to-paste `curl` lines. Both live in the same
+`Stablemate.configure` block, which is what makes §4's shown-once storage
+affordable — the place that needs a finished command already holds the credential.
 
 **It must report what the server refused.** `sync!` currently returns the
 process-wide address cache, and the rake task prints `cache.size` — which has
@@ -405,6 +504,16 @@ monitor. The monitor reads green while the backup has been failing, which is
 precisely the failure this product exists to prevent. Keep two sets: *may-register*
 (tuples + `c.monitors`) and *may-report-by-class-name* (tuples only).
 
+**Say what happens to the class-name fallback.** `resolve_keys` currently falls
+back to the job class name when a class is not in the map, using the address cache
+as the test for "does a monitor exist with this name?" With no cache that test is
+gone, and the fallback would report for every job class in the host app. **Delete
+the fallback.** The reportable map is now the complete answer, and
+`docs/integrating.md`'s "manual fallback" section — which documents creating a
+monitor by hand whose registration key equals a job class name — describes
+something the interface can no longer do anyway (§3.3). Remove both.
+`test_unmapped_perform_does_not_ping` is the invariant that must stay green.
+
 **`c.monitors` also needs translating.** The server's entry struct reads
 `registration_key` / `name` / `expected_interval_seconds` / `grace_period_seconds`;
 `{ interval:, grace: }` matches none of them and has no key field, so untranslated
@@ -412,6 +521,11 @@ entries are **silently dropped** — sync reports success and every check-in 404
 forever. Durations survive JSON as numeric strings and the server casts them, so
 only the field names need mapping. A key colliding with a `recurring.yml` task is
 currently resolved last-wins with no warning; reject or report it.
+
+Default `grace` the way the registrar already does — `max(interval * 0.15,
+5.minutes)` — so a `c.monitors` entry that omits it behaves like a `recurring.yml`
+task rather than getting zero grace. Document seconds as the canonical unit, since
+`1.day` requires ActiveSupport and the gem supports a plain-Ruby host.
 
 ### 6.4 Reading the response, and boot
 
@@ -435,18 +549,22 @@ write, where the logging IO releases the GVL. That races about 1% of the time.
 
 ```ruby
 config.after_initialize do
-  if Stablemate.config.api_key.presence
-    registrar = Registrars::SolidQueueRecurring.new   # local YAML only
-    Execution::Subscriber.new(reportable: reportable_from(registrar)).subscribe!.subscribe_discards!
-  else
-    Stablemate.log_error("no api_key configured — check-ins are DISABLED …")
-  end
+  # Log first, so a developer booting locally is told even when the environment
+  # allow-list will stop us wiring anything up.
+  Stablemate.logger.error("[stablemate] no ping_key configured — check-ins are DISABLED …") if
+    Stablemate.config.ping_key.presence.nil?
+
+  next unless Stablemate.config.enabled_in?
+  next unless Stablemate.config.ping_key.presence
+
+  registrar = Registrars::SolidQueueRecurring.new   # local YAML only, no network
+  Execution::Subscriber.new(class_to_keys: reportable_map(registrar)).subscribe!.subscribe_discards!
 rescue StandardError => e
-  Stablemate.log_error("boot wiring skipped: #{e.class}: #{e.message}")
+  Stablemate.logger.error("[stablemate] boot wiring skipped: #{e.class}: #{e.message}")
 end
 ```
 
-Four things this gets right that an earlier draft did not:
+Five things this gets right, four of which an earlier draft got wrong:
 
 - **It keeps the rescue.** `Psych::SyntaxError` is a `StandardError`, so dropping
   it turns a broken `recurring.yml` from "monitoring off" into "the app will not
@@ -456,8 +574,21 @@ Four things this gets right that an earlier draft did not:
   request would carry `Authorization: "Bearer "` for a permanent 401.
   `Configuration#default_environment` already guards against exactly this for
   `RAILS_ENV`.
-- **It logs above the environment gate**, so a developer booting locally is told.
-- **It passes the reportable set**, without which §6.3 is not implemented.
+- **It keeps `enabled_in?`.** The environment allow-list is production-only by
+  default and must survive, or a developer's laptop checks in to production
+  monitors and masks a real outage. An earlier draft's snippet omitted the line
+  while its own prose claimed to keep it.
+- **It logs above that gate**, which is the whole reason the log line and the
+  gate are separate statements.
+- **It uses the real constructor keyword.** `Subscriber.new` takes
+  `class_to_keys:`; there is no `reportable:` parameter. §6.3's intersection
+  produces a map of the same shape, so it substitutes directly.
+
+Two naming corrections while here: there is **no `log_error` helper** — `Logging`
+provides only `log_warn`/`log_info`, and they are private instance methods, so
+`Stablemate.log_error` would not resolve even if one existed. Either add
+`log_error` to `Logging` and call it from an including object, or use
+`Stablemate.logger.error` with an explicit `[stablemate]` prefix as above.
 
 `handle_event` also needs a rescue. It is the only public handler without one —
 `handle_retry` and `handle_discard` both have one — and an exception raised in a
@@ -520,7 +651,8 @@ Measured, not estimated.
 | Provenance chip + `source` + migration | ~43 |
 | Ping-token surface (`_ping_setup`, both rotation controllers, the concern, `PingsController`, helpers, routes, serializers) | ~250 |
 | `registration_key` backfill migration | ~40 |
-| **Server subtotal** | **~535** |
+| `PingKey` model, issuance, controller, views, migration, project-page wiring | ~200 |
+| **Server subtotal** | **~735** |
 | Gem deletions (§3.2) | ~110 |
 | **Tests broken by UI removal** | ~393 across 15 files, 4 deleted whole |
 | **Tests broken by the check-in move** | ~647 across 9 files, 3 deleted whole |
@@ -577,20 +709,61 @@ unattached — while still catching `Psych::SyntaxError`, or the app stops booti
 
 ### 9.3 A leaked key pages you at will
 
-With one credential the picture is simpler but not smaller: a leaked key can
-enumerate every monitor, rewrite every interval, and forge both check-ins and
-failure reports. **Two requests produce one email** carrying up to 1,000
+A leaked ping key can forge check-ins and failure reports for every monitor in the
+project. **Two requests produce one email** carrying up to `ERROR_MESSAGE_LIMIT`
 characters of attacker-controlled text from your sending domain. The rate-limit
 ceiling in §5.3 is what bounds this; pick it with that in mind.
 
-Content handling itself is clean — truncation is unconditional in the model layer,
-every render escapes, and header injection through the monitor name is Q-encoded
-by the mail gem. Checked, not assumed.
+**One required fix, which is a live bug today.** An earlier draft of this section
+said content handling was "clean — truncation is unconditional in the model
+layer… Checked, not assumed." That is true of `error` and **false of `name`**:
+
+```ruby
+# app/mailers/monitor_mailer.rb:22
+subject = "#{monitor.name} missed its check-in"
+```
+
+`validates :name, presence: true` is the only name validation and the column is an
+unbounded `varchar`, so any API key holder can put arbitrary, unbounded text in an
+email subject line. The mailer's own comment states the assumption being violated:
+*"The subject carries only the monitor name, never the error (headers stay
+injection-proof, lock-screen previews clean)."* Add a length validation and cap
+what reaches the subject. This is independent of the credential split and should
+ship regardless.
+
+Everything else in the content path checks out: `error` is truncated
+unconditionally in the model layer, every render escapes, and header injection via
+the name is Q-encoded by the mail gem.
 
 Worth adding cheaply: `ping_events` records `source_ip` but nothing about which
 key was used. A nullable key reference makes a suspected leak investigable.
 
-### 9.4 An unrelated bug found while verifying
+### 9.4 Two credentials that can disagree
+
+Nothing forces the API key and the ping key to name the same project. Use project
+A's API key with project B's ping key and registration writes to A while check-ins
+go to B; A's monitors go down permanently and every symptom reads "your job is
+down". This mistake is impossible with one credential and permanent with two, so
+it needs a permanent guard.
+
+Registration returns the last four characters of the project's ping key, and the
+gem logs loudly at startup when the configured key does not match. No escalation —
+an API key can already list every monitor in its project.
+
+**Return a set, not a value.** §4's rotation procedure deliberately keeps two keys
+live at once, so a guard comparing against "the project's ping key" would fire a
+false alarm during exactly the operation it is meant to support.
+
+### 9.5 A pre-existing bug in the sync path
+
+An `expected_interval_seconds` above the `int4` ceiling raises an unrescued
+`ActiveModel::RangeError` that escapes `Project::MonitorSync` and 500s the whole
+request — rolling back the valid entries alongside the bad one. That violates the
+"never raises / never leaves the payload half-applied" contract stated twice in
+that same file. Found while testing §4's interval-rewrite claim; fix it in the
+same change, since §4 relies on that path behaving as documented.
+
+### 9.6 An unrelated bug found while verifying
 
 `Execution::Subscriber.install_discard_hook` installs its callback **twice**, so
 every terminal failure reports twice. `defined?(::ActiveJob::Base)` does not force
@@ -644,11 +817,25 @@ scope; if it stays, it should be because the price is about to be set.
   page they land on, and no surface offers monitor creation (§7).
 - **Tenant isolation.** The same task name in two projects; checked in with project
   A's key, project B's monitor untouched.
-- **Structure.** The pings controller does not inherit the API base controller.
-- **Rate limiting, both directions.** Two task names under one key must not share a
-  counter, **and two keys on one task name must not share one** — the second is
-  what catches a lambda reading post-authentication state, and the first alone
-  would pass a broken implementation. Plus: an unauthenticated flood is bounded.
+- **Credential separation.** A ping key must be rejected by every other `/api/v1`
+  endpoint, and an API key rejected by the check-in endpoint. Assert on the class
+  graph too — `assert_not …PingsController.ancestors.include?(BaseController)` —
+  because a behavioural test is a snapshot and this controller sits in a directory
+  where every sibling inherits the thing it must not.
+- **Browser: ping keys.** Issue one from the project page, see it once, see it
+  masked afterwards, revoke it.
+- **The mismatch guard fires on a real mismatch and stays silent during a
+  rotation** with two live keys (§9.4).
+- **Monitor name length is bounded**, and an oversized name cannot reach an email
+  subject (§9.3).
+- **An out-of-range `expected_interval_seconds` in a sync payload is reported as
+  skipped, not raised**, and leaves the other entries applied (§9.5).
+- **Rate limiting, three ways.** Two task names under one key must not share a
+  counter; two keys on one task name must not share one (this is what catches a
+  lambda reading post-authentication state, and the first case alone would pass a
+  broken implementation); and **one throttled monitor must not consume another
+  monitor's budget** — the layer-order bug in §5.3. Plus: an unauthenticated flood
+  is bounded.
 - **Routing.** A dotted task name arrives intact.
 - **Backfill.** Duplicate names, a name deriving to blank, and a non-Latin name
   each produce a distinct, usable, slash-free key.
