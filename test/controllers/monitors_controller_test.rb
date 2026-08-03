@@ -337,7 +337,53 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_select "div[data-testid='ping-url-card']", false
   end
 
+  # can_upgrade_to_pro? stopped being a plain plan check and now consults Pay's
+  # subscription mirror, so it costs a query — and the cap-skip banner that reads
+  # it renders ONCE PER PROJECT. An at-cap account was paying for the same answer
+  # again for every project it owns. This page batches its rows and its sparklines
+  # precisely so it doesn't do that (#index); the upgrade question is no different.
+  test "the at-cap dashboard asks about the subscription once, not once per project" do
+    with_billing_enabled do
+      at_cap_free_account_with_billing_history!
+      sign_in @alice
+      get monitors_path # warm anything cached per process, so this measures the loop
+
+      one_project = subscription_queries { get monitors_path }
+      4.times { |i| @alice.projects.create!(name: "Extra #{i}") }
+      five_projects = subscription_queries { get monitors_path }
+
+      assert_operator one_project, :>, 0,
+        "guard: with nothing asked at all this test would prove nothing"
+      assert_equal one_project, five_projects,
+        "the upgrade question must not be re-asked for every project on the page"
+    end
+  end
+
   private
+    # A Free account sitting exactly on the Free cap, with a Pay customer behind it
+    # (a cancelled subscription from some earlier life) — the shape that makes
+    # can_upgrade_to_pro? actually reach the subscription mirror rather than
+    # short-circuit on a missing payment processor.
+    def at_cap_free_account_with_billing_history!
+      Monitoring::Monitor.where(project_id: @alice.projects.select(:id)).delete_all
+      Stablemate::FREE_PLAN_MONITOR_LIMIT.times do |i|
+        @alices_project.monitors.create!(name: "Capped #{i}",
+          expected_interval_seconds: 3600, grace_period_seconds: 300)
+      end
+      give_pro_subscription!(user: @alice, status: "canceled")
+      @alice.update!(plan: "free")
+      assert @alice.reload.at_monitor_cap?, "setup should leave the account at the cap"
+    end
+
+    # How many times the block asks Pay's subscription mirror anything — the query
+    # behind can_upgrade_to_pro?.
+    def subscription_queries
+      count = 0
+      counter = ->(*, payload) { count += 1 if payload[:sql].to_s.include?("pay_subscriptions") }
+      ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { yield }
+      count
+    end
+
     # An account mid-grace: dropped to Free, over the Free cap, locked into the
     # choose-N picker with nothing suspended yet (User::Subscription
     # #sync_plan_from_subscription!'s involuntary-downgrade branch).
