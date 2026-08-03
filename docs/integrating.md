@@ -52,9 +52,12 @@ for it.
 
 ### 1.2 Get an API key
 
-In the app: **Settings → API keys → Generate key**. The raw key
-(`sm_live_…`) is shown **once** — copy it immediately. Store it in
-**production-only** credentials (or an env var set only on production hosts):
+Keys belong to a **project**, so generate one on the project this app should
+register its monitors into: **Projects → the project → Generate key**. The raw
+key (`sm_live_…`) is shown **once** — copy it immediately; only its digest and
+last 4 characters are stored, so a lost key is replaced, never recovered. Store
+it in **production-only** credentials (or an env var set only on production
+hosts):
 
 ```sh
 bin/rails credentials:edit --environment production
@@ -64,6 +67,10 @@ bin/rails credentials:edit --environment production
 stablemate:
   api_key: sm_live_xxxxxxxxxxxxxxxxxxxx
 ```
+
+Every monitor this app registers lands in that key's project, and the API sees
+only that project — another project of the same account is as invisible as
+another account's. (Your monitor cap stays per-account, across all projects.)
 
 The key's presence is the gem's per-environment switch, and as a second
 guard the gem auto-wires **only in production by default** — dev and test
@@ -115,6 +122,25 @@ hourly_sync:
 The interval is parsed from `schedule:` (via Fugit). For irregular crons the
 **largest** gap between runs is used as the expected interval; tighten it later in
 the monitor's settings if you want a snugger window.
+
+> **Who wins when you edit a synced monitor.** The gem re-registers on every
+> production boot, and remembers what it last sent for the **name**, **interval**
+> and **grace**. While the stored value still matches that, the gem owns it and
+> keeps it current — so a `recurring.yml` change lands on the next boot without
+> you touching anything.
+>
+> Edit one of those three in the UI and the gem leaves it alone: your override
+> survives every re-sync that has nothing new to say. But if `recurring.yml`
+> itself later changes that setting, **the schedule wins** and your override is
+> replaced. That is deliberate — the interval and grace describe how often the
+> job *actually* runs, so an override derived from the old schedule is stale and
+> would false-alarm, which is the failure this product exists to prevent. Re-apply
+> your override after a schedule change if you still want the snugger window.
+>
+> Monitors registered by a gem version older than this rule have nothing
+> remembered yet, so their **first** sync writes nothing and only records what it
+> sent. If `recurring.yml` had already changed for one of them, that change lands
+> on the following change rather than that first sync.
 
 > **`command:`-only tasks are skipped** (with a logged notice). Solid Queue runs
 > them as `SolidQueue::RecurringJob`, so the gem can't attribute a run back to the
