@@ -82,10 +82,12 @@ had failed.
 there is nothing to fetch, cache, or go stale. §3.2's second half (the header
 credential) is a security improvement, not an incident fix, and §3.1 and §3.3 are
 product decisions that ride along. All are worth doing; this document should not
-pretend they are all incident fixes. The two railtie defects below are also
-untouched by it, and are handled in §6.5 and §9.2. Once addresses are local, a failed registration degrades from *"all
-monitoring silently dead until restart"* to *"a schedule change wasn't picked up
-this deploy."*
+pretend they are all incident fixes.
+
+Once addresses are local, a failed registration degrades from *"all monitoring
+silently dead until restart"* to *"a schedule change wasn't picked up this
+deploy."* The two railtie defects below are untouched by it, and are handled in
+§6.5 and §9.2.
 
 Two related defects, both confirmed by booting a real app against the railtie:
 
