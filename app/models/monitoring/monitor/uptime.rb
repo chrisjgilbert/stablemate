@@ -189,9 +189,11 @@ module Monitoring
         # disagree, and today is classified by the same up/down/partial cutoffs it
         # will get once the rollup persists it (UptimeDayStat#status).
         #
-        # Memoized because the detail page and the API detail endpoint each render
-        # BOTH readers, so every one of those responses ran today's incident scan
-        # twice for the same answer. Keyed on the second it was taken in rather
+        # Memoized because the detail page's uptime panel renders BOTH readers off
+        # one monitor — the bar and the percent — so every one of those responses
+        # ran today's incident scan twice for the same answer. (The API detail
+        # endpoint serves only the percent, so it was already paying once.) Two
+        # readers, one number, one scan. Keyed on the second it was taken in rather
         # than memoized outright: this is a snapshot of *now*, and a `travel_to` in
         # a test (or a day rolling over under a long-lived object) must get a fresh
         # one instead of yesterday's. Within a render the clock does not move, so
