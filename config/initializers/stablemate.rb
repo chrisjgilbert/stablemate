@@ -111,9 +111,9 @@ module Stablemate
 
   # Honeybadger's project API key. Config-gated like the rest: unset ⇒ no error
   # reporting at all, which is the self-host default (nobody else's crash reports
-  # should land in our project, and theirs are none of our business). Fed to the
-  # gem from config/initializers/honeybadger.rb rather than config/honeybadger.yml,
-  # because that file is git-tracked.
+  # should land in our project, and theirs are none of our business). Read by
+  # config/initializers/honeybadger.rb, which explains why the key is handed to
+  # the gem from there rather than left in config/honeybadger.yml.
   def self.honeybadger_api_key
     ENV["HONEYBADGER_API_KEY"].presence ||
       Rails.application.credentials.dig(:honeybadger, :api_key)

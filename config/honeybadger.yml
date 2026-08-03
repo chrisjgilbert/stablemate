@@ -1,16 +1,10 @@
 ---
 # For more options, see https://docs.honeybadger.io/lib/ruby/gem-reference/configuration
 #
-# NO api_key HERE, DELIBERATELY. This file is git-tracked and self-hosters clone
-# the repository, so a literal key would (a) send their exceptions to our project
-# and (b) be public. The key is read from HONEYBADGER_API_KEY or Rails encrypted
-# credentials by config/initializers/honeybadger.rb — see Stablemate
-# .honeybadger_api_key. An instance with no key set anywhere boots fine and simply
-# never reports.
-#
-# A self-hoster running their OWN fork may still put their own key here: the
-# initializer only assigns one when it has one, so this file stays the fallback
-# the gem documents. Just don't send one upstream.
+# NO api_key HERE, DELIBERATELY — this file is git-tracked and self-hosters clone
+# it. config/initializers/honeybadger.rb sets the key from ENV/credentials and
+# explains why; a self-hoster's own fork may still put theirs here, and the
+# initializer is careful to leave it alone. Just don't send one upstream.
 
 # The environment your app is running in.
 env: "<%= Rails.env %>"

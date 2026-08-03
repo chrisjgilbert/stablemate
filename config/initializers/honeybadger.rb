@@ -1,7 +1,11 @@
-# What an error report is allowed to carry off our infrastructure.
+# The two Honeybadger settings that are ours rather than the gem's, both of them
+# here rather than in config/honeybadger.yml: WHERE THE API KEY COMES FROM (see
+# the assignment inside `configure` below) and WHAT AN ERROR REPORT IS ALLOWED TO
+# CARRY off our infrastructure (the rest of this note). Everything else — env,
+# root, insights — stays in the YAML, which is where the gem's docs put it.
 #
-# Honeybadger is a third party, so this is a privacy decision, not a tuning knob
-# — and its own defaults are far narrower than ours: it filters `password`,
+# Honeybadger is a third party, so filtering is a privacy decision, not a tuning
+# knob — and its own defaults are far narrower than ours: it filters `password`,
 # `password_confirmation` and `HTTP_AUTHORIZATION`, and nothing else. (It does
 # pick up Rails' `config.filter_parameters` for notices raised inside a request,
 # from the Rack env — but not for one raised in a job or a rake task, where the
