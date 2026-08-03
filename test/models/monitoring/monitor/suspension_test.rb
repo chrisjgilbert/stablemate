@@ -134,6 +134,24 @@ class Monitoring::Monitor::SuspensionTest < ActiveSupport::TestCase
     assert monitor.up?
   end
 
+  # The migration cohort: a monitor already `suspended` when the memory column was
+  # added has no memory to read, and nothing anywhere records whether it had been
+  # paused — so no backfill can restore it and reactivation must fall back to
+  # re-evaluating the heartbeat. Pinned rather than fixed, deliberately: guessing
+  # "paused" for the whole cohort would silently stop monitoring live jobs, which
+  # is worse than the un-pause it would prevent. (The cohort is empty in
+  # production — suspension is reachable only through the Stripe downgrade path,
+  # and the managed instance has not taken a payment yet.)
+  test "a monitor suspended before the memory existed re-evaluates rather than guessing" do
+    monitor = monitors(:up)
+    monitor.suspend!
+    monitor.update_column(:status_before_suspension, nil) # as the migration left it
+
+    monitor.reactivate!
+
+    assert monitor.up?, "with no memory to read, the heartbeat decides — never a guessed pause"
+  end
+
   # F11 — suspend! had pause!'s bug: the open-incident SELECT ran unlocked, so a
   # detection sweep landing between that read and the status flip left the monitor
   # `suspended` WITH an open incident (and a down email for a monitor the plan
