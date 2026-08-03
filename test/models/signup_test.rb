@@ -159,8 +159,8 @@ class SignupTest < ActiveSupport::TestCase
       assert lock, "expected the signup to take an advisory lock"
       assert counts.any?, "expected the signup to count accounts against the cap"
       assert insert, "expected the signup to insert the user"
-      assert counts.any? { |i| i > lock },
-        "the cap decision must be re-made under the lock, against committed state"
+      assert counts.any? { |i| i > lock && i < insert },
+        "the cap decision must be re-made under the lock, BEFORE the INSERT it gates"
       assert lock < insert, "the INSERT must run under the lock, not before it"
     end
   end
@@ -195,16 +195,21 @@ class SignupTest < ActiveSupport::TestCase
     end
   end
 
+  # Every consult is recorded, not just the last. There are two now — the unlocked
+  # pre-check that spares a waitlist join the cost of a password hash, then the one
+  # the INSERT is predicated on — and only the second is a decision. Reading the
+  # final result alone would go on passing if the two ever swapped places, which is
+  # exactly the regression that would reopen M1.
   test "the capacity lock excludes a second connection while capacity is being decided" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
-      taken_elsewhere = nil
+      taken_elsewhere = []
 
-      while_deciding_capacity(-> { taken_elsewhere = try_capacity_lock_on_another_connection }) do
+      while_deciding_capacity(-> { taken_elsewhere << try_capacity_lock_on_another_connection }) do
         Signup.new(email: "excluded@example.com", password: "password1234").run
       end
 
-      assert_equal false, taken_elsewhere,
-        "a second connection must not be able to enter the check-then-create window"
+      assert_equal [ true, false ], taken_elsewhere,
+        "the deciding consult must exclude a second connection; the cheap pre-check need not"
     end
   end
 
