@@ -7,6 +7,10 @@
 # credentials by config/initializers/honeybadger.rb — see Stablemate
 # .honeybadger_api_key. An instance with no key set anywhere boots fine and simply
 # never reports.
+#
+# A self-hoster running their OWN fork may still put their own key here: the
+# initializer only assigns one when it has one, so this file stays the fallback
+# the gem documents. Just don't send one upstream.
 
 # The environment your app is running in.
 env: "<%= Rails.env %>"
