@@ -1,6 +1,11 @@
 <% content_for :title, "Monitors" %>
 <% count = @monitors.size # relation already loaded; no extra COUNT query %>
 <% at_cap = current_user.at_monitor_cap? %>
+<%# Asked once for the whole page. can_upgrade_to_pro? consults Pay's subscription
+    mirror (a past_due account reads Free while Stripe still bills it), so it costs
+    a query — and the cap-skip banner below reads it once per project. Same reason
+    @mini_ticks is preloaded: nothing on this page may scale with the row count. %>
+<% can_upgrade = at_cap && current_user.can_upgrade_to_pro? %>
 
 <% if @projects.empty? %>
   <%# First run: no project yet, so onboard through project creation (§6, §13-S6). %>
@@ -26,7 +31,7 @@
 
   <%# User-level cap note (unchanged — the cap stays per-user, §7). %>
   <% if at_cap %>
-    <% if current_user.can_upgrade_to_pro? %>
+    <% if can_upgrade %>
       <%# Hosted tier: the at-limit prompt is an upgrade nudge (PRD §5.6). %>
       <div class="mb-6 flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 shadow-sm" data-testid="at-limit-note">
         <p class="text-[13px] text-muted">
@@ -67,7 +72,7 @@
       </div>
       <% if at_cap %>
         <%# The account is at cap, so new gem jobs into this project are skipped (§13-S5). %>
-        <%= render "monitors/cap_skip_banner", project: project %>
+        <%= render "monitors/cap_skip_banner", project: project, can_upgrade: can_upgrade %>
       <% end %>
       <% if rows.any? %>
         <%= render "monitors/list", monitors: rows, mini_ticks: @mini_ticks %>
