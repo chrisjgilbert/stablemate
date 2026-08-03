@@ -22,11 +22,18 @@ class User
     def pro?  = plan == PRO
 
     # Whether this user could move to Pro right now — used by every "Upgrade"
-    # CTA (the at-cap nudge, the pricing page) so they can't drift on the
-    # eligibility rule. False on a keyless self-host instance (issue #19):
-    # there's no Pro to buy there, whatever the user's plan.
+    # CTA (the at-cap nudge, the pricing page, the billing page, the cap-skip
+    # banner) so they can't drift on the eligibility rule. False on a keyless
+    # self-host instance (issue #19): there's no Pro to buy there, whatever the
+    # user's plan.
+    #
+    # `free?` alone is not the rule, because a past_due account IS free while
+    # Stripe is still dunning its live subscription: offering it a checkout put
+    # every one of those CTAs one click away from Billing::CheckoutsController's
+    # "You're already on Pro." This is now that guard's exact complement — the
+    # button appears only where pressing it works.
     def can_upgrade_to_pro?
-      Stablemate.billing_enabled? && free?
+      Stablemate.billing_enabled? && free? && !billed_for_pro?
     end
 
     # The number of monitors this user may own, or nil when there is no cap

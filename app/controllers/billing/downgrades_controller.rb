@@ -52,11 +52,11 @@ module Billing
 
       # Is there actually a Pro to leave? The involuntary path arrives here with
       # the plan already on Free and the subscription already cancelled, so copy
-      # promising to cancel one is a lie (M4). Asks about the subscription as well
-      # as the plan because a past_due account reads Free while Stripe is still
-      # very much billing it (F5) — that one does need cancelling.
+      # promising to cancel one is a lie (M4). The predicate moved onto the User
+      # because the billing page and the Upgrade CTAs need the same answer and were
+      # each getting it wrong differently — see User::Subscription#billed_for_pro?.
       def leaving_pro?
-        current_user.pro? || current_user.live_pro_subscription?
+        current_user.billed_for_pro?
       end
 
       # Choose-N when the account owes an involuntary decision, or a voluntary

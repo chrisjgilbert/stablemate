@@ -21,8 +21,12 @@
         cross-origin hosted pages. Turbo would follow that redirect via fetch() and
         hit CORS ("Failed to fetch"), so we opt these forms out of Turbo and let the
         browser do a real full-page navigation. (allow_other_host: is set server-side.) %>
+    <%# billed_for_pro?, not pro?: a past_due account reads Free while Stripe is
+        still dunning it, and it is the one that most needs the portal (to fix the
+        card) and the downgrade (to stop the dunning). Asking the plan instead hid
+        both and offered an Upgrade that CheckoutsController refuses. %>
     <div class="flex items-center gap-2">
-      <% if @user.pro? %>
+      <% if @user.billed_for_pro? %>
         <%= button_to "Manage card & invoices", billing_portal_session_path,
               class: "h-8 px-3 inline-flex items-center rounded-lg text-[13px] font-semibold text-secondary hover:bg-hairline border border-border",
               form: { data: { turbo: false } } %>

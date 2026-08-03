@@ -37,6 +37,52 @@ class User::SubscriptionTest < ActiveSupport::TestCase
     end
   end
 
+  # The single "is there a Pro here?" question, promoted off
+  # Billing::DowngradesController so the downgrade copy, the billing page's
+  # affordances and every Upgrade CTA cannot drift apart. It has to answer YES for
+  # past_due — plan Free, Stripe still dunning — which is the case each of those
+  # surfaces got wrong on its own.
+  test "billed_for_pro? is true whenever Stripe could still charge for Pro" do
+    with_billing_enabled do
+      refute @user.billed_for_pro?, "a Free account with no subscription owes nothing"
+
+      give_pro_subscription!(status: "past_due")
+      assert @user.reload.billed_for_pro?, "mid-dunning is still being billed"
+
+      @user.pay_subscriptions.update_all(status: "canceled")
+      refute @user.reload.billed_for_pro?
+
+      @user.update!(plan: "pro")
+      assert @user.billed_for_pro?, "an active Pro plan counts even if the mirror drifts"
+    end
+  end
+
+  # A first payment that never completed has charged nothing and expires on its
+  # own, so the user must stay free to retry — the same relaxation
+  # live_pro_subscription? makes for CheckoutsController.
+  test "billed_for_pro? ignores a first payment that never completed" do
+    with_billing_enabled do
+      give_pro_subscription!(status: "incomplete")
+
+      refute @user.reload.billed_for_pro?
+      assert @user.can_upgrade_to_pro?, "they must be able to try paying us again"
+    end
+  end
+
+  # can_upgrade_to_pro? is the eligibility rule EVERY upgrade CTA reads (billing
+  # page, pricing page, the at-cap dashboard nudge, the cap-skip banner). It was
+  # plan-only, so all four offered a past_due user a button that bounced off
+  # CheckoutsController with "You're already on Pro."
+  test "can_upgrade_to_pro? refuses an account Stripe is still billing" do
+    with_billing_enabled do
+      give_pro_subscription!(status: "past_due")
+      @user.reload
+
+      assert_equal "free", @user.plan
+      refute @user.can_upgrade_to_pro?, "the CTA must not promise what checkout will refuse"
+    end
+  end
+
   test "live_pro_subscription? ignores terminal subscriptions" do
     with_billing_enabled do
       give_pro_subscription!(status: "canceled")
