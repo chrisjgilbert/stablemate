@@ -3,6 +3,7 @@ require_relative "../config/environment"
 require "rails/test_help"
 require_relative "test_helpers/session_test_helper"
 require_relative "test_helpers/boot_test_helper"
+require_relative "test_helpers/query_counting_test_helper"
 
 # Network lockdown: no test may reach the real internet. Outbound HTTP is blocked
 # so an accidental live Stripe call fails loudly instead of hitting the API (or
@@ -124,6 +125,7 @@ module ActiveSupport
     include BillingGateTestHelper
     include SlackGateTestHelper
     include PaySubscriptionMirror
+    include QueryCountingTestHelper
 
     # Rate-limit stores are dedicated in-process MemoryStores that persist across
     # tests within a worker; clear them before each test so ordinary per-test

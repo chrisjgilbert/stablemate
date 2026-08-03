@@ -294,10 +294,7 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
   private
     # How many times the block scans the incidents table — the query
     # live_today_stat runs, and the one the memoization is there to halve.
-    def count_incident_scans
-      scans = 0
-      counter = ->(*, payload) { scans += 1 if payload[:sql] =~ /\bFROM "incidents"/i && payload[:name] != "SCHEMA" }
-      ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { yield }
-      scans
+    def count_incident_scans(&block)
+      count_queries_matching(/\bFROM "incidents"/i, &block)
     end
 end
