@@ -6,12 +6,13 @@
   the daily backstop keeps the oldest N for them. Only rendered when billing is
   enabled and current_user.must_choose_downgrade? (the layout gates both).
 
-  The lock itself is only released on a billing page load, so an account can sit
-  here having already put itself back within the cap — by deleting monitors, or by
-  a voluntary downgrade that raced its own cancel webhook (M4/M3). There is nothing
-  to choose in that state, so the banner says so and points at Billing, which
-  releases the lock on load. Counts are of monitors occupying a cap slot: suspended
-  ones don't count anywhere else either (locked decision #8).
+  An account can still sit here having already put itself back within the cap:
+  deleting monitors lifts the lock on the spot (Monitoring::Monitor's
+  after_destroy_commit), but a voluntary choose-N downgrade that raced its own
+  cancel webhook leaves a lock the user has in fact already answered (M3). There is
+  nothing to choose in that state, so the banner says so and points at Billing,
+  which also releases the lock on load. Counts are of monitors occupying a cap
+  slot: suspended ones don't count anywhere else either (locked decision #8).
 %>
 <% deadline = current_user.downgrade_choice_deadline_at %>
 <% limit = Stablemate::FREE_PLAN_MONITOR_LIMIT %>

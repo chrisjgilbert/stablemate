@@ -54,4 +54,60 @@ class DowngradeGraceTest < ApplicationSystemTestCase
       assert_no_selector "[data-testid='downgrade-grace-banner']"
     end
   end
+
+  # The OTHER shape of the same lock: the account is locked into a choose-N
+  # decision it no longer has anything to answer, because it is already within the
+  # Free cap. The banner must stop asking for a choice and the picker must stop
+  # offering one — and the release the billing page performs has to actually clear
+  # both. This shipped with request tests only; it is a rendered, clickable state,
+  # so it gets a browser.
+  #
+  # Reached in production by a voluntary choose-N downgrade racing its own cancel
+  # webhook (M3): the webhook lands after the monitors were suspended, sees an
+  # account it thinks is over cap, and opens a lock the user has already answered.
+  test "a lock the account has outgrown says so, and lifts on the billing page" do
+    with_billing_enabled do
+      # Within the Free cap, but locked — the state the race leaves behind.
+      2.times { |i| @project.monitors.create!(name: "Kept#{i}", **ATTRS) }
+      @user.update!(plan: "free", awaiting_downgrade_choice: true,
+        downgrade_choice_deadline_at: Stablemate::DOWNGRADE_GRACE_PERIOD.from_now)
+
+      sign_in @user
+
+      within "[data-testid='downgrade-grace-banner']" do
+        assert_text "nothing will be suspended and there's nothing to choose"
+        assert_no_selector "[data-testid='grace-choose-link']"
+        click_on "Review billing"
+      end
+
+      # The billing page released the lock as it loaded, so the banner is gone
+      # from the page it just rendered — not merely on the next visit.
+      assert_current_path billing_subscription_path
+      assert_no_selector "[data-testid='downgrade-grace-banner']"
+      refute @user.reload.awaiting_downgrade_choice?
+    end
+  end
+
+  # The downgrade page's third shape: already on Free, nothing left to cancel and
+  # nothing to pick. Its only affordance is the way back — offering the picker
+  # here would demand a choice the user cannot satisfy.
+  test "the downgrade page offers nothing to do once the account is Free and within the cap" do
+    with_billing_enabled do
+      2.times { |i| @project.monitors.create!(name: "Kept#{i}", **ATTRS) }
+      @user.update!(plan: "free", awaiting_downgrade_choice: true,
+        downgrade_choice_deadline_at: Stablemate::DOWNGRADE_GRACE_PERIOD.from_now)
+
+      sign_in @user
+      visit new_billing_downgrade_path
+
+      assert_text "You're already on the Free plan"
+      assert_text "there's nothing to downgrade and nothing to choose"
+      assert_no_selector "[data-testid='downgrade-project-group']"
+      assert_no_selector "[data-testid='confirm-downgrade']"
+
+      click_on "Back to billing"
+
+      assert_current_path billing_subscription_path
+    end
+  end
 end

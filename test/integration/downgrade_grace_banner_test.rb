@@ -36,9 +36,10 @@ class DowngradeGraceBannerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # M4 — the lock is only released on a billing page load, so a user who deletes
-  # monitors mid-grace keeps the banner. It must at least stop lying: with 3
-  # monitors and a cap of 5 there is nothing over the cap and nothing to pick.
+  # M4 — an account can be locked and yet already within the cap (a voluntary
+  # choose-N downgrade racing its own cancel webhook, M3). The banner must stop
+  # lying: with 3 monitors and a cap of 5 there is nothing over the cap and
+  # nothing to pick.
   test "the banner stops asking for a choice once the account is within the cap" do
     with_billing_enabled do
       enter_grace! # alice's fixture monitors are well under the Free cap

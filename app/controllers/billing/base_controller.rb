@@ -19,9 +19,14 @@ module Billing
       end
 
       # Self-heal a stale choose-N lock on any billing page load: if the user is
-      # back within the Free cap (e.g. deleted monitors while locked), lift the
-      # lock and reactivate the survivors rather than trapping them in a picker
-      # they can no longer satisfy. No-op unless actually locked and within cap.
+      # back within the Free cap, lift the lock and reactivate the survivors rather
+      # than trapping them in a picker they can no longer satisfy. No-op unless
+      # actually locked and within cap.
+      #
+      # Deleting monitors now lifts it at the moment they go (Monitoring::Monitor's
+      # after_destroy_commit), so this is the backstop for the ways an account gets
+      # back within cap WITHOUT a deletion — chiefly a voluntary choose-N downgrade
+      # racing its own cancel webhook into a lock it has already answered (M3).
       def release_downgrade_lock
         current_user&.release_downgrade_lock_if_within_cap!
       end
