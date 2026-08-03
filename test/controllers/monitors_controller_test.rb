@@ -377,11 +377,8 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
 
     # How many times the block asks Pay's subscription mirror anything — the query
     # behind can_upgrade_to_pro?.
-    def subscription_queries
-      count = 0
-      counter = ->(*, payload) { count += 1 if payload[:sql].to_s.include?("pay_subscriptions") }
-      ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { yield }
-      count
+    def subscription_queries(&block)
+      count_queries_matching(/pay_subscriptions/, &block)
     end
 
     # An account mid-grace: dropped to Free, over the Free cap, locked into the
