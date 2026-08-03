@@ -1,6 +1,8 @@
 require "test_helper"
 
 class Monitoring::MonitorTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+
   # Use bob (no fixture monitors) so cap-of-5 doesn't trip these create tests.
   setup { @user = users(:bob); @project = @user.projects.sole; @project.monitors.delete_all }
 
@@ -121,6 +123,48 @@ class Monitoring::MonitorTest < ActiveSupport::TestCase
 
     assert monitor.update(name: "Renamed at cap")
     assert_equal "Renamed at cap", monitor.reload.name
+  end
+
+  # F10's sibling. The alert dispatch waits for the caller's transaction to
+  # commit; the Turbo broadcast did not, and the webhook / choose-N reactivation
+  # paths reach it from inside ProcessedEvent.record_once's transaction. Solid
+  # Queue is a SEPARATE database, so the broadcast job could be claimed by a
+  # worker that renders the monitor as it was BEFORE the change — a badge stuck
+  # showing the old status — and a rollback (the designed Stripe-retry path) left
+  # an orphan job for a change that never happened. Cheaper to fix than to reason
+  # about.
+  test "the status broadcast is enqueued only once the surrounding transaction commits" do
+    monitor = @project.monitors.create!(name: "Broadcast", **ATTRS)
+
+    assert_enqueued_jobs 2, only: Turbo::Streams::ActionBroadcastJob do
+      ActiveRecord::Base.transaction do
+        monitor.broadcast_status_update
+
+        # Nothing may be visible to a worker (separate queue DB) before commit.
+        assert_no_enqueued_jobs only: Turbo::Streams::ActionBroadcastJob
+      end
+    end
+  end
+
+  test "a rolled-back transaction broadcasts nothing" do
+    monitor = @project.monitors.create!(name: "Broadcast", **ATTRS)
+
+    assert_no_enqueued_jobs only: Turbo::Streams::ActionBroadcastJob do
+      ActiveRecord::Base.transaction do
+        monitor.broadcast_status_update
+        raise ActiveRecord::Rollback
+      end
+    end
+  end
+
+  # The ping paths broadcast with no transaction open (they dispatch outside their
+  # own with_lock), and must stay immediate.
+  test "with no surrounding transaction the broadcast happens immediately" do
+    monitor = @project.monitors.create!(name: "Broadcast", **ATTRS)
+
+    assert_enqueued_jobs 2, only: Turbo::Streams::ActionBroadcastJob do
+      monitor.broadcast_status_update
+    end
   end
 
   # Scenario 13 — deleting a monitor cascades to pings/incidents/notifications.
