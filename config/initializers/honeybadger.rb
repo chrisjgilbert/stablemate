@@ -56,7 +56,17 @@ Honeybadger.configure do |config|
   # ⚠️ OWNER ACTION: the key that used to live in the YAML is in this repository's
   # git history permanently and must be ROTATED in the Honeybadger dashboard. No
   # code change can undo that; deleting the line only stops it spreading further.
-  config.api_key = Stablemate.honeybadger_api_key
+  #
+  # Assigned only when we actually have one. A value set from a `configure` block
+  # outranks every other source the gem reads (Config#get checks @ruby first), so
+  # an unconditional assignment would push `nil` over a key a self-hoster set the
+  # gem's own way — in their honeybadger.yml, or via HONEYBADGER_CONFIG_PATH —
+  # and switch their reporting off with nothing to read that said why. Skipping
+  # the assignment leaves those paths intact, and there is no key in the
+  # repository for them to fall back TO.
+  if (api_key = Stablemate.honeybadger_api_key)
+    config.api_key = api_key
+  end
 
   config.before_notify do |notice|
     notice.url = notice.url.sub(ping_token_in_path, redacted_ping_path) if notice.url

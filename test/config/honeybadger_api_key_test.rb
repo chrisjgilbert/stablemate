@@ -1,5 +1,6 @@
 require "test_helper"
 require "open3"
+require "tmpdir"
 
 # The Honeybadger API key is a third-party credential and must not live in a
 # git-tracked file: this repository is cloned by self-hosters, so a committed key
@@ -52,5 +53,36 @@ class HoneybadgerApiKeyTest < ActiveSupport::TestCase
 
     assert_nil cfg["api_key"], "a keyless instance must not fall back to somebody else's project"
     assert_nil cfg["notify_error"], "a missing key must be a no-op, never an exception"
+  end
+
+  # Taking the key OUT of our YAML must not take everyone else's out too. A value
+  # assigned in the initializer outranks every other source Honeybadger reads, so
+  # assigning it unconditionally turned "we ship no key" into "no key can be
+  # configured the gem's own way" — a self-hoster who put one in their
+  # honeybadger.yml (the file the gem documents, and the one this repo tells them
+  # is theirs to fill) got silence, with nothing to read that said why.
+  test "a key set the gem's own way, in its YAML, still reaches Honeybadger" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "honeybadger.yml")
+      File.write(path, "---\napi_key: 'hbp_self_hosters_own_key'\nenv: test\n")
+
+      cfg = boot("HONEYBADGER_API_KEY" => nil, "HONEYBADGER_CONFIG_PATH" => path)
+
+      assert_equal "hbp_self_hosters_own_key", cfg["api_key"],
+        "the initializer must not shadow a key it hasn't got one to replace"
+    end
+  end
+
+  # …and ours still wins when we have one, so the documented ENV/credentials route
+  # is never quietly overridden by a stale file.
+  test "the environment beats a key left in the YAML" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "honeybadger.yml")
+      File.write(path, "---\napi_key: 'hbp_stale_yaml_key'\nenv: test\n")
+
+      cfg = boot("HONEYBADGER_API_KEY" => "hbp_env_key", "HONEYBADGER_CONFIG_PATH" => path)
+
+      assert_equal "hbp_env_key", cfg["api_key"]
+    end
   end
 end
