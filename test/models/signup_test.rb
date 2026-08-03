@@ -141,6 +141,11 @@ class SignupTest < ActiveSupport::TestCase
   # decision is being made (probed from a real second connection); and (c) with
   # the cap off there is no window to guard, so no lock is taken at all.
 
+  # There is also an unlocked capacity COUNT before the lock, which is why this
+  # asks for a count AFTER it rather than for the first one: that pre-check is
+  # deliberately not the decision (it only spares a waitlist join the cost of a
+  # password hash), and being stale either way is harmless. The decision — the
+  # count the INSERT is predicated on — has to be re-made under the lock.
   test "the create path takes the capacity lock before it counts accounts and inserts the user" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
       statements = capture_sql do
@@ -148,14 +153,45 @@ class SignupTest < ActiveSupport::TestCase
       end
 
       lock   = index_of(statements, /pg_advisory_xact_lock/)
-      count  = index_of(statements, /COUNT\(\*\).+"users"/i)
+      counts = indexes_of(statements, /COUNT\(\*\).+"users"/i)
       insert = index_of(statements, /INSERT INTO "users"/)
 
       assert lock, "expected the signup to take an advisory lock"
-      assert count, "expected the signup to count accounts against the cap"
+      assert counts.any?, "expected the signup to count accounts against the cap"
       assert insert, "expected the signup to insert the user"
-      assert lock < count, "the cap COUNT must run under the lock, not before it"
+      assert counts.any? { |i| i > lock },
+        "the cap decision must be re-made under the lock, against committed state"
       assert lock < insert, "the INSERT must run under the lock, not before it"
+    end
+  end
+
+  # The corollary of hashing before the lock: don't hash at all for someone who
+  # is going to the waitlist. Once the managed instance is full that is every
+  # sign-up, so paying ~250ms of bcrypt for a password we never store would just
+  # move the waste rather than remove it.
+  test "a waitlisted sign-up never pays for a password hash" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
+      events = capture_hashing_and_locking do
+        Signup.new(email: "no-hash@example.com", password: "password1234").run
+      end
+
+      assert_empty events
+    end
+  end
+
+  # …but ONLY the COUNT and the INSERT belong in there. bcrypt is deliberately
+  # slow (~250ms at the configured cost) and has nothing to do with capacity, so
+  # hashing the password under the global lock made every sign-up on a capped
+  # instance queue behind every other one's password hashing. Build the user —
+  # has_secure_password digests in the setter — before the lock is taken.
+  test "the password is hashed before the capacity lock is taken" do
+    stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
+      events = capture_hashing_and_locking do
+        Signup.new(email: "hashed-first@example.com", password: "password1234").run
+      end
+
+      assert_equal %i[hash lock], events.first(2),
+        "bcrypt must not run while every other sign-up is blocked behind the lock"
     end
   end
 
@@ -282,6 +318,31 @@ class SignupTest < ActiveSupport::TestCase
 
     def index_of(statements, pattern)
       statements.index { |sql| sql.match?(pattern) }
+    end
+
+    def indexes_of(statements, pattern)
+      statements.each_index.select { |i| statements[i].match?(pattern) }
+    end
+
+    # The ORDER of the two things that must not overlap: the password hash and the
+    # global capacity lock. bcrypt leaves no SQL behind, so it is watched at its
+    # own entry point rather than through the query log.
+    def capture_hashing_and_locking
+      events = []
+      subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|
+        events << :lock if payload[:sql].to_s.match?(/pg_advisory_xact_lock/)
+      end
+      original = BCrypt::Password.method(:create)
+      BCrypt::Password.define_singleton_method(:create) do |*args, **kwargs|
+        events << :hash
+        original.call(*args, **kwargs)
+      end
+
+      yield
+      events
+    ensure
+      BCrypt::Password.define_singleton_method(:create, original) if original
+      ActiveSupport::Notifications.unsubscribe(subscriber) if subscriber
     end
 
     # Run `probe` at the moment Signup consults the cap — i.e. inside the window
