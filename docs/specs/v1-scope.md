@@ -15,13 +15,16 @@ one way.**
 parts need inline amendment notes in the same change, following the pattern
 already used there (decision #2: *"Amended by `job-failure-details.md` §5.1"*).
 
-| Where | What changes |
+Section numbers in the left column are **`README.md`'s**; those in the right are
+**this document's**.
+
+| Where (in `README.md`) | What changes |
 |---|---|
 | Decision #4, *"Gem ping reliability — fire-and-forget, errors swallowed"* | **Amended.** Errors are no longer swallowed: a `401` is logged once and a `404` once per task name (§6.4). "Never blocks the job" and "a transient outage is absorbed by the grace period" both survive intact. |
 | Decision #6, *"`registration_key` = the recurring.yml task key… the registrar writes it"* | **Amended.** It stops being an internal idempotency key and becomes the monitor's **public address**. A backfill becomes a second writer, and it becomes character-set sensitive. |
 | Decision #3, *"No gate on monitor creation"* | **Narrowed.** Survives only as a statement about `bin/rails stablemate:sync`. |
 | §2 Security defaults, the whole `ping_token` bullet | **Void.** Every clause — plaintext by design, the dashboard showing it, the API re-serving it, the uninformative 404, per-token rate limiting, rotation — describes surfaces this removes. |
-| §3 Data model, `Monitor` | `ping_token` and its unique index are deleted; `source` becomes constant (§4.3). |
+| §3 Data model, `Monitor` | `ping_token` and its unique index are deleted; `source` becomes constant (§3.3). |
 
 Decision #5 (*"user can tighten via UI override"*) **survives, and that is
 deliberate.** Monitor *editing* is retained precisely because #5 requires it — and
@@ -50,8 +53,8 @@ After this work:
   POST /api/v1/monitors/{registration_key}/pings
   Authorization: Bearer sm_ping_…
   ```
-- **The web interface is for looking, and for the two things only a human decides:**
-  overriding a schedule, and pausing.
+- **The web interface is for looking, and for the three things only a human
+  decides:** overriding a schedule, pausing, and deleting.
 
 What that costs is stated plainly in §7. The largest remaining question — whether
 billing belongs in V1 at all — is §10, and is not decided here.
@@ -75,10 +78,12 @@ can only be sent if an address was found. **The repair is behind the door it is
 meant to open.** Four healthy jobs alerted as down while the monitoring was what
 had failed.
 
-**The fix is §3.2 alone** — build the address locally and there is nothing to
-fetch, cache, or go stale. §3.1 and §3.3 are product decisions that ride along;
-they are worth doing, but this document should not pretend they are incident
-fixes. Once addresses are local, a failed registration degrades from *"all
+**The incident fix is the first half of §3.2** — build the address locally and
+there is nothing to fetch, cache, or go stale. §3.2's second half (the header
+credential) is a security improvement, not an incident fix, and §3.1 and §3.3 are
+product decisions that ride along. All are worth doing; this document should not
+pretend they are all incident fixes. The two railtie defects below are also
+untouched by it, and are handled in §6.4 and §9.2. Once addresses are local, a failed registration degrades from *"all
 monitoring silently dead until restart"* to *"a schedule change wasn't picked up
 this deploy."*
 
@@ -286,7 +291,9 @@ keeps its own three-line `authenticating`.
 ```ruby
 namespace :api do
   namespace :v1 do
-    resources :monitors, only: %i[index show]
+    resources :monitors, only: %i[index show] do
+      collection { post :sync, to: "monitors/syncs#create" }   # unchanged — §3.1 needs it
+    end
     post "monitors/:registration_key/pings", to: "monitors/pings#create",
          constraints: { registration_key: %r{[^/]+} }, format: false, as: :monitor_pings
   end
@@ -312,9 +319,17 @@ POST /api/v1/monitors//pings                    => RoutingError
 
 Two traps. `recognize_path` resolves the controller class, so these all raise
 `RoutingError` until the controller exists — which reads exactly like a broken
-route. And the `/` constraint is defensive, not preventive: `%2F` routes fine and
-decodes to a slash-bearing key, so the pre-flight SQL in §8 will not tell you what
-you think.
+route. Run this before the route ships, since task names become part of a URL:
+
+```sql
+SELECT count(*) FROM monitors WHERE registration_key IS NULL;
+SELECT id, project_id, registration_key FROM monitors
+WHERE registration_key ~ '[^A-Za-z0-9_.\-]';
+```
+
+It will not catch everything: the `/` constraint is defensive, not preventive —
+`%2F` routes fine and decodes to a slash-bearing key (verified). Treat the query
+as a sizing exercise for the §8 backfill, not a guarantee.
 
 ### 5.2 The controller, authentication and tenancy
 
@@ -404,9 +419,14 @@ entire controller to one counter. The interpolated form
 `"#{@current_ping_key}|#{params[...]}"` collapses to one counter per task name
 instead — narrower, still wrong.
 
-Pick the ceiling deliberately and put it in `config/initializers/stablemate.rb`
-with the other constants; the current per-token limit is 30/min. It bounds the
-alert-flood in §9.3.
+Pick the ceiling deliberately; the current per-token limit is 30/min, and it
+bounds the alert-flood in §9.3. Put it on the controller, alongside
+`PingsController::PER_TOKEN_LIMIT` and `Api::V1::BaseController::PER_KEY_LIMIT` —
+that is where every rate-limit constant in this app already lives. (Not in
+`config/initializers/stablemate.rb`: this server's file of that name holds the
+money and cost-control constants and no rate limits. Note the **host app** has an
+unrelated file at the same path holding `Stablemate.configure` — §4 and §6 mean
+that one.)
 
 ### 5.4 Responses
 
@@ -535,8 +555,8 @@ task rather than getting zero grace. Document seconds as the canonical unit, sin
 - Anything else — transient, absorbed by the grace period.
 
 Log through `Rails.logger` when Rails is defined. The gem's logger defaults to
-stderr, and §2 diagnoses that exact channel as why the original failure went
-unnoticed; the replacement must not inherit it. There is no `log_error` helper —
+stderr (`lib/stablemate.rb:79`), which is where the original boot-sync warning
+went and why nobody saw it — the replacement must not inherit that channel. There is no `log_error` helper —
 `Logging` provides only `log_warn`/`log_info` — so one is needed to keep the
 `[stablemate]` prefix and the raising-logger guard.
 
@@ -652,6 +672,7 @@ Measured, not estimated.
 | Ping-token surface (`_ping_setup`, both rotation controllers, the concern, `PingsController`, helpers, routes, serializers) | ~250 |
 | `registration_key` backfill migration | ~40 |
 | `PingKey` model, issuance, controller, views, migration, project-page wiring | ~200 |
+| Never-checked-in alert: scope, job, mailer, notification cause, copy (§9.1) | ~120 |
 | **Server subtotal** | **~735** |
 | Gem deletions (§3.2) | ~110 |
 | **Tests broken by UI removal** | ~393 across 15 files, 4 deleted whole |
@@ -673,7 +694,9 @@ deliberately.
 
 **Leave `registration_key` nullable for now.** `NOT NULL` costs ~215 test fixes
 (95 `monitors.create` call sites pass no key; 3 of 4 fixtures have none) and buys
-little while `Project::MonitorSync` is the only writer. Backfill so every existing
+little while `Project::MonitorSync` is the only *ongoing* writer — the backfill
+below is a one-shot migration, not a second write path, which is the sense in
+which §0 calls it a second writer. Backfill so every existing
 monitor is addressable — deriving from the name, iterating deterministically with
 a set of keys already taken in this run. Do **not** use `String#parameterize`: it
 strips non-Latin characters entirely, so 日本語のジョブ derives to empty, which
@@ -692,8 +715,11 @@ cheapest first:
 - **The API key already records when it was last used**, on every registration —
   and nothing reads it. *"This app registered three minutes ago but no monitor has
   reported for an hour"* is a positive statement with no false positives.
-- **Alert on monitors that have never checked in.** As §7 notes, this should ship
-  with this work rather than after it.
+- **Alert on monitors that have never checked in. This one is IN scope** — see
+  §7 for why, §8 for its budget and §11 for its test. It sits here because it
+  belongs with its siblings, not because it is deferred. The threshold must be
+  relative to the monitor's own interval, it must fire once, and it needs its own
+  wording pointing at setup docs.
 - **Notice a whole project going quiet** — the most recent check-in anywhere in
   the project older than the shortest interval-plus-grace in it. Needs a
   project-level incident record.
@@ -704,8 +730,11 @@ or a deliberate shutdown.
 
 ### 9.2 The catch-all around gem startup
 
-Narrow it so a broken `recurring.yml` cannot silently leave the listener
-unattached — while still catching `Psych::SyntaxError`, or the app stops booting.
+§6.4 makes this loud — the rescue now logs — but it does not make it recoverable:
+a broken `recurring.yml` still leaves the listener unattached for the life of the
+process. Narrowing the rescue so the failure is contained, rather than taking the
+listener with it, is the remaining work. It must still catch `Psych::SyntaxError`,
+or the app stops booting.
 
 ### 9.3 A leaked key pages you at will
 
@@ -813,6 +842,9 @@ scope; if it stays, it should be because the price is about to be set.
 
 - **Browser: the monitor lifecycle without creation.** A registered monitor can be
   edited, paused and deleted; the create route is gone.
+- **Never-checked-in alert (§9.1).** A monitor registered and never checked in
+  alerts once, after its own interval rather than a fixed delay, with copy
+  distinct from a missed check-in — and does not alert twice.
 - **Browser: onboarding.** A brand-new user reaches real instructions from the
   page they land on, and no surface offers monitor creation (§7).
 - **Tenant isolation.** The same task name in two projects; checked in with project
