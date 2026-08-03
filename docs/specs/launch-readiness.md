@@ -30,7 +30,7 @@ boxes here → next chunk.
 | 0 | Launch-readiness spec + verification campaign + 27 bug fixes | — | **MERGED** | #62 |
 | 0 | Billing dependency upgrade | WS-A | **MERGED** | #63 |
 | 1 | Account page — deletion + password change | WS-D | **MERGED** | #64 |
-| 2 | Legal pages — Terms + Privacy + consent | WS-C | **NOT STARTED** | — |
+| 2 | Legal pages — Terms + Privacy + consent | WS-C | **MERGED** | #65 |
 | 3 | Findings follow-ups + Honeybadger secret move | launch-findings tail | **NOT STARTED** | — |
 | 4 | Dependabot backlog | WS-B | **NOT STARTED** | — |
 
@@ -64,12 +64,37 @@ Carried forward: **`waitlist_signups` survives account closure** — a deleted
 user's email persists there, which contradicts the "delete every trace" framing.
 A retention decision, settled with the privacy policy in chunk 2.
 
-### Chunk 2 — Legal pages (WS-C)
-- [ ] `/terms` and `/privacy` on the marketing layout, public
-- [ ] Footer links + sign-up consent line (D3: linked text, no checkbox)
-- [ ] Privacy content matches what the code actually collects/retains
-- [ ] Request tests + footer-link assertions
-- [ ] Review → `/simplify` → `/verify` → CI → PR → merge
+### Chunk 2 — Legal pages (WS-C) — **MERGED (#65)**
+- [x] `/terms` and `/privacy` on the marketing layout, public
+- [x] Footer links + sign-up consent line (D3: linked text, no checkbox — the
+      waitlist branch gets its own wording, since joining binds nobody to Terms)
+- [x] Privacy content matches what the code actually collects/retains, with the
+      content tests driven off the constants so a behaviour change breaks the
+      page describing it
+- [x] Request tests + footer-link assertions
+- [x] Waitlist rows now deleted with the account, so erasure is true not aspirational
+- [x] Review → `/simplify` → `/verify` (27/27) → CI → PR → merge
+
+**Writing the policy exposed two credential leaks to a third party**, both fixed
+here: the ping token reached Honeybadger twice (in `notice.url` *and* in the
+breadcrumb trail, since `request.filtered_path` filters only the query string),
+and both session cookies left raw in `HTTP_COOKIE` — `session_id` resumes a
+signed-in session for anyone holding it. Root cause: Honeybadger does not
+inherit Rails' `filter_parameters`. Also corrected the Terms claiming the
+companion gem is AGPL when it is **MIT**.
+
+**⚠️ OWNER ACTIONS before these pages can go live:**
+- [ ] **Operating entity** — registered name/address (+ ICO number if required).
+      The only remaining placeholder; a test pins it at exactly one per page so
+      it cannot ship by accident.
+- [ ] **Confirm Postmark** when SMTP is configured (WS-F) — it is named on D2,
+      not on anything the repo can prove.
+- [ ] Review the invented defaults: liability cap (12 months' fees or £100),
+      30-day notice for price/terms changes, minimum age 16.
+- [ ] Confirm the unverifiable claims: transfer safeguards, server-log retention,
+      production-access limits, and whether Cloudflare sets its own cookies —
+      that last one is load-bearing for the "two cookies, so no banner" reasoning.
+- [ ] Enter the Terms/Privacy URLs into Stripe Checkout's branding settings.
 
 ### Chunk 3 — Follow-ups + secret hygiene
 - [ ] Honeybadger key out of `config/honeybadger.yml` into ENV/credentials
