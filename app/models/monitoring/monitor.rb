@@ -50,6 +50,21 @@ module Monitoring
     has_many :notifications, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
     has_many :uptime_day_stats, dependent: :delete_all, foreign_key: :monitor_id, inverse_of: :monitor
 
+    # Deleting a monitor can be the act that SETTLES an account. A user dropped to
+    # Free over the cap is locked into the choose-N picker (User::Subscription),
+    # and having fewer monitors is one of the two ways out — deleting a few is the
+    # obvious one, and the dashboard is where they'd do it. The release used to run
+    # only on a billing page load (M4), so until they happened to visit /billing
+    # they kept a grace banner telling them to choose which 5 monitors to keep out
+    # of a set that already fits.
+    #
+    # It hangs off the record rather than MonitorsController#destroy so EVERY
+    # deletion path gets it: deleting a whole project cascades through here, and so
+    # does a console `destroy`. after_destroy_commit, not after_destroy, because
+    # the release reactivates monitors and rewrites the user row — it must see the
+    # deletion committed, and must not run at all if it rolls back.
+    after_destroy_commit :release_owner_downgrade_lock
+
     validates :name, presence: true
     validates :status, presence: true
     validates :expected_interval_seconds, numericality: { greater_than: 0 }
@@ -171,6 +186,16 @@ module Monitoring
     end
 
     private
+      # Skipped when the owner is going away too: closing an account (User::Closure)
+      # cascades through here, and there is no lock left to lift on a user row that
+      # is already deleted — and already frozen in memory, so writing to it would
+      # raise inside the commit callback and take the closure down with it.
+      def release_owner_downgrade_lock
+        return if user.nil? || user.destroyed?
+
+        user.release_downgrade_lock_if_within_cap!
+      end
+
       # A user may own at most MAX_MONITORS_PER_USER monitors — paused ones still
       # occupy a slot (locked decision #8). Only blocks creation; editing an
       # existing monitor at the cap is always allowed.

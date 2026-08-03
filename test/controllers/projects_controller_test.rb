@@ -143,6 +143,25 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     refute Monitoring::Monitor.exists?(monitor_id) # cascaded
   end
 
+  # Deleting a project deletes its monitors, so it settles a choose-N lock exactly
+  # the way deleting them one by one does. That falls out of the release living on
+  # Monitoring::Monitor rather than in MonitorsController#destroy — this is the
+  # test that would notice if it moved back into the controller.
+  test "destroying a project lifts a choose-N lock the account has grown out of" do
+    stub_const(Stablemate, :FREE_PLAN_MONITOR_LIMIT, 2) do
+      sign_in @alice
+      @alices_project.monitors.delete_all
+      spare = @alice.projects.create!(name: "Spare")
+      3.times { |i| spare.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
+      @alice.update!(plan: "free", awaiting_downgrade_choice: true,
+        downgrade_choice_deadline_at: Stablemate::DOWNGRADE_GRACE_PERIOD.from_now)
+
+      delete project_path(spare), params: { confirm_name: spare.name }
+
+      refute @alice.reload.awaiting_downgrade_choice?
+    end
+  end
+
   test "destroy without the matching typed name is rejected (belt-and-braces)" do
     sign_in @alice
     assert_no_difference -> { Project.count } do

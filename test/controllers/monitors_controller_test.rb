@@ -162,6 +162,37 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to monitors_path
   end
 
+  # M4 follow-up — the choose-N lock was only ever lifted on a BILLING page load,
+  # but deleting monitors is the obvious way a locked user gets back within the
+  # Free cap, and the dashboard is where they do it. Until they happened to visit
+  # /billing they kept the grace banner, still telling them to pick which monitors
+  # to keep out of a set that already fits.
+  test "deleting a monitor lifts a choose-N lock the account has grown out of" do
+    stub_const(Stablemate, :FREE_PLAN_MONITOR_LIMIT, 2) do
+      sign_in @alice
+      monitors = locked_over_cap_monitors(3)
+
+      delete monitor_path(monitors.last)
+
+      refute @alice.reload.awaiting_downgrade_choice?,
+        "one deletion put the account inside the Free cap — the lock must go with it"
+      assert_nil @alice.downgrade_choice_deadline_at
+    end
+  end
+
+  # The same deletion one monitor earlier does NOT settle anything: releasing then
+  # would drop a lock the user still owes an answer to.
+  test "deleting a monitor while still over the Free cap keeps the lock" do
+    stub_const(Stablemate, :FREE_PLAN_MONITOR_LIMIT, 2) do
+      sign_in @alice
+      monitors = locked_over_cap_monitors(4)
+
+      delete monitor_path(monitors.last)
+
+      assert @alice.reload.awaiting_downgrade_choice?
+    end
+  end
+
   # "Next check" surfaces next_due_at for an actively-up monitor: a compact
   # countdown on the crowded dashboard row, the exact timestamp (plus a grace
   # note when a grace period is actually configured) on the detail page.
@@ -307,6 +338,19 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
   end
 
   private
+    # An account mid-grace: dropped to Free, over the Free cap, locked into the
+    # choose-N picker with nothing suspended yet (User::Subscription
+    # #sync_plan_from_subscription!'s involuntary-downgrade branch).
+    def locked_over_cap_monitors(count)
+      @alices_project.monitors.delete_all
+      monitors = count.times.map do |i|
+        @alices_project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
+      end
+      @alice.update!(plan: "free", awaiting_downgrade_choice: true,
+        downgrade_choice_deadline_at: Stablemate::DOWNGRADE_GRACE_PERIOD.from_now)
+      monitors
+    end
+
     def create_monitor(status:, next_due_at:, grace_period_seconds: 300, last_ping_at: 10.minutes.ago)
       @alices_project.monitors.create!(name: "#{status.capitalize} monitor", expected_interval_seconds: 3600,
                                grace_period_seconds:, status:, last_ping_at:, next_due_at:)

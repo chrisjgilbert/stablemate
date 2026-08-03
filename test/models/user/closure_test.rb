@@ -113,6 +113,21 @@ class User::ClosureTest < ActiveSupport::TestCase
     end
   end
 
+  # Monitoring::Monitor releases its owner's choose-N lock after every destroy
+  # commit, and closure cascades through exactly that callback — with the user row
+  # already deleted and its in-memory copy frozen. Writing to it there would raise
+  # *after* the commit, i.e. after the account is irrecoverably gone, so the guard
+  # that skips a departing owner is load-bearing rather than defensive.
+  test "closing a locked account is not derailed by the downgrade-lock release" do
+    with_billing_disabled do
+      @user.update!(plan: "free", awaiting_downgrade_choice: true,
+        downgrade_choice_deadline_at: Stablemate::DOWNGRADE_GRACE_PERIOD.from_now)
+
+      assert_nothing_raised { @user.close_account! }
+      assert_not User.exists?(@user.id)
+    end
+  end
+
   # The waitlist is the one table holding a user's email that no association
   # reaches — a user who joined the waitlist before being let in would otherwise
   # leave that address behind after "delete everything". The privacy policy
