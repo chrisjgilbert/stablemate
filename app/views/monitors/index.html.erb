@@ -43,7 +43,10 @@
               data: { testid: "upgrade-button" } %>
       </div>
     <% else %>
-      <%# Self-host (or Pro at the 100 cap): matter-of-fact, nothing to upgrade to. %>
+      <%# Self-host, Pro at the 100 cap, or an account Stripe is still billing (a
+          past_due one reads Free): matter-of-fact, because there is no upgrade
+          this account can actually buy right now. The past_due case has its own
+          route out — the nav's Billing link, where the portal is. %>
       <p class="mb-6 text-[13px] text-muted" data-testid="at-limit-note">
         <%= monitor_limit_note(current_user) %> Delete a monitor to add another.
       </p>

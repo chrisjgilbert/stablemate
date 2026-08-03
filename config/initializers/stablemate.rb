@@ -17,8 +17,9 @@
 # Use the query helpers below (`monitor_cap_enabled?`, `signup_cap_enabled?`)
 # rather than re-deriving "is 0 ⇒ unlimited" at every call site.
 # Loaded both in Rails' normal initializer pass and (earlier) via require_relative
-# from pay.rb, which needs the config-gate before its own initializer runs. Guard
-# so the constants are defined exactly once regardless of order.
+# from the initializers that need these readers before `s` comes round in filename
+# order — honeybadger.rb for the API key, pay.rb for the config-gate. Guard so the
+# constants are defined exactly once regardless of order.
 return if defined?(Stablemate) && Stablemate.respond_to?(:billing_enabled?)
 
 module Stablemate

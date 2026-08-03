@@ -55,10 +55,13 @@ class User
     # usually a subscription that is already gone — in which case this is a no-op —
     # but NOT always: a card failure leaves it `past_due`, which drops the plan to
     # Free and opens this lock while Stripe keeps dunning. The picker tells that
-    # user their subscription will be cancelled, and this is their only in-app route
-    # (the billing page hides the Portal and Downgrade links once plan == free), so
-    # committing the choice must actually cancel it. Otherwise a dunning retry
-    # succeeds days later and they are billed for Pro with monitors suspended.
+    # user their subscription will be cancelled, so committing the choice must
+    # actually cancel it — otherwise a dunning retry succeeds days later and they
+    # are billed for Pro with monitors suspended. (This used to be their ONLY
+    # in-app route, because the billing page keyed its Portal and Downgrade links
+    # off plan == free; it now asks User#billed_for_pro? and offers both. That
+    # makes this a second way out rather than the last one — it does not make the
+    # cancel optional.)
     # Cancel-then-suspend ordering means a Stripe failure propagates with no monitor
     # touched, and the call stays OUTSIDE the row lock below — never hold a lock
     # across a network round trip.
