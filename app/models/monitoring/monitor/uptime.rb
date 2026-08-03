@@ -188,10 +188,25 @@ module Monitoring
         # (live_today_status) and uptime_percent — so the % and the bar cannot
         # disagree, and today is classified by the same up/down/partial cutoffs it
         # will get once the rollup persists it (UptimeDayStat#status).
+        #
+        # Memoized because the detail page and the API detail endpoint each render
+        # BOTH readers, so every one of those responses ran today's incident scan
+        # twice for the same answer. Keyed on the second it was taken in rather
+        # than memoized outright: this is a snapshot of *now*, and a `travel_to` in
+        # a test (or a day rolling over under a long-lived object) must get a fresh
+        # one instead of yesterday's. Within a render the clock does not move, so
+        # the key is stable exactly where the saving is.
         def live_today_stat
+          now = Time.current
+          return @live_today_stat if @live_today_stat_second == now.to_i
+
+          @live_today_stat_second = now.to_i
+          @live_today_stat = compute_live_today_stat(now)
+        end
+
+        def compute_live_today_stat(now)
           return UptimeDayStat.new(up_seconds: 0, down_seconds: 0) if paused? || suspended? || pending?
 
-          now = Time.current
           window_start = [ created_at, first_ping_at, Date.current.to_time(:utc) ].compact.max
           return UptimeDayStat.new(up_seconds: 0, down_seconds: 0) if window_start >= now
 
