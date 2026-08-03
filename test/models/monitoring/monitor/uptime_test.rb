@@ -161,6 +161,39 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_in_delta 50.0, @monitor.uptime_percent(days: 90), 0.01
   end
 
+  # The monitor detail page and the API detail endpoint both render the bar AND
+  # the percent, and each of those recomputed today's live stat from scratch — two
+  # identical incident scans per render, for a number that also has to agree
+  # between them.
+  test "the live day's stat is computed once for the bar and the percent" do
+    travel_to Date.current.to_time(:utc) + 12.hours
+    @monitor.incidents.create!(started_at: Date.current.to_time(:utc) + 6.hours, cause: "missed_ping")
+
+    scans = count_incident_scans do
+      @monitor.uptime_series(days: 90)
+      @monitor.uptime_percent(days: 90)
+    end
+
+    assert_equal 1, scans, "today's incidents should be scanned once per render, not once per reader"
+  end
+
+  # …but the snapshot is of a moment, so it must not outlive one. Nothing in a
+  # request moves the clock; `travel_to` in a test does, and a memo that survived
+  # it would quietly answer with the old time.
+  test "the live day's stat is recomputed when the clock moves" do
+    travel_to Date.current.to_time(:utc) + 6.hours
+    @monitor.incidents.create!(started_at: Date.current.to_time(:utc) + 3.hours,
+      resolved_at: Date.current.to_time(:utc) + 6.hours, cause: "missed_ping")
+
+    # 3h up, 3h down of the 6h elapsed.
+    assert_in_delta 50.0, @monitor.uptime_percent(days: 90), 0.01
+
+    travel_to Date.current.to_time(:utc) + 12.hours
+
+    # Six more hours of uptime on the same instance: 9h up, 3h down.
+    assert_in_delta 75.0, @monitor.uptime_percent(days: 90), 0.01
+  end
+
   # Recent events feed: pings + incident open/resolve, cause-aware labels
   # (job-failure-details.md §9).
   test "recent_events renders a success ping as a ping event" do
@@ -257,4 +290,14 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_equal 16, ticks.size
     assert(ticks.all? { |t| %w[up down].include?(t) })
   end
+
+  private
+    # How many times the block scans the incidents table — the query
+    # live_today_stat runs, and the one the memoization is there to halve.
+    def count_incident_scans
+      scans = 0
+      counter = ->(*, payload) { scans += 1 if payload[:sql] =~ /\bFROM "incidents"/i && payload[:name] != "SCHEMA" }
+      ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { yield }
+      scans
+    end
 end
