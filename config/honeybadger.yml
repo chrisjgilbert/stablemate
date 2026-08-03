@@ -1,7 +1,12 @@
 ---
 # For more options, see https://docs.honeybadger.io/lib/ruby/gem-reference/configuration
-
-api_key: 'hbp_72NsNuBazrzklhQxUtHgLX5QTUZhzM1GIc2w'
+#
+# NO api_key HERE, DELIBERATELY. This file is git-tracked and self-hosters clone
+# the repository, so a literal key would (a) send their exceptions to our project
+# and (b) be public. The key is read from HONEYBADGER_API_KEY or Rails encrypted
+# credentials by config/initializers/honeybadger.rb — see Stablemate
+# .honeybadger_api_key. An instance with no key set anywhere boots fine and simply
+# never reports.
 
 # The environment your app is running in.
 env: "<%= Rails.env %>"

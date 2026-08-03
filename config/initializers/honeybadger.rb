@@ -37,11 +37,27 @@
 # The privacy policy describes exactly this behaviour; if you change what is
 # filtered, change that page too.
 
+# Initializers load alphabetically, so `stablemate.rb` hasn't run yet — load it
+# now for honeybadger_api_key below. stablemate.rb self-guards the second load.
+require_relative "stablemate"
+
 # One rule, applied everywhere a path can surface, so the two can't drift.
 ping_token_in_path = %r{/ping/[^/?#]+}
 redacted_ping_path = "/ping/[FILTERED]"
 
 Honeybadger.configure do |config|
+  # The key is NOT in config/honeybadger.yml, because that file is git-tracked and
+  # self-hosters clone it: a literal there ships our project's credential to
+  # everyone and routes their exceptions into it. ENV first, then credentials —
+  # the same rule as every other third-party secret. nil is a supported state: the
+  # gem logs "API key is missing" and drops the notice, so a keyless instance
+  # boots and runs normally with reporting off.
+  #
+  # ⚠️ OWNER ACTION: the key that used to live in the YAML is in this repository's
+  # git history permanently and must be ROTATED in the Honeybadger dashboard. No
+  # code change can undo that; deleting the line only stops it spreading further.
+  config.api_key = Stablemate.honeybadger_api_key
+
   config.before_notify do |notice|
     notice.url = notice.url.sub(ping_token_in_path, redacted_ping_path) if notice.url
 
