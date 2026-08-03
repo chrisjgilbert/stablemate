@@ -74,7 +74,9 @@
         </ul>
         <% if !signed_in %>
           <%= link_to "Start free", sign_up_path, class: "btn btn--primary" %>
-        <% elsif current_user.pro? %>
+        <% elsif current_user.billed_for_pro? %>
+          <%# Not pro?: a past_due account reads Free but already has a subscription,
+              so "Upgrade" would bounce — send it to Billing, where the portal is. %>
           <%= link_to "Manage plan", billing_subscription_path, class: "btn btn--ghost" %>
         <% elsif current_user.can_upgrade_to_pro? %>
           <%= button_to "Upgrade to Pro", billing_checkout_path, class: "btn btn--primary", form: { style: "margin:0" } %>

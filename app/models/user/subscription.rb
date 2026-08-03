@@ -93,6 +93,24 @@ class User
       live_pro_subscriptions.where.not(status: UNBILLABLE_STATUSES).exists?
     end
 
+    # "Is there a Pro here?" — the one question every Pro-facing surface asks, so
+    # they cannot drift apart. True on an active Pro plan and on a subscription
+    # Stripe can still turn back into a charge; false once it is terminal, and
+    # false for a first payment that never completed (which the user is meant to
+    # be able to retry).
+    #
+    # Deliberately NOT `pro?`: a past_due account reads Free by design while
+    # Stripe keeps dunning it. Every surface that asked the plan instead got that
+    # user wrong in its own way — the billing page and the pricing page offered an
+    # Upgrade button CheckoutsController then refused with "You're already on
+    # Pro.", while hiding the portal that is how they'd actually fix the card; the
+    # downgrade page promised to cancel a subscription it thought was gone. It
+    # lives here rather than on a controller because three of those callers are
+    # views and one is a different controller.
+    def billed_for_pro?
+      pro? || live_pro_subscription?
+    end
+
     # Recompute `plan` from the Pay subscription mirror and persist it. THE ONLY
     # writer of `plan`. Returns true when the plan actually changed.
     #   active Pro subscription ⇒ "pro";  none/cancelled ⇒ "free".
