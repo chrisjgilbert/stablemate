@@ -1,7 +1,8 @@
-# Ping architecture — the split-credential redesign
+# Ping architecture — authenticated check-ins
 
-Status: **proposed**, not yet built. Replaces the current scheme, where the gem
-fetches its ping URLs from the server at boot and holds them in memory.
+Status: **proposed**, not yet built. Replaces two things: the scheme where the gem
+fetches its ping URLs from the server at startup and holds them in memory, and the
+public unauthenticated ping endpoint.
 
 ---
 
@@ -13,46 +14,69 @@ kept not reporting until it was restarted. Four healthy jobs were reported as
 down. The jobs were fine — the monitoring was broken, and the alerts blamed the
 jobs.
 
-The cause is that the gem learns where to send its pings by asking the server at
-startup, then remembering the answer. If that one call fails, it has no addresses
-to send to, and nothing ever makes it ask again.
+The cause is that the gem learns where to send its check-ins by asking the server
+at startup, then remembering the answer. If that one call fails it has nothing to
+send to, and nothing ever makes it ask again.
 
-**The proposal is to stop asking.** Instead of fetching addresses, the gem builds
-them itself from settings it already has. To do that safely it needs a new
-credential — a "ping key" — which can record check-ins and nothing else.
+**The proposal has two parts.**
 
-Two things follow. First, roughly 110 lines of the most delicate code in the gem
-get deleted, including all of its shared-between-threads state. Second, a failed
-startup call can no longer stop pings, because pings no longer depend on it.
+*Stop asking.* The gem addresses a monitor by its task name, which it already
+reads from `recurring.yml`. Nothing is fetched, so there is nothing to cache and
+nothing to go stale.
 
-**What this costs.** A ping key covers a whole project rather than a single
-monitor, so if one leaks, an attacker can fake check-ins for every job in that
-project — including faking a recovery during a real outage. That is a real
-downgrade from today and we are accepting it knowingly (§7.3). It is the same
-trade Healthchecks.io and Cronitor both make.
+*Authenticate the check-in.* A new credential — a **ping key** — is sent in an
+`Authorization` header, exactly as the existing API key already is. It can record
+check-ins and nothing else.
 
-**What this does not fix.** If pings stop arriving for any reason, Stablemate
-still reports "your job is down" — which is exactly the misleading alert that made
-the incident painful. Fixing that is separate work, described in §7.1 and being
-done in parallel.
+```
+POST /api/v1/monitors/{registration_key}/pings
+Authorization: Bearer sm_ping_…
+```
+
+**What this deletes.** About 110 lines of the most delicate code in the gem,
+including all of its state shared between threads. And, because check-ins are now
+authenticated, the entire public unauthenticated ping endpoint — its two rate
+limiters, its parameter guards, its deliberately uninformative error responses,
+the per-monitor ping token, and both token-rotation controllers. The application
+is left with **no unauthenticated write endpoint at all.**
+
+**What this costs.** Stablemate stops being able to monitor anything that is not
+an ActiveJob job in a Rails app the gem is installed in. Shell scripts, `command:`
+recurring tasks, and jobs in other languages have no way in. That is a deliberate
+narrowing to match what the README already claims — "job monitoring for Rails
+applications" — and §6 sets out exactly what is given up.
+
+**What this does not fix.** If check-ins stop arriving for any reason, Stablemate
+still reports "your job is down", which is the misleading alert that made the
+incident painful. That is separate work, described in §7.1 and being done in
+parallel.
+
+> **Gate before building §6.** Removing manual monitors deletes a shipped feature.
+> The projects migration records that production has real users with monitor rows,
+> and `source` defaults to `"manual"`, so monitors created in the interface or
+> predating the gem are manual. Run `SELECT source, count(*) FROM monitors GROUP
+> BY source;` first. If real customers hold manual monitors, §6 needs a migration
+> plan or should be dropped; §§1–5 are unaffected either way.
 
 ---
 
-## The three credentials
+## The two credentials
 
-There are already two credentials, and this adds a third. They are easy to
-confuse, so:
+The redesign adds one credential and removes one. Afterwards there are two, they
+work the same way, and **neither ever appears in a URL**:
 
-| | What it is for | Who holds it | Scope | Stored as | Where it appears |
-|---|---|---|---|---|---|
-| **API key**<br>`sm_live_…` | Managing monitors: listing them, registering them from `recurring.yml`, rotating ping tokens | The gem, in the host app's credentials | One project | A hash — the real value is shown once and never recoverable | An `Authorization` header. Never in a URL |
-| **Ping token**<br>32 random characters | Recording a check-in for **one** monitor | Whoever runs the job — often a crontab | One monitor | Plain text, because the dashboard has to display the URL | In the URL. Copy-pasted from the dashboard |
-| **Ping key** *(new)*<br>`sm_ping_…` | Recording a check-in for **any** monitor in a project | The gem, in the host app's credentials | One project | A hash — shown once | In the URL, built by the gem |
+| | What it is for | Scope | Stored as | Sent as |
+|---|---|---|---|---|
+| **API key**<br>`sm_live_…` | Managing monitors: listing them, registering them from `recurring.yml` | One project | A hash — the real value is shown once and never recoverable | `Authorization: Bearer` |
+| **Ping key** *(new)*<br>`sm_ping_…` | Recording check-ins, and nothing else | One project | A hash — shown once | `Authorization: Bearer` |
 
-The point of adding a third rather than reusing the first: the API key can read
-and rewrite every monitor you own. The gem sends a request after every single job
-run, and we do not want a credential that powerful on a path that busy. The ping
-key can only say "this job ran".
+The **ping token** — a secret in the URL identifying one monitor — is removed
+(§6).
+
+Why add a second key rather than reuse the first: the API key can read and rewrite
+every monitor you own. The gem sends a request after every single job run, and a
+credential that powerful does not belong on a path that busy. The ping key can
+only say "this job ran".
 
 ---
 
@@ -68,139 +92,121 @@ def dispatch(key, label:, &request)
   @dispatcher.call(-> { deliver(url, label, &request) })
 ```
 
-The gem does have a repair mechanism: if a ping comes back rejected, it re-fetches
-its addresses. But that mechanism only runs *after* a ping has been sent — and a
-ping can only be sent if an address was found. **The repair is behind the door it
-is meant to open.** With no addresses, no ping is sent, so nothing is rejected, so
-nothing is repaired. There is no way out of that state short of restarting the
+The gem does have a repair mechanism: if a check-in comes back rejected, it
+re-fetches its addresses. But that only runs *after* a request has been sent, and
+a request can only be sent if an address was found. **The repair is behind the
+door it is meant to open.** With no addresses nothing is sent, so nothing is
+rejected, so nothing is repaired. There is no way out short of restarting the
 process.
 
-It is also worse under the host's setup, where the job supervisor runs inside the
-web server. The supervisor copies its memory to each worker it starts, so one
-failed startup call is inherited by all of them.
+It is worse under the host's setup, where the job supervisor runs inside the web
+server. The supervisor copies its memory to each worker it starts, so one failed
+startup call is inherited by all of them.
 
 Two corrections to the original incident write-up:
 
-- **It was not completely silent.** The startup failure does log one line, but to
-  standard error rather than the Rails log, unless the host has configured
-  otherwise. The signal existed once, in a place nobody was looking.
+- **It was not completely silent.** The startup failure logs one line, but to
+  standard error rather than the Rails log unless the host configured otherwise.
+  The signal existed once, where nobody was looking.
 - **There is a second, worse version of the same bug.** The gem's startup code
   wraps everything — reading `recurring.yml`, registering monitors, attaching the
   job listener — in a single catch-all. If `recurring.yml` has a YAML syntax
-  error, the listener is never attached at all: no success pings *and* no failure
-  reports, one warning, no recovery. Deleting the address cache does not touch
-  this. §7.4 covers it.
+  error the listener is never attached at all: no success check-ins *and* no
+  failure reports, one warning, no recovery. Deleting the address cache does not
+  touch this. §7.4 covers it.
 
-## 2 · The decision: delete the mechanism rather than repair it
+## 2 · The decision
 
-The gem will build ping URLs itself:
+Two changes that are independent and each stand on their own.
 
-```
-POST or GET   {endpoint}/ping/{ping_key}/{registration_key}
-```
+### 2.1 Address monitors by task name, not by a fetched URL
 
-Both halves are already on hand: the ping key comes from the host app's
-configuration, and the `registration_key` is the task name from `recurring.yml`.
-Nothing is fetched, so there is nothing to cache, nothing to go out of date, and
-no repair mechanism to get stuck behind.
+The gem already knows the task name — it reads it from `recurring.yml` to register
+the monitor in the first place. Using it as the address means nothing is fetched,
+nothing is cached, nothing goes stale, and there is no repair mechanism to get
+stuck behind.
 
-### Why delete rather than fix
+**Why delete rather than fix.** The ordering bug in §1 is about ten lines to
+repair. The reason not to: the rejected-request path had tests and the no-address
+path had none, because nobody thought of it. You cannot write a test for a failure
+you have not imagined, but you can remove the code where that class of failure
+lives.
 
-The ordering bug in §1 is about ten lines to fix. The reason not to just fix it:
-the rejected-ping path had tests, and the no-address path had none — because
-nobody thought of it. You cannot write a test for a failure you have not imagined,
-but you can remove the code where that class of failure lives.
-
-What goes:
-
-| Removed | ~Lines | Why it mattered |
+| Removed from the gem | ~Lines | Why it mattered |
 |---|---|---|
-| The shared ping-URL map and the lock protecting it | 25 | The gem's only state shared between threads |
+| The shared address map and the lock protecting it | 25 | The gem's only state shared between threads |
 | The re-fetch mechanism, its throttle, mutex and timer | 25 | An entire recovery protocol |
 | The two methods that populate the map | 21 | |
-| The "list my monitors" API call and the "address rejected" response state | 20 | Only exist to serve the cache |
-| The startup wiring that ties them together | 8 | |
+| The "list my monitors" call and the "address rejected" response state | 20 | Exist only to serve the cache |
+| The startup wiring tying them together | 8 | |
 | The read-only variant of startup registration | — | A second network call during startup |
 
-That is about 110 lines out of 680, but the count understates it: this is most of
-the genuinely hard reasoning in the gem — swapping an immutable snapshot under a
-lock, guaranteeing readers never block, throttling re-fetches against a clock that
-cannot go backwards. The gem's main test file is 583 lines and *every single test*
+About 110 lines of 680, but the count understates it: this is most of the genuinely
+hard reasoning in the gem — swapping an immutable snapshot under a lock,
+guaranteeing readers never block, throttling re-fetches against a clock that
+cannot run backwards. The gem's main test file is 583 lines and every single test
 has to supply a fake address map.
 
-**Some complexity moves to the server** — one model, one route, one extra database
-lookup. That trade is the point: state shared between threads with a recovery
-protocol, exchanged for an indexed lookup in Postgres.
+### 2.2 Put the credential in a header, not the URL
 
-### 2.1 Why not just reuse the API key
+An earlier draft of this design followed Healthchecks.io and put the ping key in
+the URL path: `POST /ping/{ping_key}/{registration_key}`. That is the right shape
+for Healthchecks, whose clients are `curl` invocations in any language. It is the
+wrong shape here, where the only client is a Ruby gem.
 
-The gem could ping a header-authenticated endpoint with the API key it already
-has. No new credential, no new configuration. This is the strongest alternative
-and it was rejected for three reasons:
+Healthchecks puts the credential in the URL to buy one property: a single
+copy-pasteable string that works with no flags, in environments that cannot set
+headers. Once §6 removes the audience that needs that, the property is worth
+nothing and its costs are all still charged.
 
-- Authenticating the API key writes a "last used" timestamp to its database row.
-  On the ping path that becomes a database write on one shared row after **every
-  job completion**, from every worker.
-- The management API allows 120 requests a minute across a whole project; the ping
-  endpoint allows 30 a minute per monitor. A project with twenty jobs that all run
-  on the hour would throttle itself.
-- The API key can read every monitor, bulk-rewrite them, and rotate ping tokens.
-  Putting it on the busiest path means it ends up in far more proxy and monitoring
-  logs, and a leak costs the whole project.
+Moving the credential to a header fixes four things at once:
 
-### 2.2 Two places we deliberately differ from Healthchecks
+- **It leaves the logs.** Rails logs request paths verbatim and filters only query
+  strings, so a credential in the path is written to every request log, every
+  proxy log, and every error report. A header is not logged.
+- **`GET` stops applying.** A check-in is not a read: it advances the monitor's
+  clock and, if the monitor is currently down, resolves the incident and sends a
+  "recovered" email. With the credential in a URL, anything that follows a link —
+  chat-app previews, mail providers pre-fetching, antivirus scanners, browser
+  prefetch — can fire one. This endpoint is `POST` only.
+- **It is a normal REST resource.** Creating a check-in for a monitor is
+  `POST …/monitors/{id}/pings`, which is what it now is.
+- **Two specific bugs never get written.** The rate-limiter fault in §3.5 and the
+  URL-parsing fault in §3.2 both come from having a credential and a task name as
+  adjacent path segments.
 
-**We are not copying `?create=1` (create a monitor on its first ping).**
-Healthchecks does this and it is genuinely good for them. It does not transfer:
+It still satisfies the principle from the incident report that the gem should have
+no privileged path — a person can type
+`curl -H "Authorization: Bearer sm_ping_…"` just as easily. Nothing here is
+fetch-only.
+
+The one thing lost: you can no longer paste a check-in URL into a browser to test
+it. That is a small debugging convenience, and `curl -v` replaces it.
+
+### 2.3 Registration stays a separate call
+
+Healthchecks lets a check-in create the monitor if it does not exist
+(`?create=1`). That is genuinely good for them and does not transfer:
 
 - **There is nowhere honest to get the schedule from.** A monitor needs an
-  expected interval and a grace period. If the ping carries them, then every ping
-  becomes a settings write, and it bypasses the careful logic that stops a
-  redeploy overwriting an interval a user tightened by hand. If they come from a
-  default, a job that runs daily gets alerted on hourly. Worse: a monitor created
-  this way has no record of what the gem last sent, which permanently traps it in
-  the branch of that logic that refuses the first update — so the wrong interval
-  sticks.
-- **Filling someone's monitor limit is a cheaper attack than faking pings.** Five
-  requests fill a free account. The next real registration then reports every
-  genuine job as rejected for being over the limit, and the victim is unmonitored
-  while the interface tells them to buy more slots. On self-hosted installs there
-  is no limit at all by default, so it is unbounded row creation from a URL.
-- **`GET` works on this endpoint**, so an image tag in an email would create
-  monitors via any link scanner or chat-app link preview. A `GET` that changes
-  data is exactly what browsers and scanners assume cannot happen.
-- It would need a per-user lock to count monitors correctly, on a public,
-  unauthenticated, high-volume endpoint.
-- It would disable the check that catches two apps sharing one project's
-  credentials, because that check only runs during registration.
-- It would throw away the "we could not register this job, and here is why"
-  messages that registration returns and the gem logs. A ping endpoint returns
-  only a status code.
+  expected interval and a grace period. If the check-in carries them, every
+  check-in becomes a settings write and bypasses the logic that stops a redeploy
+  overwriting an interval a user tightened by hand. If they come from a default, a
+  job that runs daily gets alerted on hourly. Worse: a monitor created this way has
+  no record of what the gem last sent, which permanently traps it in the branch of
+  that logic that refuses the first update — so the wrong interval sticks.
+- **It would throw away the reasons.** Registration returns "we could not register
+  this job, and here is why" — over the plan limit, malformed — and the gem logs
+  each one. A check-in endpoint returns a status code.
+- **It would disable the check that catches two apps sharing one project's
+  credentials**, which only runs during registration.
+- **Counting monitors correctly needs a per-user lock**, which does not belong on
+  the highest-volume endpoint in the system.
 
-So registration keeps its job as the **settings channel** — it has a response
-body, and settings need one. A ping carries a single fact and gets no reply worth
-reading. The important change is that pings no longer *depend* on registration, so
-a failed registration is harmless.
-
-**The ping key is shown once and stored only as a hash, unlike Healthchecks',
-which is permanently visible in their dashboard.** The obvious objection is that
-if you lose it you have to rotate, and rotating a credential that lives in every
-deployed config file is dangerous. That is answered by allowing **several live
-ping keys per project** (§3.1): create a second one, deploy it, watch the old
-one's "last used" timestamp stop moving, then delete it. Because you add before
-you remove, nothing breaks mid-rotation — and once rotation is safe, storing only
-a hash costs nothing and a database leak yields nothing usable.
-
-There is a useful side effect. Because the key cannot be displayed, the monitor
-page shows a template instead of a finished URL:
-
-```
-POST https://stablemate.dev/ping/$STABLEMATE_PING_KEY/daily_digest
-```
-
-That nudges people toward putting the key in an environment variable rather than
-pasting it into a crontab that ends up committed to a config repository — which is
-the most likely way it would leak in the first place.
+So registration keeps its job as the **settings channel** — it has a response body,
+and settings need one. A check-in carries a single fact and gets no reply worth
+reading. The change that matters is that check-ins no longer *depend* on
+registration, so a failed registration is harmless.
 
 ## 3 · Server design
 
@@ -209,7 +215,9 @@ the most likely way it would leak in the first place.
 **A table, not a column on `projects`.** Safe rotation needs two keys valid at
 once, plus a way to tell whether anything is still using the old one. A single
 column cannot hold two values, and a design that cannot rotate safely should be
-rejected on that alone.
+rejected on that alone. Rotation is then: create a second key, deploy it, watch
+the first one's "last used" timestamp stop moving, delete it. Because you add
+before you remove, nothing breaks in between.
 
 ```
 app/models/ping_key.rb              # the model
@@ -222,231 +230,160 @@ by 32 random characters — a **different prefix** from `sm_live_`, so a key pas
 into the wrong configuration slot fails immediately and automated secret scanners
 can tell them apart.
 
-The migration follows the pattern of the projects migration, **including its
-correction note**: production has real data, so add the column nullable, backfill
-every project, then enforce not-null and add the unique index. Written with
+Because the key is never displayed after creation, only its hash is stored. A
+database leak yields nothing usable.
+
+The migration adds a new table with a unique index, which is safe. Written with
 explicit `up` and `down` so it can be rolled back.
 
 **This must not be a "type" column on the existing `api_keys` table.**
-Authentication looks a token up across the whole table. With one table, a ping key
+Authentication looks a token up across the whole table. With one table a ping key
 would authenticate the management API unless every single lookup remembered to
-filter by type — and forgetting is silent and permissive, which is the worst
-possible default in security code. Two tables make the mistake impossible rather
-than merely discouraged.
+filter by type — and forgetting is silent and permissive, the worst possible
+default in security code. Two tables make the mistake impossible rather than
+merely discouraged.
 
 **Shared hashing, separate policy.** The existing authentication code is two
-methods that reference nothing specific to API keys: hash the token, look it up by
+methods referencing nothing specific to API keys: hash the token, look it up by
 hash, compare, record usage. Copying it wholesale means a future fix applied to
 one copy and not the other — a silent divergence in security-critical code.
 
 So extract only the mechanical part into a shared module: hash a token, and find a
-record by that hash (with the redundant constant-time comparison and the comment
-explaining why it is there). Each model keeps its own authentication method
-holding its own rules — the API key records usage on every lookup, the ping key
-does not (§3.4). A single shared method with a `record_usage:` switch is rejected
-for the same reason as the type column: it can be forgotten.
+record by that hash, with the redundant constant-time comparison and the comment
+explaining why it is there. Each model keeps its own authentication method holding
+its own rules — the API key records usage on every lookup, the ping key does not
+(§3.4). A single shared method with a `record_usage:` switch is rejected for the
+same reason as the type column: it can be forgotten.
 
 ### 3.2 The route
 
 ```ruby
-match "/ping/:ping_key/:registration_key", to: "pings#create", via: %i[get post],
-      constraints: { registration_key: %r{[^/]+} }, format: false, as: :keyed_ping
-match "/ping/:ping_token", to: "pings#create", via: %i[get post], as: :ping
+namespace :api do
+  namespace :v1 do
+    resources :monitors, only: %i[index show], param: :registration_key do
+      resource :pings, only: :create, module: "monitors",
+               constraints: { registration_key: %r{[^/]+} }
+    end
+  end
+end
 ```
 
-**That constraint is mandatory.** Rails treats a dot in the last part of a URL as
-a file extension. Tested against this app's own router:
+**That constraint is required.** Rails excludes dots from dynamic URL segments by
+default. Task names come from a user's `recurring.yml` and nothing validates their
+format anywhere in the app. Tested against this app's own router:
 
 ```
 # without the constraint
-/ping/KEY/reports.daily  =>  registration_key: "reports", format: "daily"
+/api/v1/monitors/reports.daily/pings  =>  RoutingError
 # with it
-/ping/KEY/reports.daily  =>  registration_key: "reports.daily"
+/api/v1/monitors/reports.daily/pings  =>  registration_key: "reports.daily"
 ```
 
-Task names come from a user's `recurring.yml` and nothing validates their format
-anywhere in the app. Without the constraint, a task called `reports.daily` would
-check in **a different monitor in the same project** — silencing the wrong job's
-alerts — and the URL helper would generate exactly the address the router cannot
-read back. The gem must also URL-encode the task name when building the address.
+Note this is a **better** failure than the URL-credential design had: there, a
+dotted task name silently checked in a *different monitor in the same project*.
+Here it is a routing error, so the worst case is a check-in that does not arrive
+rather than one that arrives at the wrong monitor. The gem must still URL-encode
+the task name.
 
-Also tested: the one-segment and two-segment routes cannot collide, because a
-Rails URL segment never spans a `/`. Declaration order does not matter. But
-`/ping/KEY/` with a trailing slash matches the **one-segment** route and returns
-404. That is left as-is — a trailing slash is a typo and 404 is the right answer.
+Before this ships, check what is actually out there — task names are about to
+become part of a URL:
 
-Run the check in §5 before this ships.
-
-### 3.2.1 This URL is not RESTful, and that is deliberate
-
-Our own conventions say to find the noun hiding in the verb and to route
-everything as a standard resource. This URL breaks that in four ways. Three are
-intentional; naming them here is the justification our conventions require.
-
-**`/ping` reads as a verb.** Cosmetically true. The controller is already
-`PingsController#create`, so the internal shape is correct and only the path
-segment reads wrongly. Renaming it to `/pings` would invalidate every ping URL
-currently sitting in a customer's crontab, for no functional gain. Not worth it.
-
-**The credential is in the path rather than an `Authorization` header, and it
-identifies the monitor rather than merely proving who is asking.** The RESTful
-form would be `POST /monitors/{id}/pings` with a header. Compare what an operator
-has to paste:
-
-```sh
-curl -fsS https://stablemate.dev/ping/KEY/daily_digest
-curl -fsS -X POST -H "Authorization: Bearer KEY" https://stablemate.dev/projects/7/monitors/daily_digest/pings
+```sql
+SELECT id, project_id, registration_key FROM monitors
+WHERE registration_key ~ '[^A-Za-z0-9_.\-]';
 ```
 
-The second is correct and nobody would use it. One copy-pasteable string that
-works with no flags *is* the interface, and many of the places it gets used —
-minimal containers, basic schedulers, health-check probes — cannot set headers at
-all. Every comparable service made the same choice: Healthchecks, Cronitor, Sentry
-and Dead Man's Snitch all put the credential in the URL.
+With the constraint in place only a `/` in the name is genuinely fatal.
 
-The cost is that the credential appears in the path, and Rails logs request paths
-verbatim — only query strings are filtered. So ping credentials are already in
-production logs today, and will be under the new scheme too. That is unchanged by
-this redesign, but §7.3's larger reach makes each logged line worth more.
+### 3.3 Authentication, and keeping tenants apart
 
-**`GET` changes state, and this one has a consequence worth stating plainly.**
-HTTP treats `GET` as safe, and anything that follows a link will issue one: chat
-apps generating link previews, mail providers rewriting and pre-fetching links,
-antivirus scanners, browser prefetch. A ping is not a read — it records a
-check-in, advances the monitor's clock, and **if the monitor is currently down it
-resolves the incident and sends a "recovered" email.** Paste a ping URL into a
-chat channel during a real outage and you will be told the outage is over.
-
-We keep `GET` anyway, because removing it means every user writes `curl -X POST`,
-and no comparable service asks that. The mitigations are:
-
-- Treat a complete ping URL as a password, and say so next to the copy button on
-  the monitor page — not merely in the docs.
-- The gem path is less exposed by construction: because the ping key is shown once
-  (§2.2), the monitor page displays a `$STABLEMATE_PING_KEY` template rather than
-  a working address, so a screenshot or pasted snippet of it cannot be fired. The
-  per-monitor token URL is displayed complete, so the risk remains there.
-
-**Possible follow-on, not proposed here.** Healthchecks serves pings from an
-entirely separate domain (`hc-ping.com`, distinct from `healthchecks.io`). That is
-not about REST, but it addresses the same instinct: session cookies never reach
-the ping host, its request logs can be configured separately from the app's — which
-matters when credentials are in the path — and rate limiting can be tuned
-independently. The cost is another DNS record, another certificate and more deploy
-configuration. Worth knowing about; not worth doing yet.
-
-### 3.3 Keeping tenants separate
-
-Today a ping token is unique across the entire database, so a ping can only ever
-reach one monitor — that is a property of the schema, not of anyone remembering to
-do the right thing.
-
-Task names are only unique **within a project**, and they are ordinary words:
-`daily_digest`, `nightly_backup`. Different customers will use identical names
-constantly — that collision is the whole reason projects exist.
-
-So the schema no longer guarantees isolation and the code has to. The rule:
-**identify the project first, then reach the monitor only through that project.**
+The check-in controller must **not** inherit the existing API base controller,
+which authenticates API keys. It authenticates ping keys instead, resolves the
+project from the key, and reaches the monitor only through that project:
 
 ```ruby
-PingKey.authenticating(params[:ping_key])&.project&.monitor_for(params[:registration_key])
+current_project.monitors.find_by(registration_key: params[:registration_key])
 ```
 
-A test proving the same task name in two different projects never crosses over is
-**mandatory**, matching the equivalent discipline already applied to the
-management API.
+That scoping is not optional. Task names are unique only **within** a project, and
+they are ordinary words — `daily_digest`, `nightly_backup`. Different customers
+will use identical names constantly; that collision is the whole reason projects
+exist. The old ping token was unique across the entire database, so isolation was
+a property of the schema. Now it is a property of the code, and needs two tests:
+
+- The same task name in two projects; checked in with project A's key, project B's
+  monitor must be untouched.
+- **A ping key must be rejected by every other `/api/v1` endpoint, and an API key
+  must be rejected by this one.** This is the test that closes the escalation risk
+  §3.1 designed against.
 
 ### 3.4 The pings controller
 
-The controller is about 100 lines today: two rate limiters with long explanatory
-comments, a guard against oversized duration values, a guard against
-array-shaped parameters, and the success/failure rule. Adding
-`if params[:ping_key]` on top of that is exactly the sprawl our own conventions
-warn against.
+The existing public controller carries a lot that now disappears, because the
+endpoint is authenticated: two rate limiters keyed on a URL secret, deliberately
+uninformative 404s to avoid confirming whether a token exists, and the reasoning
+about not leaking which tenant a request belongs to. None of that is needed once a
+request must present a credential the API base already knows how to reject.
 
-But splitting it in two is also wrong: both URL forms record *the same thing*. The
-only difference is how the monitor is identified. So:
-
-1. Move the existing bulk into a shared module — the rate limiters, the parameter
-   guards, and a single `record_ping(monitor)`. There is precedent for this in two
-   other controller concerns already in the app.
-2. Keep **one** action, whose monitor lookup is a two-line branch.
-
-No dedicated lookup class. A class whose entire body is one `if` is not worth
-creating.
+What survives and moves across: the guard against oversized duration values, the
+guard against array-shaped parameters, and the success-or-failure rule that reads
+`status` and `message`.
 
 **The ping key does not record usage on every request.** An API key is
 authenticated a handful of times per deploy; a ping key would be authenticated
-after every job in the project, so writing a timestamp each time would put every
-one of that tenant's concurrent pings in a queue behind one database row, and turn
-every ping into two writes. Rotation still needs the signal, so write it coarsely
-— only when the recorded time is more than five minutes old.
+after every job in the project, so writing a timestamp each time would queue all
+of that tenant's concurrent check-ins behind one database row and turn every
+check-in into two writes. Rotation still needs the signal, so write it coarsely —
+only when the recorded time is more than five minutes old.
 
-### 3.5 A real bug in the original proposal: rate limiting
+### 3.5 Rate limiting
 
-The current limiter counts requests per ping token. On the two-segment route there
-is no ping token, so that value is `nil` — and Rails builds the counter's key like
-this:
+Count per **monitor** — the ping key and task name together — not per key. A
+project with more jobs than the limit would otherwise throttle itself into a
+false project-wide outage, and the gem treats the resulting 429 as a transient
+error and ignores it, so the visible symptom would be a burst of false "down"
+alerts.
 
-```ruby
-# actionpack-8.1.3.1/lib/action_controller/metal/rate_limiting.rb:75
-cache_key = ["rate-limit", scope, name, by].compact.join(":")
-```
+This is worth stating because the URL-credential draft had a real bug here. Its
+limiter counted per ping token, and on a two-segment route that value is `nil` —
+and Rails builds the counter key with `["rate-limit", scope, name, by].compact`,
+which **drops the nil entirely** rather than treating it as distinct. Every
+check-in from every customer in the process would have shared one counter. Moving
+to a header removes the shape that made that possible, but the per-monitor keying
+is still the requirement.
 
-`.compact` **drops the nil entirely** rather than treating it as a distinct value.
-Every new-style ping from every customer in the process would therefore share one
-counter of 30 per minute. Once over, requests get a 429, which the gem treats as a
-transient error and ignores — so the visible result is a burst of false "down"
-alerts across unrelated customers. It would never show up in tests, because the
-counter lives in memory per process.
+A per-IP limiter is no longer the main defence, since requests must authenticate,
+but keep one as a coarse bound.
 
-The limiter must count per **monitor**, i.e. the ping key and task name together,
-never the ping key alone — otherwise a project with more jobs than the limit
-throttles itself into a project-wide false outage. This needs a test proving two
-task names under one key do not share a counter.
+### 3.6 Error responses
 
-The per-IP limiter is unchanged.
+Now that the endpoint is authenticated, the existing API conventions apply and the
+deliberately uninformative responses can go:
 
-### 3.6 Identical responses for different failures
+- Missing, unknown or revoked ping key → `401`, matching the rest of `/api/v1`.
+- Valid key, unknown task name → `404`.
 
-An unknown ping key, a valid key with an unknown task name, and a rate-limited
-request all return the same 404 with no explanation. This is the existing
-convention and it stays.
+Those being **distinguishable** is a gain, not a leak: a caller has already proved
+they hold a credential for the project, so telling them a task is unregistered
+reveals nothing they could not learn from the monitors list. It also gives the gem
+the signal §4.3 needs — "my key is wrong" and "this job is not registered yet"
+were indistinguishable under the old design and had to be teased apart on the
+client.
 
-The cost is real: the gem cannot then tell "my key is wrong" from "this job is not
-registered yet" — which is exactly the distinction §7 wants. We accept it, because
-distinguishing them would let an attacker confirm a valid ping key and then guess
-job names against it. We recover the signal on the client side instead (§4.3).
+### 3.7 Interface
 
-Worth being clear about one thing: the task name in the URL adds **no security**.
-For any app whose source is inspectable, `recurring.yml` is public. This is one
-secret plus a public label, not two secrets.
-
-### 3.7 What "rotate" now promises
-
-Both rotate actions currently promise the old URL stops working immediately, and
-the confirmation dialog says so. With two URL forms live, rotating a monitor's
-ping token leaves its ping-key URL working. That is a security control making a
-promise it no longer keeps.
-
-Fix the wording, not the behaviour: the confirmation must say the monitor is still
-reachable via the project's ping key, and point to where ping keys are revoked.
-Rotating the project key from a single monitor's page would take every other
-monitor in the project offline at the same time.
-
-### 3.8 Interface
-
-Mirrors the existing API-key interface exactly: a controller that issues a key and
-re-renders the project page with the shown-once dialog, a revoke action, both
-scoped so another user's project returns 404, a list partial, and the keys loaded
-in the shared project-page module alongside API keys — that module exists
-precisely so the page and the issuing action cannot drift apart.
+The project page gains a ping-key section mirroring the API-key one exactly: issue
+a key and re-render the page with the shown-once dialog, revoke, both scoped so
+another user's project returns 404, and the keys loaded in the shared project-page
+module alongside API keys — that module exists precisely so the page and the
+issuing action cannot drift apart.
 
 The existing shown-once dialog hardcodes "API key" in its heading, label and test
 identifier. Pass those in as parameters rather than duplicating the file.
 
-The monitor page gains the template form (§2.2) for gem-registered monitors, and
-keeps the literal token URL for hand-created ones.
+The monitor page's setup card changes meaning entirely. There is no URL to copy,
+because there is no URL that works on its own. It becomes instructions: add the
+gem, put the ping key in credentials, declare the task in `recurring.yml`.
 
 ## 4 · Gem design
 
@@ -455,10 +392,12 @@ keeps the literal token URL for hand-created ones.
 - A `ping_key` setting, defaulting to the `STABLEMATE_PING_KEY` environment
   variable — matching how the server address already works, so setup is one step
   rather than two.
-- URL construction inside the HTTP client, with the task name URL-encoded.
+- Check-in and failure-report requests built against
+  `/api/v1/monitors/{task}/pings` with a bearer header, reusing the header helper
+  the registration call already uses. The task name is URL-encoded.
 - A startup check and log line when no ping key is configured (§4.4).
 
-### 4.2 Ping only the tasks we could actually register
+### 4.2 Check in only for tasks we could actually register
 
 This is the one substantive change beyond deleting the cache, and it fixes an
 existing latent bug rather than creating one.
@@ -469,42 +408,40 @@ gave it an address for that name.** The cache is quietly acting as a
 server-approved list of what exists.
 
 Remove the cache and an address becomes constructible for *any* string. The gem
-would then ping after every successful run of every job class in the host app —
-mailer jobs, file-analysis jobs, every one-off background job — thousands a minute
-into an endpoint that allows 300.
+would then check in after every successful run of every job class in the host app
+— mailer jobs, file-analysis jobs, every one-off background job.
 
-The cache is also silently doing a second job nobody documented. The gem builds
-two lists from `recurring.yml`: one of every task with a job class, and a narrower
-one of tasks it can actually work out a schedule for. Tasks in the first list but
-not the second — a task scheduled for 30 February, say — are never registered, so
-they have no address, so their pings are silently dropped. The same is true of
-tasks the server refused to register.
+The cache is also silently doing a second job nobody documented. The gem builds two
+lists from `recurring.yml`: one of every task with a job class, and a narrower one
+of tasks whose schedule it can actually work out. Tasks in the first but not the
+second — a task scheduled for 30 February, say — are never registered, so they have
+no address, so their check-ins are silently dropped. The same is true of tasks the
+server refused to register.
 
-So: **build the list of pingable tasks from the narrower list.** "Could we work
-out this schedule?" becomes an explicit condition for pinging, rather than an
-accident of a missing cache entry. There is an existing test that pins this
-behaviour and it must stay green.
+So: **build the list of reportable tasks from the narrower list.** "Could we work
+out this schedule?" becomes an explicit condition rather than an accident of a
+missing cache entry. An existing test pins this behaviour and must stay green.
 
-### 4.3 Keep the third response state, change what it means
+### 4.3 Act on the response
 
-Under the new scheme a 404 means either the ping key is wrong, or no monitor
-exists for that task name. Neither is fixed by re-fetching addresses — but both
-are exactly the failures this redesign exists to make visible, and the 404 is the
-**only** signal the gem will ever get.
+The server now distinguishes a bad credential (`401`) from an unregistered task
+(`404`), so the client should too:
 
-Collapsing the client's response handling to just "worked" and "failed" would put
-"your credential is wrong" in the same bucket as "the server had a blip", which is
-transient and correctly ignored.
+- `401` — the ping key is wrong or revoked. Log **once**, loudly. Nothing will
+  work until it is fixed.
+- `404` — this task is not registered. Log **once per task name**. If registration
+  is enabled, it will be fixed by the next successful registration.
+- Anything else, or a transport failure — transient, absorbed by the monitor's
+  grace period, as now.
 
-So keep three states, rename the third to `:rejected`, and change what happens:
-log **once per task name** — the current code logs on every single ping, which is
-how a message gets filtered out as noise — with wording that names the two real
-causes rather than the now-impossible "token was rotated".
+Logging once matters: the current code logs on every check-in, which is how a
+message gets filtered out as noise.
 
 Add a `Stablemate.health` reader exposing the last registration error, the time of
-the last successful ping, and any rejected task names, so "are my pings arriving?"
-can be answered from a console or a health check. Nothing about building URLs
-locally makes anything visible by itself — this has to be built on purpose.
+the last successful check-in, and any rejected task names, so "are my check-ins
+arriving?" can be answered from a console or a health check. Nothing about
+building addresses locally makes anything visible by itself — this has to be built
+on purpose.
 
 ### 4.4 When no ping key is configured
 
@@ -513,7 +450,7 @@ Neither crash nor quietly carry on.
 **Do not crash at startup.** The gem's one absolute rule is that monitoring must
 never break the app it monitors. Raising during startup would take down every web
 worker in a rolling deploy of someone's revenue-generating app because their
-monitoring configuration was stale. That trade is never worth it.
+monitoring configuration was stale.
 
 **Do not fall back to the old fetch-and-cache path.** That keeps the bug, keeps
 the code we are deleting, and means nobody ever moves across.
@@ -521,10 +458,10 @@ the code we are deleting, and means nobody ever moves across.
 Instead: the `stablemate:sync` task — run by hand or from a deploy script, where a
 non-zero exit is useful — exits with an error. Startup logs at **error** level
 (not warning, the level everything else uses, where it would be invisible) and
-skips ping delivery entirely:
+skips check-in delivery entirely:
 
 ```
-[stablemate] no ping_key configured — pings are DISABLED and every monitor in
+[stablemate] no ping_key configured — check-ins are DISABLED and every monitor in
 this project will alert as DOWN within one interval + grace. Add
 `c.ping_key = Rails.application.credentials.dig(:stablemate, :ping_key)` to
 config/initializers/stablemate.rb (or set STABLEMATE_PING_KEY). Find it at
@@ -535,69 +472,97 @@ What will happen, how to fix it, where to get the value, and what still works.
 
 ### 4.5 The `register_on_boot` setting survives, and gets simpler
 
-The original proposal bundled this with the cache, but they are separable. The
-map of job classes to task names is read from the local `recurring.yml` and needs
-no network access at all. So:
+The original proposal bundled this with the cache, but they are separable. The map
+of job classes to task names is read from the local `recurring.yml` and needs no
+network access. So:
 
 - `true` → register monitors at startup, as now.
 - `false` → **nothing happens at startup** except attaching the job listener.
-  Pings still work for every task in `recurring.yml`, because the address is built
-  locally.
+  Check-ins still work for every task in `recurring.yml`, because the address is
+  built locally.
 
-That is strictly better than today, where turning registration off merely swapped
-one startup network call for a different one on the same fragile path.
+Strictly better than today, where turning registration off merely swapped one
+startup network call for a different one on the same fragile path.
 
 ### 4.6 What `sync!` returns
 
 Today it returns the address map, and the rake task prints `"synced N monitor(s)"`
 using its size. Without a map it needs something else to count — the number of
-monitors the server reported registering. One trap: when there are no tasks at all
-it currently returns an empty map, so the task prints "synced 0". A replacement
-that returns `nil` would silently turn that into a failure message.
+monitors the server reported registering. One trap: with no tasks at all it
+currently returns an empty map, so the task prints "synced 0". A replacement
+returning `nil` would silently turn that into a failure message.
 
 ## 5 · Sequencing
 
-**There is no migration to manage.** The gem's only user is a side project the
-maintainer controls, so it is updated at the same time. Server and gem ship
+**There is no migration to manage for the gem.** Its only user is a side project
+the maintainer controls, so it is updated at the same time. Server and gem ship
 together, and a broken moment in between costs one redeploy of an app we own.
 
-That removes what would otherwise be the most expensive part of this work: no
-version negotiation, no waiting period to prove the old path is unused before
-deleting it, no gem that supports both schemes, no deprecation window.
-
-Two things look like compatibility concessions but are not, and therefore stay:
-
-- **The token URL form is kept** — for hand-created monitors, not for
-  compatibility. See §7.5.
-- **The ping-key cross-check** (§7.2) — it guards a permanent mistake, not a
-  temporary one.
-
-The only ordering that matters: run the server migration before pointing a gem at
-the new route.
-
-One thing worth checking against production first, since task names are about to
-become part of a URL:
-
-```sql
-SELECT id, project_id, registration_key FROM monitors
-WHERE registration_key ~ '[^A-Za-z0-9_.\-]';
-```
-
-Any result is a monitor whose new-style URL would not survive a round trip. With
-the §3.2 constraint in place, only a `/` in the name is genuinely fatal.
-
-## 6 · Things removed from the gem's public interface
+That removes what would otherwise be the most expensive part: no version
+negotiation, no waiting period to prove the old path unused, no gem supporting
+both schemes, no deprecation window. The gem's version goes to `0.2.0` because its
+public interface changes, not because anything needs to detect it.
 
 The shared address map and the ability to construct the job listener with your own
-addresses are documented for people wiring the gem up by hand. The gem is
-pre-1.0 with no third-party users, so they go without ceremony.
+addresses are documented for people wiring the gem up by hand. Pre-1.0 with no
+third-party users, so they go without ceremony.
 
-The README's "manual fallback" section is deleted. What it describes — creating a
-monitor by hand whose registration key matches a job class name — is **already
-impossible**: the monitor form does not accept a registration key, and the
-registration endpoint is the only thing that writes that column. It is a
-documented feature that does not work. Anyone who wants it gets explicit
-configuration instead.
+**§6 is a different matter** and is gated on the query in the summary.
+
+## 6 · What the product gives up
+
+This is the part to disagree with if any of it is going to be disagreed with.
+
+Removing the public check-in endpoint means Stablemate can only monitor **an
+ActiveJob job, in a Rails app, with the gem installed.** Specifically lost:
+
+- **`command:` recurring tasks.** Solid Queue runs these without a job class, so
+  the gem cannot attribute a run to them. The documented workaround today is
+  either wrapping the command in a job class or creating a monitor by hand and
+  appending a `curl`. Only the first survives.
+- **Anything not in a Rails app** — a backup script on the same box, a job in
+  another language, a scheduled task in a managed service.
+- **Monitors created in the interface.** With no way to check them in, creating one
+  produces a monitor that can only ever be pending.
+
+### What that deletes
+
+Directly: the ping token column and its concern, both token-rotation controllers,
+the public check-in route and the unauthenticated parts of its controller, and
+monitor creation in the interface.
+
+By cascade, and this reaches further than it first appears:
+
+| Becomes dead | Why |
+|---|---|
+| `Monitor::Transfer` and its controller and view | Its first line is `return … unless @monitor.manual?` |
+| `awaiting_setup?` and the branch it drives | Defined as `manual? && !ever_pinged?` |
+| The gem provenance chip | Every monitor is from the gem, so it distinguishes nothing |
+| `from_gem?` / `manual?` / the `source` column | Constant |
+
+Plus roughly 228 lines across four browser-test files.
+
+### Why this is defensible
+
+The README already says "Dead simple job monitoring for **Rails applications**",
+and the landing page mentions Rails four times and Solid Queue once, with no
+mention of `curl` or cron. Meanwhile `docs/integrating.md` §2 is a full section
+titled "The manual path (any language, any scheduler)". Those two have disagreed
+since before this redesign. This resolves the disagreement in favour of what the
+product actually claims to be.
+
+It is also the safe direction to be wrong in. Adding a per-monitor URL credential
+back later is a column and a route. Removing one after customers depend on it is
+the hard direction. Narrow now, widen on evidence.
+
+### Why it might still be wrong
+
+Every comparable service — Healthchecks, Cronitor, Dead Man's Snitch, Sentry — is
+language-agnostic, and the single copy-pasteable URL is how all of them onboard.
+Giving it up forecloses the "I have one weird cron job" entry point, which is
+often how a team first tries a monitoring product. That is a positioning decision,
+not a technical one, and it should be made deliberately rather than as a
+consequence of this redesign.
 
 ## 7 · What this does not fix
 
@@ -605,67 +570,67 @@ configuration instead.
 
 A wrong ping key, a DNS failure, a blocked outbound connection, an interfering
 proxy, a rate limit — in every case the server sees silence and the email says the
-job "missed its check-in". **This redesign changes which address goes quiet, not
-what silence means.**
+job "missed its check-in". **This redesign changes how check-ins are addressed,
+not what silence means.**
 
-This was the actual damage from the incident, and it is being handled as separate,
-parallel work. Three signals, cheapest first:
+This was the actual damage from the incident, and it is separate, parallel work.
+Three signals, cheapest first:
 
 - **Notice that the app is still talking to us.** The API key already records when
-  it was last used, on every registration — and nothing reads it. "This app
-  checked in three minutes ago, but no monitor has reported for an hour" is a
-  *positive* statement with no false positives: the app is running and can reach
-  us, so it is the pings specifically that are not arriving. Works even with a
-  single monitor.
+  it was last used, on every registration — and nothing reads it. "This app checked
+  in three minutes ago, but no monitor has reported for an hour" is a *positive*
+  statement with no false positives: the app is running and can reach us, so it is
+  the check-ins specifically that are not arriving. Works even with a single
+  monitor.
 - **Alert on monitors that have never checked in.** Detection only considers
   monitors currently marked up, so a monitor that is registered but has never
-  received a successful ping is invisible to it **forever** and produces no alerts
-  at all. The threshold has to be relative to the monitor's own interval, it must
-  fire only once, and it needs its own wording pointing at setup docs.
-- **Notice a whole project going quiet.** Not "every monitor is down" — monitors
-  go overdue in order of how often they run, so waiting for all of them means
-  waiting for the slowest. The useful test is: the most recent ping *anywhere* in
-  the project is older than the *shortest* interval-plus-grace in it. That fires as
-  soon as the fastest job misses. It needs somewhere to record a project-level
-  incident, and it tells you nothing about a project with one monitor.
+  received a successful check-in is invisible to it **forever** and produces no
+  alerts at all. The threshold has to be relative to the monitor's own interval, it
+  must fire only once, and it needs its own wording pointing at setup docs.
+- **Notice a whole project going quiet.** Not "every monitor is down" — monitors go
+  overdue in order of how often they run, so waiting for all of them means waiting
+  for the slowest. The useful test is: the most recent check-in *anywhere* in the
+  project is older than the *shortest* interval-plus-grace in it. That fires as soon
+  as the fastest job misses. It needs somewhere to record a project-level incident,
+  and it tells you nothing about a project with one monitor.
 
 The wording rule for all of them: **say what was observed, never what it means.**
-"No monitor in project Foo has reported since 14:02" is true whether the cause is
-a firewall, a crashing worker, or a deliberate shutdown, and it sends the reader
-to the right place in all three. "Your network is blocked" is just a new way to be
+"No monitor in project Foo has reported since 14:02" is true whether the cause is a
+firewall, a crashing worker, or a deliberate shutdown, and it sends the reader to
+the right place in all three. "Your network is blocked" is just a new way to be
 wrong.
 
 ### 7.2 Two credentials that can disagree
 
 Nothing forces the API key and the ping key to belong to the same project. Use
 project A's API key with project B's ping key and registration writes to A while
-pings go to B. A's monitors go down permanently, and every symptom reads as "your
-job is down". This is a **new** kind of mistake — impossible today — and it is
-permanent rather than transitional, so it needs a permanent guard.
+check-ins go to B. A's monitors go down permanently, and every symptom reads as
+"your job is down". This is a **new** kind of mistake, and permanent rather than
+transitional, so it needs a permanent guard.
 
 The guard, shipping with the gem rather than after it: registration returns the
 last four characters of the project's ping key, and the gem logs loudly at startup
 if the key it holds does not match. There is no escalation in that — an API key can
-already read every ping URL in its project.
+already list every monitor in its project.
 
-Together with §4.3's once-per-task logging, this turns "wrong key, silent until
-the interval elapses" — about 27 hours for a daily job — into one line at deploy
-time. Both halves do real work: §4.3 catches a key that is wrong everywhere, this
-catches a key that is valid but belongs somewhere else.
+Together with §4.3's `401` handling, this turns "wrong key, silent until the
+interval elapses" — about 27 hours for a daily job — into one line at deploy time.
 
-### 7.3 One leaked key now exposes a whole project
+### 7.3 One leaked key exposes a whole project
 
-Today a leaked ping token lets an attacker fake check-ins for one monitor. A
-leaked ping key lets them fake check-ins **and failure reports** for every monitor
-in the project. And faking a check-in on a monitor that is currently down does not
-just suppress the alert — it resolves the incident and sends a "recovered" email
-in the middle of a real outage.
+A leaked ping key lets an attacker fake check-ins **and failure reports** for every
+monitor in the project, where a leaked ping token affected one. And faking a
+check-in on a monitor that is currently down does not just suppress the alert — it
+resolves the incident and sends a "recovered" email during a real outage.
 
-This is the sharpest criticism of the design and it is accepted knowingly, limited
-by: storing only a hash, encouraging environment variables over crontab literals
-(§2.2), independent rotation with an overlap period (§3.1), and refusing to let
-the key create anything (§2.2). The per-monitor token remains available to anyone
-who wants the narrower scope.
+Moving the credential into a header narrows this considerably compared with the
+URL design: it is no longer written to request logs, proxy logs or error reports,
+cannot be fired by a link preview, and will not appear in a screenshot of a
+crontab. What remains is that anyone who can read the host app's credentials holds
+it — which is true of the API key too, and that one is strictly more powerful.
+
+Bounded further by storing only a hash, independent rotation with an overlap
+period (§3.1), and refusing to let the key create anything (§2.3).
 
 ### 7.4 The catch-all around gem startup
 
@@ -674,45 +639,22 @@ narrow the catch-all so a broken `recurring.yml` cannot silently leave the job
 listener unattached for the life of the process, and surface it through
 `Stablemate.health`.
 
-### 7.5 There will still be two URL forms — on purpose
-
-With no compatibility to preserve, the obvious move is to collapse to one URL
-form and delete ping tokens and both rotate actions entirely. That was considered
-and **rejected on product grounds**, so it does not quietly become available
-later:
-
-- Hand-created monitors have no registration key, and giving them one means making
-  it user-editable and validated — which re-opens a decision already made and
-  recorded, that names make poor URL fragments because they collide within a
-  project and go blank for non-Latin characters.
-- **The ping key is shown once, so the dashboard could no longer display a working
-  URL at all** — only a template with a placeholder in it. "Create a monitor,
-  copy the URL, paste it into a shell script" is a core first-run path and it
-  needs a complete, copy-pasteable string. Making the ping key permanently visible
-  to solve this would undo §2.2 and bring back the rotation hazard.
-- It would delete the only narrowly-scoped ping credential the product has. Per
-  §7.3, the project key's reach is this design's biggest cost, and the per-monitor
-  token is what limits it for anyone who cares.
-
-So: **two credentials for two separate audiences** — monitors registered from
-config files, and monitors created by hand — which is Healthchecks' shape, for
-Healthchecks' reasons. Document it that way rather than treating it as unfinished.
-
 ## 8 · Test plan
 
 Beyond ordinary unit and request coverage, the parts that are not optional:
 
 - **Browser test.** Generate a ping key from the project page, see it once, see it
-  masked in the list afterwards, revoke it. Mirrors the existing API-key test.
-- **Tenant isolation.** The same task name in two projects; pinged with project
+  masked afterwards, revoke it. Mirrors the existing API-key test.
+- **Credential separation.** A ping key must be rejected by every other `/api/v1`
+  endpoint, and an API key rejected by the check-in endpoint (§3.3).
+- **Tenant isolation.** The same task name in two projects; checked in with project
   A's key, project B's monitor must be untouched (§3.3).
 - **Rate limiting.** Two different task names under one ping key must not share a
   counter (§3.5).
 - **Routing.** A task name containing a dot must arrive intact (§3.2).
-- **Response uniformity.** Unknown key, valid key with unknown task name, and
-  over-limit must be indistinguishable (§3.6).
-- **Gem: unlisted job classes never ping** under the new task list (§4.2).
-- **Gem: no ping key configured** — listener still attached, no pings sent, one
+- **Gem: unlisted job classes never check in** under the new task list (§4.2).
+- **Gem: no ping key configured** — listener still attached, nothing sent, one
   error line (§4.4).
-- **Gem: a task with an unworkable schedule never pings** (§4.2) — the containment
-  the cache was doing by accident.
+- **Gem: a task with an unworkable schedule never checks in** (§4.2) — the
+  containment the cache was doing by accident.
+- **Gem: `401` and `404` are handled differently** and each logs once (§4.3).
