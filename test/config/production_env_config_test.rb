@@ -1,39 +1,40 @@
 require "test_helper"
-require "open3"
 
 # Self-hosting (#17) requires the production environment to be configured entirely
 # from ENV — no in-repo Rails credentials. We can't flip the running test process
 # into the production environment, so we boot a throwaway production process with
-# the relevant env vars set and read the resulting config back out. This proves a
-# self-hoster's STABLEMATE_HOST / SMTP_* / SECRET_KEY_BASE actually drive the app.
+# the relevant env vars set and read the resulting config back out
+# (BootTestHelper). This proves a self-hoster's STABLEMATE_HOST / SMTP_* /
+# SECRET_KEY_BASE actually drive the app.
 class ProductionEnvConfigTest < ActiveSupport::TestCase
-  def boot_production(env)
-    script = <<~RUBY
-      c = Rails.application.config
-      data = {
-        mailer_host: c.action_mailer.default_url_options[:host],
-        mailer_protocol: c.action_mailer.default_url_options[:protocol],
-        smtp_address: c.action_mailer.smtp_settings[:address],
-        smtp_port: c.action_mailer.smtp_settings[:port],
-        smtp_user: c.action_mailer.smtp_settings[:user_name],
-        raise_delivery_errors: c.action_mailer.raise_delivery_errors,
-        perform_deliveries: c.action_mailer.perform_deliveries,
-        force_ssl: c.force_ssl,
-        hosts: c.hosts.map(&:to_s)
-      }
-      puts data.to_json
-    RUBY
+  include BootTestHelper
 
-    base = {
-      "RAILS_ENV" => "production",
-      "SECRET_KEY_BASE" => "test-secret-key-base",
-      "DISABLE_DATABASE_ENVIRONMENT_CHECK" => "1"
+  BOOT_SCRIPT = <<~RUBY.freeze
+    c = Rails.application.config
+    data = {
+      mailer_host: c.action_mailer.default_url_options[:host],
+      mailer_protocol: c.action_mailer.default_url_options[:protocol],
+      smtp_address: c.action_mailer.smtp_settings[:address],
+      smtp_port: c.action_mailer.smtp_settings[:port],
+      smtp_user: c.action_mailer.smtp_settings[:user_name],
+      raise_delivery_errors: c.action_mailer.raise_delivery_errors,
+      perform_deliveries: c.action_mailer.perform_deliveries,
+      force_ssl: c.force_ssl,
+      hosts: c.hosts.map(&:to_s)
     }
-    out, err, status = Open3.capture3(base.merge(env), "bin/rails", "runner", script,
-                                       chdir: Rails.root.to_s)
-    assert status.success?, "production boot failed: #{err}"
-    JSON.parse(out.lines.last)
-  end
+    puts data.to_json
+  RUBY
+
+  # SECRET_KEY_BASE because production demands one and there are no in-repo
+  # credentials to supply it; DISABLE_DATABASE_ENVIRONMENT_CHECK because the boot
+  # points at the test database.
+  PRODUCTION_ENV = {
+    "RAILS_ENV" => "production",
+    "SECRET_KEY_BASE" => "test-secret-key-base",
+    "DISABLE_DATABASE_ENVIRONMENT_CHECK" => "1"
+  }.freeze
+
+  def boot_production(env) = boot_app(BOOT_SCRIPT, PRODUCTION_ENV.merge(env))
 
   test "STABLEMATE_HOST drives the mailer host and protocol" do
     cfg = boot_production(

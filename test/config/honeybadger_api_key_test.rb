@@ -1,5 +1,4 @@
 require "test_helper"
-require "open3"
 require "tmpdir"
 
 # The Honeybadger API key is a third-party credential and must not live in a
@@ -14,25 +13,22 @@ require "tmpdir"
 #
 # Boot-time behaviour is the part a runtime stub cannot prove, so — like
 # BillingBootTest — these boot a throwaway process and read the resulting config
-# back out. A self-hoster with NO key must boot fine and simply not report.
+# back out (BootTestHelper). A self-hoster with NO key must boot fine and simply
+# not report.
 class HoneybadgerApiKeyTest < ActiveSupport::TestCase
-  def boot(env)
-    script = <<~RUBY
-      notify_error = begin
-        Honeybadger.notify(RuntimeError.new("boot check"))
-        nil
-      rescue => e
-        e.message
-      end
-      puts({ api_key: Honeybadger.config[:api_key], notify_error: notify_error }.to_json)
-    RUBY
-    out, err, status = Open3.capture3(
-      { "RAILS_ENV" => "test" }.merge(env),
-      "bin/rails", "runner", script, chdir: Rails.root.to_s
-    )
-    assert status.success?, "app failed to boot with env #{env.keys.inspect}: #{err}"
-    JSON.parse(out.lines.last)
-  end
+  include BootTestHelper
+
+  BOOT_SCRIPT = <<~RUBY.freeze
+    notify_error = begin
+      Honeybadger.notify(RuntimeError.new("boot check"))
+      nil
+    rescue => e
+      e.message
+    end
+    puts({ api_key: Honeybadger.config[:api_key], notify_error: notify_error }.to_json)
+  RUBY
+
+  def boot(env) = boot_app(BOOT_SCRIPT, env)
 
   # Asked of the parsed document rather than the raw text, so the answer is the
   # one the gem itself would get — a commented-out example or a mention in prose

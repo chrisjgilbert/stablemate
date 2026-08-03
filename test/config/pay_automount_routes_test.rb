@@ -1,5 +1,4 @@
 require "test_helper"
-require "open3"
 
 # F4 — Pay must not automount its own routes.
 #
@@ -18,6 +17,8 @@ require "open3"
 # present (Pay::Stripe.enabled?), so the boot test below is the one that proves it
 # for the managed instance; the routing test proves the payments half in-process.
 class PayAutomountRoutesTest < ActiveSupport::TestCase
+  include BootTestHelper
+
   PAY_PATHS = [ [ "/pay/webhooks/stripe", :post ], [ "/pay/payments/1", :get ] ].freeze
 
   test "Pay's automounted routes are not recognised" do
@@ -38,15 +39,10 @@ class PayAutomountRoutesTest < ActiveSupport::TestCase
         pay_paths: Rails.application.routes.routes.map { |r| r.path.spec.to_s }.grep(/pay/)
       }.to_json)
     RUBY
-    env = {
-      "RAILS_ENV" => "test",
+    cfg = boot_app(script,
       "STRIPE_PUBLISHABLE_KEY" => "pk_test_boot",
       "STRIPE_SECRET_KEY" => "sk_test_boot",
-      "STRIPE_WEBHOOK_SECRET" => "whsec_test_boot"
-    }
-    out, err, status = Open3.capture3(env, "bin/rails", "runner", script, chdir: Rails.root.to_s)
-    assert status.success?, "app failed to boot with Stripe keys: #{err}"
-    cfg = JSON.parse(out.lines.last)
+      "STRIPE_WEBHOOK_SECRET" => "whsec_test_boot")
 
     assert_equal true, cfg["billing_enabled"], "expected the boot to have billing on"
     assert_equal false, cfg["automount_routes"]

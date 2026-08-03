@@ -1,5 +1,4 @@
 require "test_helper"
-require "open3"
 
 # The hosted-tier billing config-gate (issue #19) only does anything at BOOT: the
 # pay.rb initializer registers the Stripe processor and feeds Pay its keys when
@@ -9,30 +8,27 @@ require "open3"
 # the managed instance on boot while every other test stayed green.
 #
 # These tests close that gap by booting a throwaway process with the Stripe env set
-# (and unset) and reading the resulting config back out — the managed instance must
-# actually boot, and the keyless self-host instance must stay dormant.
+# (and unset) and reading the resulting config back out (BootTestHelper) — the
+# managed instance must actually boot, and the keyless self-host instance must stay
+# dormant.
 class BillingBootTest < ActiveSupport::TestCase
+  include BootTestHelper
+
   STRIPE_ENV = {
     "STRIPE_PUBLISHABLE_KEY" => "pk_test_boot",
     "STRIPE_SECRET_KEY" => "sk_test_boot",
     "STRIPE_WEBHOOK_SECRET" => "whsec_test_boot"
   }.freeze
 
-  def boot(env)
-    script = <<~RUBY
-      puts({
-        billing_enabled: Stablemate.billing_enabled?,
-        processors: Pay.enabled_processors,
-        stripe_api_key_present: ::Stripe.api_key.present?
-      }.to_json)
-    RUBY
-    out, err, status = Open3.capture3(
-      { "RAILS_ENV" => "test" }.merge(env),
-      "bin/rails", "runner", script, chdir: Rails.root.to_s
-    )
-    assert status.success?, "app failed to boot with env #{env.keys.inspect}: #{err}"
-    JSON.parse(out.lines.last)
-  end
+  BOOT_SCRIPT = <<~RUBY.freeze
+    puts({
+      billing_enabled: Stablemate.billing_enabled?,
+      processors: Pay.enabled_processors,
+      stripe_api_key_present: ::Stripe.api_key.present?
+    }.to_json)
+  RUBY
+
+  def boot(env) = boot_app(BOOT_SCRIPT, env)
 
   test "the managed instance boots with Stripe keys set and enables billing" do
     cfg = boot(STRIPE_ENV)
