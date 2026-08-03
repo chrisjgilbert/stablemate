@@ -60,7 +60,22 @@ class Signup
     def create_user_within_cap
       # No cap configured (issue #16, the self-host default): sign-ups are always
       # open, so there is no window to guard and no lock to pay for.
-      return create_user unless Stablemate.signup_cap_enabled?
+      return save_user(build_user) unless Stablemate.signup_cap_enabled?
+
+      # An unlocked pre-check that is NOT the decision — the authoritative one is
+      # made under the lock below, against committed state. It exists so that
+      # someone headed for the waitlist doesn't pay for a password hash we are
+      # never going to store. Being stale is harmless in both directions: a false
+      # "full" waitlists someone who could have squeezed in, and a false "room"
+      # simply reaches the real check.
+      return nil if self.class.at_capacity?
+
+      # Build the record — and with it the bcrypt hash of the password, which
+      # has_secure_password computes right there in the setter — BEFORE the lock is
+      # taken. bcrypt is deliberately slow (~250ms at the configured cost) and has
+      # nothing to do with capacity, so hashing under the global lock made every
+      # sign-up on a capped instance queue behind every other one's password.
+      user = build_user
 
       # Serialise the whole check-then-create window. Without it two requests racing
       # for the last slot both read User.count < cap and both insert, taking the
@@ -69,8 +84,9 @@ class Signup
       # (the cap is a global COUNT, and the row being created doesn't exist yet), so
       # we take a transaction-scoped Postgres advisory lock instead: no extra table,
       # no gem, released automatically on COMMIT/ROLLBACK, and free when uncontended.
-      # The capacity re-check therefore runs inside the lock, against committed state.
-      with_capacity_lock { create_user unless self.class.at_capacity? }
+      # The capacity re-check therefore runs inside the lock, against committed state
+      # — and only it and the INSERT do.
+      with_capacity_lock { save_user(user) unless self.class.at_capacity? }
     end
 
     # The non-blocking side effects of a successful sign-up: the verification
@@ -92,13 +108,17 @@ class Signup
       end
     end
 
-    def create_user
-      user = User.new(
+    # Unsaved, and already carrying its password_digest — see create_user_within_cap
+    # for why that matters.
+    def build_user
+      User.new(
         email_address: @email,
         password: @password,
         password_confirmation: @password_confirmation
       )
+    end
 
+    def save_user(user)
       # Insert in its OWN savepoint (requires_new) so a lost double-submit race
       # rolls back only this INSERT: Postgres aborts the whole enclosing
       # transaction on an index violation, which would take the capacity lock's
