@@ -231,8 +231,19 @@ name was user-authored:
 | emit a "recovered" email | yes | no |
 | write ping-event rows | yes | no |
 
-The ping key's two exclusives are transient — both are overwritten by the next
-legitimate check-in. Every durable capability belongs to the API key alone.
+The ping key's exclusives are narrower, but **not transient, and an earlier draft
+of this section was wrong to say so.** A forged success on a monitor that is down
+runs `CheckIn#recover`, which calls `Incident#resolve!` — and that begins
+`return if resolved_at.present?`, so a later genuine recovery **cannot correct
+it**. The result is a permanently wrong `resolved_at`, permanently overstated
+uptime, and a "recovered" email for a job that never recovered. A forged failure
+likewise opens an `Incident` carrying attacker text, which the data model keeps
+deliberately so it outlives ping pruning. And `first_ping_at ||= received_at` is
+documented as never moving afterwards.
+
+This does not weaken the case for the split — the API key holds every capability
+the ping key does, plus enumeration and durable rewrites. It does mean §9.3's
+investigability work is under-scoped.
 
 ### The axis the earlier draft never considered
 
@@ -646,7 +657,13 @@ end
 
 Three things to pin down, because each has a wrong-looking-right answer:
 
-- **The encoder is `ERB::Util.url_encode`.** `CGI.escape` and
+- **The encoder is `ERB::Util.url_encode`, and `client.rb` must `require "erb"`.**
+  It requires only `net/http`, `json` and `uri` today, and the gem supports a
+  plain-Ruby host. Without the require, `ERB` is an uninitialized constant —
+  `NameError`, which is a `StandardError`, which `Client#ping`'s rescue swallows
+  and reports as `:error`, which §6.5 classifies as transient. Every check-in
+  would be dropped with no `401` or `404` logged, and the monitor would go down
+  saying it missed its check-in. Verified: the bare require set raises. `CGI.escape` and
   `URI.encode_www_form_component` turn a space into `+`, which decodes as a
   literal `+` in a path segment — so a task named `"my task"` would 404 forever
   while §5.1's route table passed, since none of its examples contain a space.
@@ -669,9 +686,17 @@ the key through.
   remedy: run `bin/rails stablemate:sync`.
 - Anything else — transient, absorbed by the grace period.
 
-Log through `Rails.logger` when Rails is defined. The gem's logger defaults to
-stderr (`lib/stablemate.rb:79`), which is where the original boot-sync warning
-went and why nobody saw it — the replacement must not inherit that channel. There is no `log_error` helper —
+**Route these through `Rails.logger` when Rails is defined.** The gem's logger is
+`config.logger || Logger.new($stderr)`, and nothing in the gem ever assigns
+`Rails.logger` — so the default is the stderr channel the original boot-sync
+warning went to, which is why nobody saw it. Since boot now does nothing else,
+this line is the *only* signal a misconfigured deploy produces; leaving it on
+stderr bypasses the host's formatter, level and tags.
+
+So `Stablemate.logger` must prefer `Rails.logger` when Rails is loaded, or
+`Configuration#logger` must default to it. The snippets below write
+`Stablemate.logger.error` assuming that change lands first — without it they are
+the very channel this paragraph condemns. There is no `log_error` helper —
 `Logging` provides only `log_warn`/`log_info` — so one is needed to keep the
 `[stablemate]` prefix and the raising-logger guard.
 
@@ -725,7 +750,8 @@ only `log_warn`/`log_info` — and adding one does not by itself make
 `false`, so the module has no such method to call. Either add `log_error` to
 `Logging` and invoke it from an object that includes the module, or call
 `Stablemate.logger.error` directly with an explicit `[stablemate]` prefix, as the
-snippet above does. The railtie already uses the latter shape.
+snippet above does — but only once `Stablemate.logger` prefers `Rails.logger`, per
+the paragraph above. The railtie already uses the latter shape.
 
 `handle_event` also needs a rescue. It is the only public handler without one —
 `handle_retry` and `handle_discard` both have one — and an exception raised in a
@@ -813,11 +839,59 @@ little while `Project::MonitorSync` is the only *ongoing* writer — the backfil
 below is a one-shot migration, not a second write path, which is the sense in
 which §0 calls it a second writer. Backfill so every existing
 monitor is addressable — deriving from the name, iterating deterministically with
-a set of keys already taken in this run. Do **not** use `String#parameterize`: it
+a set of keys already taken. **Seed that set per project from the rows that
+already hold one** (`where.not(registration_key: nil)`), not just from what this
+run assigns: gem monitors already have keys, and a legacy manual monitor *named*
+after one of them derives straight into it. Reproduced — the partial unique index
+raises `RecordNotUnique`, Postgres rolls back the wrapping transaction, and the
+migration fails the deploy. Do **not** use `String#parameterize`: it
 strips non-Latin characters entirely, so 日本語のジョブ derives to empty, which
 contradicts §5.1's unicode support. Strip only `/` and surrounding whitespace, and
 handle duplicate names, names deriving to blank, and collisions on the
 `monitor-<id>` fallback.
+
+## 8.1 · Cutover: this must ship in two phases
+
+**Shipping all of this in one deploy takes every healthy monitor dark and emails a
+false outage for each one.** The server and the gem are separate repositories with
+separate deploys, and the ping key can only be issued from the server interface
+*after* the server deploy — so there is necessarily a window where a new server
+faces an old gem. Traced end to end, that window is not benign:
+
+1. The old gem's cached address is `…/ping/<token>`; the route is gone → 404.
+2. `Client#classify` reads 404 as "address rejected" and triggers a re-sync.
+3. The re-sync hits `SyncsController#create`, which calls `ping_url_for(monitor)`
+   → `ping_url(monitor.ping_token)`. Helper and column are both deleted → **500**.
+4. `sync!` rescues, returns nil, and the dead addresses stay cached. Re-sync is
+   throttled to once a minute.
+5. Every check-in is then dropped at `subscriber.rb:258` — `return unless url` —
+   **the exact line §2 quotes as the incident this document exists to fix.**
+6. `DetectMissedPingsJob` sweeps and `flag_missed!` opens an incident and sends a
+   `down` email per monitor.
+
+The casualties are precisely the healthy ones: `detectable` is
+`where(status: "up")`, so paused, suspended, pending and already-down monitors are
+untouched. For a 15-minute job the grace is `max(interval × 0.15, 5.minutes)` =
+5 minutes, so the whole window to beat is 20 minutes — server deploy, copy a ping
+key from the UI, edit host credentials, redeploy the host. That does not fit.
+
+**Two phases, and the split is free** — the new route does not collide with
+`match "/ping/:ping_token"`, and `ping_keys` can be created while `ping_token`
+still exists:
+
+- **Phase 1 — additive, server only.** Add `PingKey`, the new endpoint, the route,
+  the rate limiters, the `registration_key` backfill. Change nothing else. The old
+  ping endpoint, `ping_token`, the rotation controllers and `ping_url` in the sync
+  response all keep working. Nothing breaks, nothing is dark.
+- **Phase 2 — the host cuts over.** Issue a ping key, add it to the host's
+  credentials, deploy gem `0.2.0`, run `stablemate:sync`, and **verify a real
+  check-in has landed** before continuing.
+- **Phase 3 — subtractive, server only.** Now delete the ping endpoint,
+  `ping_token`, both rotation controllers, `ping_url` from the serializers, and the
+  monitor-creation path.
+
+§6.2's care about `pre-deploy` versus `post-deploy` hooks is wasted if this
+larger ordering is left implicit.
 
 ## 9 · What this does not fix
 
@@ -882,7 +956,9 @@ unconditionally in the model layer, every render escapes, and header injection v
 the name is Q-encoded by the mail gem.
 
 Worth adding cheaply: `ping_events` records `source_ip` but nothing about which
-key was used. A nullable key reference makes a suspected leak investigable.
+key was used. A nullable key reference makes a suspected leak investigable — and
+per §4 it must reach `incidents` and `notifications` too, since a forged recovery
+is permanent and those rows are what outlive ping pruning.
 
 ### 9.4 Two credentials that can disagree
 
@@ -893,8 +969,13 @@ down". This mistake is impossible with one credential and permanent with two, so
 it needs a permanent guard.
 
 Registration returns the last four characters of **every live ping key** for the
-project, and the gem logs loudly at startup when the configured key matches none
-of them. No escalation —
+project, and **`bin/rails stablemate:sync` warns loudly** when the configured ping
+key matches none of them.
+
+**Not at startup.** §3.1 and §6.5 make boot do no network call at all, so a
+booting worker has no registration response to compare against. Putting this check
+at boot would re-add exactly the startup HTTP call §2 is about. The command is the
+only process that holds the response, so the check belongs there. No escalation —
 an API key can already list every monitor in its project.
 
 **A set, not a value** — §4's rotation procedure deliberately keeps two keys live
@@ -960,6 +1041,14 @@ scope; if it stays, it should be because the price is about to be set.
 
 - **Browser: the monitor lifecycle without creation.** A registered monitor can be
   edited, paused and deleted; the create route is gone.
+- **Cutover (§8.1).** After phase 1 and before phase 2, a monitor still checking
+  in through the old ping-token URL keeps working and does not go overdue. This is
+  the test that proves the phases are separable.
+- **Backfill collision (§8).** A legacy monitor named after an existing gem
+  monitor's task key backfills to a *different*, usable key — the migration must
+  not raise.
+- **Gem on a plain-Ruby host (§6.4).** A check-in with a space in the task name
+  succeeds without Rails loaded, which fails if `erb` is not required.
 - **Never-checked-in alert (§9.1).** A monitor registered and never checked in
   alerts once, after its own interval rather than a fixed delay, with copy
   distinct from a missed check-in — and does not alert twice.
