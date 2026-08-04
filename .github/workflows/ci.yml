@@ -38,7 +38,7 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check for a scaffolded app
         id: app
@@ -58,11 +58,20 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Chromium for system tests
+        id: chrome
         if: steps.app.outputs.present == 'true'
-        uses: browser-actions/setup-chrome@v1
+        uses: browser-actions/setup-chrome@v2
         timeout-minutes: 5
 
       - name: Run CI (bin/ci)
+        # Hand the system tests the exact binary the step above installed rather
+        # than letting Cuprite guess from PATH — the action decides where Chrome
+        # lands, and that is not something we should be inferring across a major
+        # version of it. If the output is ever missing or renamed the variable
+        # arrives empty, and application_system_test_case.rb falls back to the
+        # preinstalled Chromium and then to PATH, which is the behaviour we had.
+        env:
+          CHROMIUM_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           chmod +x bin/ci
           bin/ci
@@ -141,7 +150,7 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.preflight.outputs.ready == 'true'
 
       - name: Set up Ruby (gives us bin/kamal)
@@ -152,7 +161,7 @@ jobs:
 
       - name: Load the deploy key into ssh-agent
         if: steps.preflight.outputs.ready == 'true'
-        uses: webfactory/ssh-agent@v0.9.0
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
