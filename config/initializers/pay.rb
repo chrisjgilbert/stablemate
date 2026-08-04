@@ -45,6 +45,16 @@ end
 # ~index 110 vs the engine's ~372), so here is early enough.
 Pay.automount_routes = false
 
+# Pay#support_email= wraps its argument in ::Mail::Address, so the constant has
+# to exist by the time this block runs. Action Mailer only requires "mail" from
+# eager_load!, which does not happen in development or test — the constant used
+# to be here anyway because rails/all loaded Action Mailbox, which requires
+# "mail" outright. Dropping that framework in config/application.rb turned an
+# incidental dependency into a boot failure (test env only; development was
+# covered by letter_opener). Ask for it explicitly instead of relying on a
+# framework we don't otherwise use.
+require "mail"
+
 Pay.setup do |config|
   config.application_name = "Stablemate"
   config.support_email = "support@stablemate.dev"
