@@ -31,7 +31,7 @@ boxes here → next chunk.
 | 0 | Billing dependency upgrade | WS-A | **MERGED** | #63 |
 | 1 | Account page — deletion + password change | WS-D | **MERGED** | #64 |
 | 2 | Legal pages — Terms + Privacy + consent | WS-C | **MERGED** | #65 |
-| 3 | Findings follow-ups + Honeybadger secret move | launch-findings tail | **NOT STARTED** | — |
+| 3 | Findings follow-ups + Honeybadger secret move | launch-findings tail | **MERGED** | #67 |
 | 4 | Dependabot backlog | WS-B | **NOT STARTED** | — |
 
 Deliberately **not** in these chunks: WS-E (publishing the gem needs an

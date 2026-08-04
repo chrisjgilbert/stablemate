@@ -103,21 +103,61 @@ jobs:
       STABLEMATE_SSL_CERT: ${{ secrets.STABLEMATE_SSL_CERT }}
       STABLEMATE_SSL_KEY: ${{ secrets.STABLEMATE_SSL_KEY }}
       KNOWN_HOSTS: ${{ secrets.KNOWN_HOSTS }}
+      # Read by the preflight below as well as by ssh-agent. A secret can't be
+      # referenced from a job- or step-level `if:` (the secrets context isn't
+      # available there), so the only way to *test* one is to surface it as env
+      # first — which is why this lives here rather than inline on its step.
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
     steps:
+      # Deploying needs eight secrets/variables that only the owner of a real
+      # server can supply. Until they are set, every push to main failed here —
+      # a permanently red main that trains you to ignore the X, and would hide a
+      # genuine CI failure behind an expected one. So: check first, and skip the
+      # rest of the job cleanly when the deployment isn't configured.
+      #
+      # Deliberately NOT a silent skip. It emits a GitHub notice naming exactly
+      # what is missing, so "we never set this up" and "our deploy broke" stay
+      # distinguishable — the whole point of turning the red green is that red
+      # starts meaning something again.
+      #
+      # Only names are printed, never values.
+      - name: Check the deploy is configured
+        id: preflight
+        run: |
+          missing=""
+          for name in KAMAL_REGISTRY_USER STABLEMATE_SERVER_IP STABLEMATE_HOST \
+                      KAMAL_REGISTRY_PASSWORD RAILS_MASTER_KEY STABLEMATE_DATABASE_PASSWORD \
+                      STABLEMATE_SSL_CERT STABLEMATE_SSL_KEY SSH_PRIVATE_KEY KNOWN_HOSTS; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+
+          if [ -n "$missing" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Auto-deploy skipped::Not configured — set these repo Secrets/Variables to enable it:$missing"
+            echo "Auto-deploy is not configured. Missing:$missing"
+            echo "Nothing was deployed. Deploy by hand with bin/kamal deploy, or add the values above."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.preflight.outputs.ready == 'true'
 
       - name: Set up Ruby (gives us bin/kamal)
+        if: steps.preflight.outputs.ready == 'true'
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
 
       - name: Load the deploy key into ssh-agent
+        if: steps.preflight.outputs.ready == 'true'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Trust the server host key
+        if: steps.preflight.outputs.ready == 'true'
         # From a KNOWN_HOSTS secret (ssh-keyscan <ip> on your laptop, paste the
         # output) rather than scanning at deploy time — deterministic, and it
         # can't be silently poisoned by a MITM during the run.
@@ -127,6 +167,7 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: kamal deploy
+        if: steps.preflight.outputs.ready == 'true'
         # Kamal builds the amd64 image on the runner, logs in and pushes to the
         # registry itself (KAMAL_REGISTRY_PASSWORD), then rolls it out over SSH;
         # migrations run on boot.
