@@ -683,11 +683,11 @@ end
 def check_in_uri(registration_key)
   URI.join(config.endpoint, "/api/v1/monitors/#{ERB::Util.url_encode(registration_key)}/pings")
 end
-
-def ping_headers
-  { "Authorization" => "Bearer #{config.ping_key}" }
-end
 ```
+
+`ping` and `report_failure` keep their existing `rescue StandardError` — it is
+what makes the whole path fire-and-forget, and the encoder note below depends on
+it being there.
 
 Three things to pin down, because each has a wrong-looking-right answer:
 
@@ -704,8 +704,8 @@ Three things to pin down, because each has a wrong-looking-right answer:
 - **The body stays form-encoded**, as `report_failure` already sends it, so
   `status` and `message` keep working unchanged.
 - **Response classification lives in `Client#classify`**, not in
-  `Subscriber#deliver`. `classify` already owns the three-way split; the change is
-  which three states. `Subscriber#deliver` keeps only "act on what the client
+  `Subscriber#deliver`. `classify` already owns this split; the change is which
+  states it distinguishes — §6.5 defines four. `Subscriber#deliver` keeps only "act on what the client
   said", and loses `trigger_resync` entirely.
 
 `Subscriber` also sheds more than the address lookup: the `ping_urls:`, `resync:`
@@ -993,7 +993,8 @@ said content handling was "clean — truncation is unconditional in the model
 layer… Checked, not assumed." That is true of `error` and **false of `name`**:
 
 ```ruby
-# app/mailers/monitor_mailer.rb:22
+# app/mailers/monitor_mailer.rb:22 and :29 — both subjects interpolate the name
+subject = "#{monitor.name} reported an error"
 subject = "#{monitor.name} missed its check-in"
 ```
 
@@ -1160,10 +1161,12 @@ manual-path section and its manual-fallback note, and
 `docs/deploy-hetzner-cloudflare.md`'s verification `curl`. Each describes something
 that will 404.
 
-**§10 gates part of §8.** The billing decision changes whether `suspended` remains
-a status, and therefore whether the uptime rollup, the live-day stat, the check-in
-transition and the cap scope keep their special cases. Decide §10 **before** this
-work starts, not alongside it.
+**§10 does not block starting.** An earlier draft said to settle the billing
+question first. It overstates the dependency: the `suspended` status and its
+special cases in the uptime rollup, the live-day stat, the check-in transition and
+the cap scope are untouched by anything in §§3–8. The overlap is that both would
+edit `docs/specs/README.md`'s data model, which is a merge conflict rather than a
+design dependency. Decide §10 when convenient; do not stop for it.
 
 ## 12 · Test plan
 
