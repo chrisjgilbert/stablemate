@@ -377,8 +377,26 @@ Inherit `ActionController::API`, which has no forgery protection to forget;
 `ActionController::Base` would reintroduce the trap `pings_controller.rb:5-10`
 documents, invisible in the test environment. What must be reimplemented rather
 than inherited: `rescue_from ActiveRecord::RecordNotFound`, the `{"error": …}`
-response shape, and bearer-token extraction. Duplicate them deliberately and keep
-the shapes identical to `/api/v1`.
+response shape, bearer-token extraction, and — the one an implementer will miss —
+**the rate-limit responder**. Duplicate them deliberately and keep the shapes
+identical to `/api/v1`.
+
+That last one is the same class of bug as the `rescue_from` below, and it is
+reached by *omitting* code rather than writing it. `Api::V1::BaseController:48`
+holds `RATE_LIMITED = -> { render json: { error: "rate_limited" }, status:
+:too_many_requests }`, which is what makes §5.4's `429` row true; a controller
+that does not inherit `BaseController` does not have it. §5.3 specifies `by:`, the
+two ceilings and the store but no `with:`, and **Rails 8.1's default `with:` is
+`-> { raise TooManyRequests }`, not a render** — verified at
+`actionpack-8.1.3.1/lib/action_controller/metal/rate_limiting.rb:66`. An unhandled
+raise leaves the controller entirely and is dressed by `ActionDispatch::ShowExceptions`
+→ `PublicExceptions`, which answers by *request format*: a JSON request gets
+`{"status":429,"error":"Too Many Requests"}` — right status, wrong body — and a
+form-encoded request with no `Accept` header falls to `render_html`, finds no
+`public/429.html`, and returns **`429 text/html` with an empty body** (verified;
+`show_exceptions.rb:83-86`). §6.4 sends the check-in form-encoded, so that second
+branch is the one the gem actually hits. Give this controller its own copy of the
+lambda.
 
 It resolves the project from the key and reaches the monitor only through it:
 
@@ -454,9 +472,19 @@ luck.
 Two layers, and **the order matters in the opposite direction to the obvious
 one.** Declare **per-monitor first, then per-IP.**
 
-Each layer increments its own counter unconditionally, but `with:` **renders**,
-and a rendering `before_action` halts the chain — so the layer that fires first
-is the only one that charges. Put per-IP first and a runaway task's rejections
+Each layer increments its own counter unconditionally, but the over-limit
+responder **halts the filter chain** — so the layer that fires first is the only
+one that charges.
+
+Be precise about *why* it halts, because it is the responder's own doing and not
+something `rate_limit` arranges. `rate_limiting` calls `with:` and returns
+(`rate_limiting.rb:72-90`); nothing after that stops the request. Rails 8.1's
+default `with:` halts by raising `TooManyRequests`; this app's `RATE_LIMITED`
+halts by rendering. **A `with:` that neither renders nor raises does not halt** —
+a logging-only lambda would let the request through *while over the limit*, and
+charge both counters on the way. Since §5.2 requires writing a custom `with:`
+here, that is a reachable way to silently disable both layers, and the §12 test
+that asserts a `429` is what catches it. Put per-IP first and a runaway task's rejections
 are charged to the shared host-wide bucket; put per-monitor first and they stop
 at the runaway's own bucket.
 
@@ -1229,7 +1257,9 @@ design dependency. Decide §10 when convenient; do not stop for it.
   lambda reading post-authentication state, and the first case alone would pass a
   broken implementation); and **one throttled monitor must not consume another
   monitor's budget** — the layer-order bug in §5.3. Plus: an unauthenticated flood
-  is bounded.
+  is bounded. And **assert the over-limit body**, form-encoded as §6.4 sends it —
+  `429 {"error": "rate_limited"}`, not the framework default's empty `text/html`
+  (§5.2). Asserting only on the status passes a controller with no `with:` at all.
 - **Routing.** A dotted task name arrives intact, and a body-supplied
   `registration_key` cannot override the path parameter.
 - **Every response is JSON**, including a monitor that fails validation during
