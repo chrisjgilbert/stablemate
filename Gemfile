@@ -39,8 +39,28 @@ gem "kamal", require: false
 # Add HTTP asset caching/compression and X-Sendfile acceleration to Puma [https://github.com/basecamp/thruster/]
 gem "thruster", require: false
 
-# Use Active Storage variants [https://guides.rubyonrails.org/active_storage_overview.html#transforming-images]
-gem "image_processing", "~> 1.2"
+# NO image_processing, despite `rails new` putting it here — deliberate, and the
+# line is absent rather than commented so nobody has to wonder whether it was an
+# accident. Nothing in this app declares an attachment (no has_one_attached, no
+# has_many_attached, and active_storage:install was never run — the schema has no
+# active_storage_* tables), so it processed exactly zero variants.
+#
+# Dependabot proposed 1.2 → 2.0 (#6), which forced the question. From 2.0 the
+# backends are soft dependencies, but Active Storage's transformers/vips.rb still
+# requires image_processing/vips eagerly at boot whenever the gem is present and
+# variant_processor is :vips (the default under load_defaults 7.0+). Its rescue
+# only recognises LoadErrors naming `libvips` or `image_processing`, and 2.0's
+# message names neither — so the bump alone doesn't boot, it needs ruby-vips too.
+#
+# So the bump is "add a second gem to keep an unused one working". Dropping it
+# instead takes four gems out of the bundle — image_processing, mini_magick,
+# ruby-vips and ffi, the last two a native extension needing libvips on every
+# machine that runs this app, self-hosters included. Removing it boots clean,
+# because Active Storage's rescue handles the gem being ABSENT correctly; it is
+# only the present-but-backendless state it mishandles.
+#
+# Add `gem "image_processing", "~> 2.0"` and `gem "ruby-vips", "~> 2.0"` back
+# together the day something here actually needs a variant.
 
 # Hosted-tier billing (issue #19, hosted-only / config-gated). Pay wraps Stripe
 # subscription state via the pay_* tables — we don't hand-roll it. Dormant unless
