@@ -25,6 +25,8 @@ Section numbers in the left column are **`README.md`'s**; those in the right are
 | Decision #3, *"No gate on monitor creation"* | **Narrowed.** Survives only as a statement about `bin/rails stablemate:sync`. |
 | §2 Security defaults, the whole `ping_token` bullet | **Void.** Every clause — plaintext by design, the dashboard showing it, the API re-serving it, the uninformative 404, per-token rate limiting, rotation — describes surfaces this removes. |
 | §3 Data model, `Monitor` | `ping_token` and its unique index are deleted; `source` becomes constant (§3.3). |
+| §3 Data model, table set | **Gains `PingKey`** — `project_id`, `name`, `token_digest` (unique), `token_last4`, `last_used_at`, timestamps. A project may hold more than one, so rotation can overlap (§4). |
+| §2 Security defaults, the `ApiKey` bullet | **Widened**, not replaced. The same posture — hashed, constant-time compared, shown once, opaque `401` — now covers both credentials, with the addition that the API key is no longer the credential on the check-in path (§4). |
 
 Decision #5 (*"user can tighten via UI override"*) **survives, and that is
 deliberate.** Monitor *editing* is retained precisely because #5 requires it — and
@@ -224,7 +226,7 @@ name was user-authored:
 |---|---|---|
 | page the owner with chosen text | body, truncated | **subject, unbounded** |
 | durably silence alerting | no | **yes, one request, invisible** |
-| enumerate every monitor and task name | no | **yes** |
+| enumerate every monitor and task name | in bulk, no — but see §5.4 | **yes, one request** |
 | rewrite name / interval / grace everywhere | no | **yes** |
 | emit a "recovered" email | yes | no |
 | write ping-event rows | yes | no |
@@ -279,6 +281,13 @@ interface never displays it.
 up across the whole table, so one table means a ping key authenticates the
 management API unless every lookup remembers to filter — and forgetting is silent
 and permissive. Two tables make the mistake impossible rather than discouraged.
+
+**Rotation needs more than one live key**, which is why this is a table rather
+than a column on `projects`. The procedure is: issue a second key, deploy it,
+watch the first key's `last_used_at` stop moving, revoke it. Because you add
+before you remove, nothing breaks in between — and that is also what makes
+shown-once affordable, since a lost key has a cheap remedy. §9.4's guard must
+account for the window where two are live.
 
 **Share the hashing, not the lookup.** Extract `digest(raw)` only. If the shared
 module also owns the lookup and anyone writes `ApiKey.find_by(...)` inside it —
@@ -417,11 +426,15 @@ luck.
 Two layers, and **the order matters in the opposite direction to the obvious
 one.** Declare **per-monitor first, then per-IP.**
 
-Rails' limiter increments its counter unconditionally and the layers run in
-declaration order, so a request already rejected by one layer still burns the
-next one's budget. With per-IP first, a single runaway task exhausts the
-host-wide bucket and throttles every other monitor on that host — measured: a
-healthy monitor got 429 under per-IP-first and 200 under the reverse.
+Each layer increments its own counter unconditionally, but `with:` **renders**,
+and a rendering `before_action` halts the chain — so the layer that fires first
+is the only one that charges. Put per-IP first and a runaway task's rejections
+are charged to the shared host-wide bucket; put per-monitor first and they stop
+at the runaway's own bucket.
+
+Measured, one runaway task and one healthy task under the same key: per-monitor
+first, the healthy task got 200 and the per-IP counter reached 4; per-IP first,
+the healthy task got 429 and the per-IP counter reached 11.
 
 A per-IP layer is still required, because without it there is no
 pre-authentication bound at all: the per-monitor key is attacker-chosen on both
@@ -720,11 +733,6 @@ snippet above does. The railtie already uses the latter shape.
 host's job**. The gem's "nothing may propagate into the host" guarantee is
 currently enforced only on the dispatch side.
 
-Name the encoder: **`ERB::Util.url_encode`**. `CGI.escape` and
-`URI.encode_www_form_component` turn a space into `+`, which decodes as a literal
-`+` in a path segment — so a task named `"my task"` would 404 forever while §5.1's
-route table passed, because none of its examples contain a space.
-
 ## 7 · What the user journey becomes
 
 **There is no browser-only path to seeing the product work.** Sign up, and the
@@ -749,7 +757,10 @@ rewritten in the same change:
 
 **`db/seeds.rb` creates a manual monitor with no task name and prints a ping URL
 for a deleted route.** It is the documented walking-skeleton path, so it must
-become: create a project, issue an API key, print the `stablemate:sync` invocation.
+become: create a project, issue **both** an API key and a ping key, and print the
+`stablemate:sync` invocation alongside a ready-to-paste check-in command. Issuing
+only the API key would seed a skeleton that can register a monitor and never check
+one in — the permanently-grey-row failure this same section warns about.
 
 **The monitor detail page** loses the ping-URL card entirely — that is the whole
 of `_ping_setup.html.erb`, rendered for every monitor, not only ones awaiting
@@ -777,7 +788,7 @@ Measured, not estimated.
 | `registration_key` backfill migration | ~40 |
 | `PingKey` model, issuance, controller, views, migration, project-page wiring | ~200 |
 | Never-checked-in alert: scope, job, mailer, notification cause, copy (§9.1) | ~120 |
-| **Server subtotal** | **~735** |
+| **Server subtotal** | **~855** |
 | Gem deletions (§3.2) | ~110 |
 | **Tests broken by UI removal** | ~393 across 15 files, 4 deleted whole |
 | **Tests broken by the check-in move** | ~647 across 9 files, 3 deleted whole |
@@ -816,9 +827,11 @@ A wrong key, DNS failure, blocked egress, a rate limit — in every case the ser
 sees silence and the email says the job "missed its check-in". Three signals,
 cheapest first:
 
-- **The API key already records when it was last used**, on every registration —
-  and nothing reads it. *"This app registered three minutes ago but no monitor has
-  reported for an hour"* is a positive statement with no false positives.
+- **The API key already records when it was last used**, on every registration.
+  Today the only reader is a "Last used" column in the project view; nothing acts
+  on it. *"This app registered within the hour but no monitor has reported for
+  longer"* is a positive statement with no false positives. Phrase the threshold
+  in hours, not minutes — §5.2 coarsens that write to five-minute granularity.
 - **Alert on monitors that have never checked in. This one is IN scope** — see
   §7 for why, §8 for its budget and §11 for its test. It sits here because it
   belongs with its siblings, not because it is deferred. The threshold must be
@@ -879,13 +892,14 @@ go to B; A's monitors go down permanently and every symptom reads "your job is
 down". This mistake is impossible with one credential and permanent with two, so
 it needs a permanent guard.
 
-Registration returns the last four characters of the project's ping key, and the
-gem logs loudly at startup when the configured key does not match. No escalation —
+Registration returns the last four characters of **every live ping key** for the
+project, and the gem logs loudly at startup when the configured key matches none
+of them. No escalation —
 an API key can already list every monitor in its project.
 
-**Return a set, not a value.** §4's rotation procedure deliberately keeps two keys
-live at once, so a guard comparing against "the project's ping key" would fire a
-false alarm during exactly the operation it is meant to support.
+**A set, not a value** — §4's rotation procedure deliberately keeps two keys live
+at once, so a guard comparing against a single key would fire a false alarm during
+exactly the operation it is meant to support.
 
 ### 9.5 A pre-existing bug in the sync path
 
@@ -986,6 +1000,8 @@ scope; if it stays, it should be because the price is about to be set.
 - **Gem: unlisted job classes never report**, and a task with an underivable
   schedule never reports.
 - **Gem: a `c.monitors` key matching a host job class name never binds to it.**
-- **Gem: boot with no API key** — one error line, listener not attached, app still
-  boots. **And with a broken `recurring.yml`** — one error line, app still boots.
+- **Gem: boot with no ping key** — one error line, listener not attached, app
+  still boots. **With a ping key and no API key** — listener *is* attached and
+  check-ins work, since boot no longer needs the API key (§6.5). **With a broken
+  `recurring.yml`** — one error line, app still boots.
 - **Gem: `401` and `404` handled differently**, each logged once.
