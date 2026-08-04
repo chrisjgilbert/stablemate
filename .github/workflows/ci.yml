@@ -87,22 +87,13 @@ jobs:
         timeout-minutes: 5
 
       - name: Run CI (bin/ci)
-        # Point Cuprite at the binary the step above installed rather than
-        # letting it guess from PATH; the tiers it falls back to live in
-        # test/application_system_test_case.rb.
-        #
-        # Then fail loudly if that binary never arrived. The fallback exists for
-        # the sandbox and for laptops, and on a runner it would quietly hand the
-        # suite whatever Chrome the image happens to ship — voiding the version
-        # pinned above with a green check and no signal. A pin you can't detect
-        # losing isn't a pin.
+        # Point Cuprite at the binary the step above installed rather than letting
+        # it guess from PATH. The system suite REFUSES to run under CI without
+        # this (see test/application_system_test_case.rb) — the check lives there
+        # so every CI entry point inherits it, rather than guarding this one shell.
         env:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
-          if [ -z "$CHROMIUM_PATH" ]; then
-            echo "::error title=No browser::setup-chrome reported no chrome-path; refusing to run the system suite against an unpinned browser."
-            exit 1
-          fi
           chmod +x bin/ci
           bin/ci
         timeout-minutes: 15

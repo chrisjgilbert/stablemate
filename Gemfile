@@ -16,8 +16,11 @@ gem "turbo-rails"
 gem "stimulus-rails"
 # Tailwind CSS, the project's styling framework [https://github.com/rails/tailwindcss-rails]
 gem "tailwindcss-rails"
-# Build JSON APIs with ease [https://github.com/rails/jbuilder]
-gem "jbuilder"
+# NO jbuilder, despite `rails new` including it. There is not one .jbuilder
+# template here — /api/v1 and the ping endpoint all `render json:` a plain Hash,
+# which is the whole of our JSON surface. Removed for dependency hygiene (one
+# less gem to audit, bump and cache), not for speed: it was ~4ms of boot, below
+# measurement noise.
 
 # Use Active Model has_secure_password [https://guides.rubyonrails.org/active_model_basics.html#securepassword]
 gem "bcrypt", "~> 3.1.7"

@@ -34,6 +34,7 @@ boxes here → next chunk.
 | 3 | Findings follow-ups + Honeybadger secret move | launch-findings tail | **MERGED** | #67 |
 | 4 | Dependabot backlog | WS-B | **MERGED** | #70 |
 | 5 | Chunk 4 follow-ups — Action SHA pins, drop `rails/all`, driver convention | — | **MERGED** | #72 |
+| 6 | Chunk 5 review follow-ups — dead Pay setting, boot-order coupling, pin guard | — | **IN REVIEW** | — |
 
 Deliberately **not** in these chunks: WS-E (publishing the gem needs an
 MFA'd RubyGems account — owner action, though the repo-side prep can ride in a
@@ -190,8 +191,16 @@ Two things worth remembering from this chunk:
       `Pay.support_email=`, which needs `::Mail::Address`. Action Mailer only
       requires `mail` from `eager_load!`, so the constant was present only
       because `rails/all` loaded Action Mailbox. Dropping that framework turned
-      an undeclared dependency into a **test-env boot failure** — development
-      was masked by `letter_opener`. The initializer now requires `mail` itself.
+      an undeclared dependency into a **test-env boot failure**, fixed at the
+      time with a `require "mail"`.
+      **Correction (chunk 6):** this entry originally said development was
+      masked by `letter_opener`. It wasn't — `letter_opener` never loads Mail
+      (verified in isolation). Development survived because
+      `mail_interceptor.rb` referenced `ActionMailer::Base` at initializer-load
+      time, and `action_mailer/base.rb` opens with `require "mail"`; initializers
+      load alphabetically, so `mail_interceptor` ran before `pay`. Its
+      registration is guarded `unless production? || test?`, which is exactly why
+      only test broke. Chunk 6 removed both ends — see its entry.
 - [x] **Driver convention reconciled toward the code.** CLAUDE.md preferred
       `driven_by :selenium` with Cuprite as the sandbox fallback; the code has
       always used Cuprite unconditionally, and Cuprite runs green on
@@ -210,6 +219,105 @@ Two things worth remembering from this chunk:
 > app code reaches the dropped frameworks, no mailer attachments, no other
 > undeclared-constant sites, no stale references repo-wide. The efficiency and
 > altitude angles produced nothing. Worth a re-run for parity.
+
+### Chunk 6 — the chunk 5 review follow-ups
+The three review passes that died on a session limit during chunk 5 were re-run
+against the merged diff. What they found:
+
+- [x] **`Pay.support_email` deleted — it was dead *and* latently wrong.** Pay
+      resolves its from-address as
+      `Pay.support_email || ::ApplicationMailer.default_params[:from]`, so setting
+      it doesn't add an address, it **overrides** ours — with a literal
+      `support@stablemate.dev` that a self-hoster doesn't own. Both readers are
+      unreachable today (`send_emails = false`; nothing calls `Pay::Receipts`),
+      so it was dormant — but the initializer documents how to switch those
+      emails on in one line. Deleting it also removed the `require "mail"` chunk 5
+      added, at its source. `MailFromTest` pins it.
+- [x] **Boot-order coupling removed.** `mail_interceptor.rb` referenced
+      `ActionMailer::Base` at initializer-load time, which runs
+      `require "mail"` as a side effect — the accident that masked the pay.rb bug
+      in development. Now `ActiveSupport.on_load(:action_mailer)`, matching its
+      sibling `mail_delivery_retries.rb`.
+- [x] **Development is boot-tested.** Test boots on every run and
+      `ProductionEnvConfigTest` boots production, but development — the only
+      environment where `NonProdMailGuard` actually registers — had no cover.
+- [x] **The SHA pins have a guard, not just a comment.** `WorkflowPinsTest`
+      asserts every third-party `uses:` is a 40-hex commit pin carrying a
+      `# v…` comment. Offline, so it runs wherever `bin/ci` does. It can't tell
+      you a SHA is the *wrong* commit, but it catches an unpinned action and a
+      pin with no readable version — and it exists because the prose comment
+      alone already failed once (see the chunk 5 entry).
+- [x] **The CI browser invariant moved into the file that owns the tiers.**
+      `application_system_test_case.rb` now refuses to run under `CI` without an
+      explicit `CHROMIUM_PATH`, so every CI entry point inherits it — instead of
+      a shell test on one workflow step, which also wrongly failed the docs-only
+      state the workflow's own header promises stays green.
+- [x] **`bin/rails app:update` recorded** in `config/application.rb`: with
+      `rails/all` a new framework arrived free; naming them means a Rails that
+      adds one leaves us silently without it, and `app:update` is the mechanism
+      that re-derives the skips.
+- [x] Review → `/simplify` → `/verify` → CI → PR → merge
+
+The efficiency pass found two things worth real money:
+
+- [x] **The Stripe SDK no longer eager-loads into a keyless instance.** stripe's
+      railtie does `config.eager_load_namespaces << Stripe` unconditionally, so a
+      production boot pulled in all **1039** of its files — including on the
+      self-host default, where `enabled_processors` is empty, the `Billing::`
+      routes 404, and no code path can reach a Stripe constant. Measured:
+      **3694ms → 3345ms** per boot and **−34MB RSS**, 1039 → 44 files. Gated in
+      `config/initializers/pay.rb`; `StripeEagerLoadTest` asserts **both**
+      directions, because dropping it when keys ARE present would be worse than
+      the waste — Stripe's resources are plain autoloads, so a forked Puma worker
+      would resolve them per-worker instead of once, pre-fork and COW-shared.
+      Note `gem "stripe", require: false` is **not** an alternative: Pay never
+      requires the SDK itself, so that breaks the hosted instance outright.
+- [x] **`bin/ci` stopped re-installing the companion gem's bundle every run.**
+      `gem/Gemfile.lock` is gitignored, so `bundle check` could never succeed and
+      every CI run fell through to a full resolve against rubygems.org — outside
+      setup-ruby's cache, which is keyed on the *app's* lockfile. From the Actions
+      logs that was **~26–28s of a ~110s `bin/ci` step**, more than `rails test`
+      or `rails test:system`, spent re-fetching gems already on disk (the suite
+      runs on the plain load path, and all five deps ship in the app's bundle —
+      fugit via solid_queue, the rest via rails). Now probes whether they *load*
+      and installs only if not. Still fails closed.
+- [x] **`jbuilder` dropped** — not one `.jbuilder` template exists; the whole JSON
+      surface is `render json:` of a Hash. Hygiene, not speed: ~4ms, below noise.
+
+Measured and deliberately **not** actioned:
+- **honeybadger loads in dev/test** (~27ms, 3 Rack middlewares) where
+  `development_environments` already stops it reporting. Making it `require:
+  false` would cost `Honeybadger.notify` as a dev no-op and break
+  `honeybadger_filtering_test.rb`. Not worth 27ms once per suite run.
+- **`rails/test_unit/railtie` in production** (~17ms probe ceiling, pulls in
+  prism). Wall-clock was inconclusive against ±50ms noise, and gating it costs
+  `bin/rails test` under `RAILS_ENV=production`. Only worth it if boot is being
+  attacked systematically.
+- **`setup-chrome` is ~6s/run**, not the ~9s previously assumed — 4% of the job,
+  and the price of a pinned browser. Keep.
+
+The correctness re-run found **no defects** (pristine worktree; every test file
+run in isolation and mixed both orders; all three environments booted including
+production with `eager_load`; `zeitwerk:check`; `assets:precompile`; a real
+development Puma server serving every page, since development is the environment
+CI never exercises). Two things it surfaced that are not defects but are worth
+knowing:
+
+- **Dropping Action Mailbox incidentally closed a live hole.** Its *conductor*
+  routes — `/rails/conductor/action_mailbox/*`, which include unauthenticated
+  `POST`s for injecting inbound email — were being drawn **in production**, purely
+  because `rails/all` loaded the engine. Verified: 0 such routes now, and the
+  parent commit did use `rails/all`. Nobody was routing mail there, so nothing was
+  exploitable end-to-end, but the endpoints existed and no longer do.
+- **One silent behavioural carry-over.** `ActionView::Helpers::FormHelper
+  .multiple_file_field_include_hidden` flips `true` → `false` in eager-loaded
+  environments, because the `action_view.configuration` initializer that sets it
+  lives inside `activestorage/engine.rb`. Inert here — there is no `file_field`
+  anywhere in `app/` — but it is the one thing the removal changes that isn't
+  obviously about Active Storage.
+- `active_model/railtie` in the explicit list is **redundant but harmless**:
+  `activerecord/railtie.rb` already requires it, so registration order is
+  unchanged.
 
 > **Review note (2026-08-01).** An adversarial pressure-test pass verified every
 > file/behaviour claim in this spec against the code and the installed gems.

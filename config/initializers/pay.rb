@@ -13,11 +13,6 @@
 # available here. stablemate.rb self-guards against the redundant second load.
 require_relative "stablemate"
 
-# `Pay.support_email=` below wraps its argument in ::Mail::Address, and Action
-# Mailer only requires "mail" from eager_load! — which development and test don't
-# do. Ask for it rather than inherit it from a framework we don't load.
-require "mail"
-
 # Hand Stripe its keys from our single config-gate source. Pay has no key
 # setters — `Pay::Stripe.public_key/private_key/signing_secret` are *readers* that
 # resolve via `find_value_by_name(:stripe, …)`, i.e. ENV["STRIPE_PUBLIC_KEY"] /
@@ -52,7 +47,11 @@ Pay.automount_routes = false
 
 Pay.setup do |config|
   config.application_name = "Stablemate"
-  config.support_email = "support@stablemate.dev"
+  # NO support_email. Pay resolves its from-address as
+  # `Pay.support_email || ::ApplicationMailer.default_params[:from]`, so setting
+  # it here doesn't add an address — it OVERRIDES ours, with a literal domain a
+  # self-hoster doesn't own. Leaving it unset makes Pay follow
+  # STABLEMATE_MAIL_FROM like every other mailer (MailFromTest pins this).
 
   # We have exactly one paid product — Pro. Naming every subscription "pro" lets
   # User::Subscription#subscribed_to_pro? ask Pay a single, plan-agnostic question.
@@ -81,4 +80,23 @@ Pay.setup do |config|
   # processor and the billing surface stays dormant. Pay::Stripe.setup reads the
   # keys bridged above and sets ::Stripe.api_key itself.
   config.enabled_processors = Stablemate.billing_enabled? ? %i[stripe] : []
+end
+
+# Don't eager-load the Stripe SDK into a keyless instance.
+#
+# stripe's railtie does `config.eager_load_namespaces << Stripe` unconditionally,
+# so production eager-loads all 1039 of its files on every boot — including the
+# self-host default, where `enabled_processors` is empty, the Billing:: routes
+# 404, and nothing can reach a Stripe constant. Measured on a keyless production
+# boot: ~320ms and ~34MB RSS for code that is never called.
+#
+# Keep the eager load when keys ARE present: Stripe's resources are plain
+# autoloads, and resolving them lazily inside a forked Puma worker would pay the
+# cost per worker rather than once, pre-fork and copy-on-write shared.
+#
+# NOT `gem "stripe", require: false` — Pay never requires the SDK itself
+# (`grep -rn 'require "stripe"'` in pay is empty); it relies on Bundler.require,
+# so that would break the hosted instance outright.
+unless Stablemate.billing_enabled?
+  Rails.application.config.eager_load_namespaces.delete(Stripe)
 end
