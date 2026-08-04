@@ -28,11 +28,16 @@ Section numbers in the left column are **`README.md`'s**; those in the right are
 | §3 Data model, table set | **Gains `PingKey`** — `project_id`, `name`, `token_digest` (unique), `token_last4`, `last_used_at`, timestamps. A project may hold more than one, so rotation can overlap (§4). |
 | §2 Security defaults, the `ApiKey` bullet | **Widened**, not replaced. The same handling — hashed, constant-time compared, shown once, uninformative `401` — now covers both credentials, with the addition that the API key is no longer the credential on the check-in path (§4). |
 
-Decision #5 (*"user can tighten via UI override"*) **survives, and that is
-deliberate.** Monitor *editing* is retained precisely because #5 requires it — and
-it is why the `last_synced_*` columns and `gem_may_write?` must stay (§3.1). A
-later "finish the job, delete the whole controller" cleanup would silently break a
-locked decision.
+Decision #5 (*"user can tighten via UI override"*) is **amended: the capability
+survives, its home moves.** Tightening a monitor is still a first-class act, but
+it is done in config (`c.overrides`, §3.1) and applied by `stablemate:sync`, not
+in a web form. An earlier revision of this document kept UI editing *because* #5
+requires the capability — that reasoning conflated the capability with its
+location. Moving it into the repo is what lets monitor config have exactly one
+writer, which deletes the `last_synced_*` settings memory and `gem_may_write?`
+outright (§3.1) instead of preserving arbitration machinery whose only job was
+refereeing between two writers. The change your override protects lands in the
+same commit as the schedule it overrides.
 
 Two pre-existing errors in that data model are worth fixing while editing it: the
 `Monitor` block omits six shipped columns, and lists the status vocabulary without
@@ -55,8 +60,12 @@ After this work:
   POST /api/v1/monitors/{registration_key}/pings
   Authorization: Bearer sm_ping_…
   ```
-- **The web interface is for looking, and for the three things only a human
-  decides:** overriding a schedule, pausing, and deleting.
+- **Monitor configuration is code.** Schedules come from `recurring.yml`,
+  non-Rails monitors and interval overrides from `Stablemate.configure` — and
+  nothing else writes config. The web interface is a dashboard plus the two
+  *operational* actions only a human decides in the moment: pausing and
+  deleting. The line: if it describes how the job *should* behave, it lives in
+  the repo; if it's about what is happening *now*, it lives in the UI.
 
 What that costs is stated plainly in §7. The largest remaining question — whether
 billing belongs in V1 at all — is §10, and is not decided here.
@@ -100,10 +109,11 @@ Two related defects, both confirmed by booting a real app against the railtie:
 
 ## 3 · The three changes
 
-### 3.1 Registration becomes a command
+### 3.1 Registration becomes a command, and config becomes code
 
 `bin/rails stablemate:sync` already reads `recurring.yml`, builds tuples and posts
-them. It becomes the only registrar. The railtie stops registering.
+them. It becomes the only registrar — and, with §3.3 removing the edit form, the
+**only writer of monitor config at all**. The railtie stops registering.
 
 Monitors that are not Rails jobs are declared in the same place, so they go
 through the same command:
@@ -112,12 +122,57 @@ through the same command:
 c.monitors = { "pg_backup" => { interval: 1.day, grace: 2.hours } }
 ```
 
-**What does not change:** the `last_synced_name` /
+**Overrides are declared beside them, and they are not optional polish.** The
+derived interval is the *largest* gap between consecutive runs, so a weekday-only
+`0 9 * * 1-5` derives 72 hours (Friday → Monday; measured with Fugit). Correct by
+construction — anything tighter false-alarms every weekend — and useless for the
+user who wants to know on Tuesday. With UI editing gone this is the only remedy,
+so it ships in the same change:
+
+```ruby
+c.overrides = { "weekday_report" => { interval: 26.hours } }
+```
+
+The rules, each of which has a wrong-looking-right alternative. Overrides accept
+`interval:` and `grace:`, integer seconds allowed for the same plain-Ruby-host
+reason `c.monitors` allows them (§6.3). They apply to *derived* tasks only — an
+override on a `c.monitors` key is a config error, because you would simply edit
+the declaration. And **an override key matching no derived task fails the whole
+run, exit non-zero, before any request is made.** A typo'd key silently ignored
+means the weekday job keeps its 72-hour window — the exact failure overrides
+exist to close — and half-applying the rest would make the failure ambiguous.
+
+**What this deletes — and an earlier revision of this section said the exact
+opposite, so the reversal needs spelling out.** The `last_synced_name` /
 `last_synced_expected_interval_seconds` / `last_synced_grace_period_seconds`
-columns and `gem_may_write?`. Their comment blames boot sync, and the tempting
-inference is that a deliberate command makes them unnecessary. It does not — the
-command belongs in a deploy script, so it still runs on every deploy, and a
-setting tightened by hand must still survive it. Locked decision #5 depends on it.
+columns and `gem_may_write?` existed to answer one question: *when the sync and a
+hand-edit disagree, whose value is it?* With no hand-edits the question has no
+second party. The sync writes the three settings unconditionally; the ~70 lines of
+arbitration (`GEM_SETTINGS`, `gem_settings`, `gem_may_write?`,
+`monitor_sync.rb:157-226`), the three columns, their migration, and the ten tests
+pinning the arbitration (`monitor_sync_test.rb:279-431`, "a re-sync preserves the
+settings the user changed in the UI" through "a preserved interval leaves
+next_due_at on the user's cadence") all go. So does the "KNOWN LIMIT" coin-flip
+documented in `gem_may_write?` — a real bug class deleted, not resolved.
+
+Two things that look like part of this deletion and are not. **`last_synced_app`
+stays** — it feeds cross-app conflict detection (`monitor_sync.rb:140-147`,
+`diverging_app?`), which has nothing to do with settings arbitration; "delete the
+`last_synced_*` columns" over-deletes by one. And the
+`before_update :recompute_next_due_at` callback stays — sync and console still
+edit intervals; only its comment's mention of the form needs updating.
+
+One property this buys: **recovery from config poisoning becomes unconditional.**
+§4's headline attack writes a 68-year interval via the sync endpoint. Under
+arbitration, re-running `stablemate:sync` *usually* fixed it — the attacker's
+request updates the remembered column too, so the correction passes
+`gem_may_write?` — but the KNOWN-LIMIT branch could refuse it forever: a monitor
+whose stored value and memory already disagreed (nil-remembered history, exactly
+the coin-flip case the comment documents) rejects an unchanged payload on every
+sync, and the documented escape hatch was the UI edit this spec deletes.
+Always-write has no refusing branch: `bin/rails stablemate:sync` restores
+whatever the repo says, every time. The repo is the source of truth, so the repo
+is also the recovery path.
 
 ### 3.2 Check-ins are addressed locally and authenticated by header
 
@@ -151,13 +206,23 @@ it. This is the gem's only state shared between threads, and most of its hard
 reasoning: an immutable snapshot swapped under a lock, readers guaranteed never to
 block, re-fetches throttled against a clock that cannot run backwards.
 
-### 3.3 Monitor creation leaves the web interface
+### 3.3 Monitor configuration leaves the web interface
+
+Creation *and* editing go together — an earlier revision removed only creation and
+kept editing for decision #5, which §0 now amends. Keeping the edit form would
+keep the two-writer problem the rest of this document works to delete.
 
 The create path goes: `MonitorsController#new` and `#create`, `resolve_project`,
 `load_projects`, `new.html.erb`, and the six `new_monitor_path` references — five
-links plus `ProjectsController#after_create_path`. Editing stays (decision #5), and
-`_form.html.erb` and `_preset_field.html.erb` are shared with it, so they stay —
-though the form's project selector at `:4-14` is create-only and goes.
+links plus `ProjectsController#after_create_path`. The edit path goes with it:
+`#edit` and `#update`, `monitor_params`, `edit.html.erb` (7 lines),
+`_form.html.erb` (42) and `_preset_field.html.erb` (26) whole — nothing else
+renders them once edit is gone — and the Edit link at `show.html.erb:36`. The
+route narrows to `resources :monitors, only: %i[index show destroy]` plus the
+pause sub-resource. What the show page renders in the form's place is read-only
+config with its source named — "Defined in your repo · registered by
+`stablemate:sync`" — so a user looking for the vanished Edit button is told where
+the knob went (§11 bounds what that provenance note may claim).
 
 With one creator, these become unreachable rather than merely unused:
 
@@ -200,9 +265,12 @@ key is the top rung.**
 
 **An API key can durably silence alerting with one request.** `POST
 /api/v1/monitors/sync` may rewrite `expected_interval_seconds` on an existing
-monitor — `sync_params` permits it, `valid_shape?` checks only `positive?`, the
-model validates only `greater_than: 0`, and `gem_may_write?` allows any value
-differing from what the gem last sent. Observed: `3600 → 2_147_483_647`, HTTP 200.
+monitor — `sync_params` permits it, `valid_shape?` checks only `positive?`, and
+the model validates only `greater_than: 0`. Observed: `3600 → 2_147_483_647`,
+HTTP 200. (Measured through `gem_may_write?`, which allowed any value differing
+from what the gem last sent; §3.1 deletes that guard and writes unconditionally,
+which changes nothing about this attack — the attacker's value passed the guard
+anyway — but see §3.1 for what it changes about *recovery*.)
 And `before_update :recompute_next_due_at` fires on the sync itself, so the
 monitor's next due date moves to 2094 **immediately** — no follow-up check-in
 needed, nothing visible, one request.
@@ -571,7 +639,9 @@ cost rather than claiming it leaks nothing.
 
 ### 6.1 The command
 
-`bin/rails stablemate:sync` gains three things.
+`bin/rails stablemate:sync` is now the management surface for monitor config —
+§3.1 makes it the only writer — so its output is product, not plumbing. It gains
+six things.
 
 **It must exit non-zero when it registers nothing.** Today it exits 0 four ways,
 two without making an HTTP request at all: `recurring.yml` missing, the
@@ -598,6 +668,50 @@ never been a per-run count. Return a result carrying both a count and the
 `skipped` reasons, since §12 requires printing them. Two traps: `{}` is truthy, so
 a `nil`-returning replacement flips "synced 0" into a failure message; and
 `0.size` is `8`, so `.size` must be removed, not just re-pointed.
+
+**It must show its derivation, per task.** The interval is computed from the
+schedule by a rule (§3.1's largest-gap) that surprises exactly when it matters.
+One line per task, naming the number *and where it came from*, makes the
+72-hour weekday window visible at the moment the user can still fix it — half
+the overrides people need become obvious the moment they see this line:
+
+```
+✓ reports.daily      every 24h  (derived from '0 9 * * *')
+✓ weekday_report     every 26h  (override — derived 72h from '0 9 * * 1-5')
+✓ pg_backup          every 24h  (declared in c.monitors)
+✗ db_backup          skipped: command task, no class: to observe
+!  2 monitors on the server match no task here: old_report, legacy_sync
+   (kept and still monitored — delete them in the dashboard, or restore the task)
+synced 3 for environment 'production'.
+```
+
+The shape is binding, the glyphs are not. Success lines carry the derivation,
+skips carry the server's or registrar's reason, and the run ends with the §12
+count. A run applying overrides names them inline rather than in a separate
+block, so the line a user scans for a task is the whole story for that task.
+
+**It must report orphans, and must not delete them.** An orphan is a monitor the
+sync's own project holds that matches no task in this run — the task was renamed
+or removed from `recurring.yml`. The server computes the list (it is the only
+party that sees both sides) and returns it in the sync response envelope,
+alongside `monitors` and `skipped`; the CLI prints it as above. Three boundaries,
+each load-bearing:
+
+- **Orphan candidates are `source: "gem"` rows whose `last_synced_app` matches
+  this run's `app` and whose `registration_key` is not in the payload.** The app
+  match is what stops two apps syncing distinct task sets into one project from
+  orphaning each other's monitors on every run; the source check keeps the §8
+  `manual-<id>` backfill rows out permanently.
+- **Reported, never pruned.** An orphaned monitor keeps monitoring — its pings
+  stopping and it going down is *correct*, the job stopped existing. Removal is
+  the UI's delete button (an operational act, §3.3). No `--prune` in V1: it
+  would need a delete route the API deliberately lacks, and auto-prune's failure
+  mode — a broken `recurring.yml` parses to zero tasks and deletes every
+  monitor — is the incident this document exists to end. (The four
+  register-nothing paths already exit non-zero before any request, so an empty
+  parse can't even *report* orphans, let alone act on them.)
+- **Renames look like an add plus an orphan**, because the key is the identity.
+  The output above makes that legible without special-casing it.
 
 ### 6.2 Where it runs
 
@@ -899,15 +1013,21 @@ Measured, not estimated.
 | Area | Scale |
 |---|---|
 | Create path (controller, view, six references, form selector) | ~110 lines |
+| Edit path (`#edit`/`#update`, `monitor_params`, `edit.html.erb` 7 + `_form` 42 + `_preset_field` 26, show-page link, route narrowing) | ~90 |
+| Sync arbitration deletion (`gem_may_write?`, `GEM_SETTINGS`, `gem_settings` — `monitor_sync.rb:157-226` — three columns + drop migration) | ~80 removed |
+| Read-only config panel replacing the form on `show` | ~15 |
 | Transfer cascade | ~92 |
 | Provenance chip + `source` + migration | ~43 |
 | Ping-token surface (`_ping_setup`, both rotation controllers, the concern, `PingsController`, helpers, routes, serializers) | ~250 |
 | `registration_key` backfill migration | ~40 |
 | `PingKey` model, issuance, controller, views, migration, project-page wiring | ~200 |
 | Never-checked-in alert: scope, job, mailer, notification cause, copy (§9.1) | ~120 |
-| **Server subtotal** | **~855** |
+| Orphan computation in the sync response (§6.1) | ~25 |
+| **Server subtotal** | **~1,065** |
 | Gem deletions (§3.2) | ~100 |
+| Gem additions: `c.overrides` (validation, application to tuples) + derivation/orphan output (§6.1) | ~70 |
 | **Tests broken by UI removal** | ~393 across 15 files, 4 deleted whole |
+| **Tests broken by the edit/arbitration removal** | 5 of 27 in `monitors_controller_test.rb`, the edit half of `monitor_edit_delete_test.rb`, 10 arbitration tests in `monitor_sync_test.rb:279-431` |
 | **Tests broken by the check-in move** | ~647 across 9 files, 3 deleted whole |
 | **Gem suite** | 48 of 94 tests error under the deletions |
 
@@ -979,10 +1099,12 @@ still exists:
   `daily_digest`; the next `stablemate:sync` then **adopts it** instead of
   creating its own. Reproduced: what is two monitors today becomes one, fed by
   both a shell cron and a Rails job — so killing the shell script leaves the
-  monitor green, which is exactly the failure §6.3 forbids elsewhere. It also
-  inherits the manual interval, because `gem_may_write?` refuses on a first sync
-  where nothing was last sent, so a fifteen-minute job silently keeps an hour-long
-  window.
+  monitor green, which is exactly the failure §6.3 forbids elsewhere. (When this
+  was reproduced, `gem_may_write?` also made the adopted monitor keep its manual
+  interval; under §3.1's always-write the sync overwrites it instead. The
+  interval detail flips, the load-bearing hazard doesn't — either way one monitor
+  now describes the Rails job, and the shell cron it was created to watch is
+  unmonitored.)
 
   So **backfill into a namespace the gem does not derive from job names** —
   `manual-<id>` — rather than deriving from the name. A name-derived key is only
@@ -1247,6 +1369,27 @@ manual-path section and its manual-fallback note, and
 `docs/deploy-hetzner-cloudflare.md`'s verification `curl`. Each describes something
 that will 404.
 
+**What the show page's provenance note may claim.** §3.3's read-only panel says
+"defined in your repo" — it must not try to say *where* in the repo. The server
+receives derived interval seconds, never the schedule string, so it cannot
+render "derived from `0 9 * * *`" without a new payload field and column bought
+for a caption. The cron-string provenance lives in the CLI output (§6.1), which
+has the string; the UI names the mechanism (`stablemate:sync`, the syncing app —
+`last_synced_app` is already stored) and stops there.
+
+**A deploy-time "preview ping" was considered and rejected — do not resurrect it
+as a quick onboarding win.** Sending a synthetic check-in per monitor after sync
+would assert the job ran when it never has: it flips `pending → up` (a green
+dashboard for a job that may be broken from day one), erases the never-checked-in
+state §9.1's alert exists to catch, and — run against a monitor that is down —
+executes `CheckIn#recover`, closing a real incident and emailing "back up"
+(`incident.rb:28` makes that permanent). It also proves the wrong path: §6.2's
+hooks run on the deploying machine, so a preview exercises the laptop's network,
+not the worker's. The honest versions of the two needs it serves: a verify
+endpoint that authenticates the ping key without recording anything, and
+`pending` rendered as a designed state ("expecting its first check-in within
+24h") with §9.1 as the safety net. The first real ping is the demo.
+
 **§10 does not block starting.** An earlier draft said to settle the billing
 question first. It overstates the dependency: the `suspended` status and its
 special cases in the uptime rollup, the live-day stat, the check-in transition and
@@ -1256,8 +1399,23 @@ design dependency. Decide §10 when convenient; do not stop for it.
 
 ## 12 · Test plan
 
-- **Browser: the monitor lifecycle without creation.** A registered monitor can be
-  edited, paused and deleted; the create route is gone.
+- **Browser: the monitor lifecycle without a form.** A registered monitor can be
+  paused and deleted; the create and edit routes are both gone; the detail page
+  shows interval and grace read-only with their source named (§3.3).
+- **Config round-trips through sync alone.** Change an interval in the payload,
+  sync, the monitor has it — then send the original, sync, it's back. This is
+  the always-write behaviour that replaces the ten arbitration tests
+  (`monitor_sync_test.rb:279-431`), and it is also the §3.1 recovery property:
+  removing an override must restore the derived value on the next sync, with no
+  refusing branch.
+- **An unknown override key aborts the run** — exit non-zero, nothing synced, the
+  key named — and an override on a `c.monitors` key is the same config error
+  (§3.1).
+- **Orphans are reported, never deleted (§6.1).** Remove a task, sync: the
+  monitor is named in the output and still monitored. Two apps syncing disjoint
+  task sets into one project must not orphan each other (the `last_synced_app`
+  match), and a backfilled `manual-<id>` monitor never appears (the `source`
+  check).
 - **The detection sweep survives one bad record (§9.3).** A monitor that fails
   validation must not stop `DetectMissedPingsJob` flagging the monitors after it.
 - **Backfilled keys cannot be adopted by the gem (§8.1).** A hand-created monitor
