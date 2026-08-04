@@ -258,8 +258,43 @@ against the merged diff. What they found:
       that re-derives the skips.
 - [x] Review → `/simplify` → `/verify` → CI → PR → merge
 
-Not taken: nothing. The efficiency pass's remaining suggestions are recorded
-inline where they apply.
+The efficiency pass found two things worth real money:
+
+- [x] **The Stripe SDK no longer eager-loads into a keyless instance.** stripe's
+      railtie does `config.eager_load_namespaces << Stripe` unconditionally, so a
+      production boot pulled in all **1039** of its files — including on the
+      self-host default, where `enabled_processors` is empty, the `Billing::`
+      routes 404, and no code path can reach a Stripe constant. Measured:
+      **3694ms → 3345ms** per boot and **−34MB RSS**, 1039 → 44 files. Gated in
+      `config/initializers/pay.rb`; `StripeEagerLoadTest` asserts **both**
+      directions, because dropping it when keys ARE present would be worse than
+      the waste — Stripe's resources are plain autoloads, so a forked Puma worker
+      would resolve them per-worker instead of once, pre-fork and COW-shared.
+      Note `gem "stripe", require: false` is **not** an alternative: Pay never
+      requires the SDK itself, so that breaks the hosted instance outright.
+- [x] **`bin/ci` stopped re-installing the companion gem's bundle every run.**
+      `gem/Gemfile.lock` is gitignored, so `bundle check` could never succeed and
+      every CI run fell through to a full resolve against rubygems.org — outside
+      setup-ruby's cache, which is keyed on the *app's* lockfile. From the Actions
+      logs that was **~26–28s of a ~110s `bin/ci` step**, more than `rails test`
+      or `rails test:system`, spent re-fetching gems already on disk (the suite
+      runs on the plain load path, and all five deps ship in the app's bundle —
+      fugit via solid_queue, the rest via rails). Now probes whether they *load*
+      and installs only if not. Still fails closed.
+- [x] **`jbuilder` dropped** — not one `.jbuilder` template exists; the whole JSON
+      surface is `render json:` of a Hash. Hygiene, not speed: ~4ms, below noise.
+
+Measured and deliberately **not** actioned:
+- **honeybadger loads in dev/test** (~27ms, 3 Rack middlewares) where
+  `development_environments` already stops it reporting. Making it `require:
+  false` would cost `Honeybadger.notify` as a dev no-op and break
+  `honeybadger_filtering_test.rb`. Not worth 27ms once per suite run.
+- **`rails/test_unit/railtie` in production** (~17ms probe ceiling, pulls in
+  prism). Wall-clock was inconclusive against ±50ms noise, and gating it costs
+  `bin/rails test` under `RAILS_ENV=production`. Only worth it if boot is being
+  attacked systematically.
+- **`setup-chrome` is ~6s/run**, not the ~9s previously assumed — 4% of the job,
+  and the price of a pinned browser. Keep.
 
 > **Review note (2026-08-01).** An adversarial pressure-test pass verified every
 > file/behaviour claim in this spec against the code and the installed gems.

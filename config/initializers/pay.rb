@@ -81,3 +81,22 @@ Pay.setup do |config|
   # keys bridged above and sets ::Stripe.api_key itself.
   config.enabled_processors = Stablemate.billing_enabled? ? %i[stripe] : []
 end
+
+# Don't eager-load the Stripe SDK into a keyless instance.
+#
+# stripe's railtie does `config.eager_load_namespaces << Stripe` unconditionally,
+# so production eager-loads all 1039 of its files on every boot — including the
+# self-host default, where `enabled_processors` is empty, the Billing:: routes
+# 404, and nothing can reach a Stripe constant. Measured on a keyless production
+# boot: ~320ms and ~34MB RSS for code that is never called.
+#
+# Keep the eager load when keys ARE present: Stripe's resources are plain
+# autoloads, and resolving them lazily inside a forked Puma worker would pay the
+# cost per worker rather than once, pre-fork and copy-on-write shared.
+#
+# NOT `gem "stripe", require: false` — Pay never requires the SDK itself
+# (`grep -rn 'require "stripe"'` in pay is empty); it relies on Bundler.require,
+# so that would break the hosted instance outright.
+unless Stablemate.billing_enabled?
+  Rails.application.config.eager_load_namespaces.delete(Stripe)
+end

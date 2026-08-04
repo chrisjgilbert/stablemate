@@ -102,9 +102,25 @@ if [ -d gem ]; then
   step "stablemate gem tests"
   (
     cd gem
-    # Best-effort install; if it fails the ruby run below still fails closed on
-    # the missing dependency, so CI stays red rather than skipping the suite.
-    bundle check >/dev/null 2>&1 || bundle install >/dev/null 2>&1 || true
+    # Ask whether the suite's dependencies LOAD, rather than whether the gem has
+    # its own installed bundle. It runs on the plain load path (no `bundle
+    # exec`), and every one of these already ships in the app's bundle — fugit
+    # via solid_queue, the rest via rails — so on CI they are present the moment
+    # setup-ruby restores its cache.
+    #
+    # `bundle check` could never answer yes here: gem/Gemfile.lock is gitignored,
+    # so it failed on every CI run and fell through to a full `bundle install`,
+    # resolving and downloading against rubygems.org outside setup-ruby's cache
+    # (which is keyed on the APP's Gemfile.lock). Measured from the Actions logs,
+    # that was ~26-28s of a ~110s bin/ci step — more than `rails test` and more
+    # than `rails test:system`, spent re-fetching gems already on disk.
+    #
+    # Still fails CLOSED: if the probe fails we install, and if that install
+    # fails the ruby run below raises on the missing dependency and reds the run.
+    # The gem suite is never silently skipped.
+    if ! ruby -e 'require "fugit"; require "minitest/autorun"; require "active_support"; require "active_job"' >/dev/null 2>&1; then
+      bundle install >/dev/null 2>&1 || true
+    fi
     ruby -Ilib -Itest -e 'Dir["test/**/*_test.rb"].each { |f| require File.expand_path(f) }'
   ) || note_fail "gem tests"
 fi
