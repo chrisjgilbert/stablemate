@@ -14,8 +14,14 @@ on:
 # moved.
 #
 # This does NOT freeze updates — dependabot understands SHA pins and bumps both
-# the SHA and the version comment. To change one by hand:
-#   git ls-remote --tags --refs https://github.com/<owner>/<repo>
+# the SHA and the version comment. To change one by hand, resolve the tag to the
+# COMMIT it points at:
+#   git ls-remote https://github.com/<owner>/<repo> 'refs/tags/<tag>*'
+# and take the `refs/tags/<tag>^{}` line if there is one. An ANNOTATED tag has
+# its own object, and `--refs` hides exactly that peel line — pin the tag object
+# by mistake and dependabot no longer recognises the pin as a version, so the
+# action silently stops being updated. setup-chrome below is annotated; the other
+# three are lightweight, where the ref is already the commit.
 #
 # Runs the full bin/ci (system tests included) on every push and PR — this is
 # the authoritative "is main mergeable?" gate; require it as a branch-protection
@@ -72,7 +78,7 @@ jobs:
       - name: Install Chrome for system tests
         id: chrome
         if: steps.app.outputs.present == 'true'
-        uses: browser-actions/setup-chrome@e574b4b3a21156ab45dd6b5f67e884fd26eed829 # v2.1.2
+        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
         with:
           # Stated, not defaulted: v1 defaulted to bleeding-edge Chromium
           # snapshots, v2 to the Chrome for Testing stable channel. Pin the

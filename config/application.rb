@@ -1,33 +1,27 @@
 require_relative "boot"
 
-# The `rails/all` list, minus the three frameworks this app has no use for:
-# active_storage/engine, action_mailbox/engine and action_text/engine. Nothing
-# here declares an attachment or rich text — no has_one_attached, no
-# has_rich_text, no ApplicationMailbox, and active_storage:install was never run,
-# so the schema has no active_storage_* or action_mailbox_* tables. The other two
-# are listed with Active Storage because both depend on it.
+# Not `rails/all` — nothing here declares an attachment or rich text, so three
+# frameworks were booting per process and mounting routes that could never match.
+# This is exactly what `rails new --skip-active-storage --skip-action-mailbox
+# --skip-action-text` generates, commented-out lines included, so the omissions
+# say so themselves.
 #
-# `rails/all` is the generated default and staying on it would be the
-# conventional choice; the reason to leave is that it was booting three
-# frameworks per process — web, jobs, console, every test run — and mounting
-# routes that could never match, purely because the file says "all". Loading the
-# frameworks you use is the same convention, written out.
-#
-# Add a railtie back the moment something needs it: an attachment needs
-# active_storage/engine here, `config.active_storage.service` in the environment
-# files, a `config/storage.yml`, and the image_processing/ruby-vips pair the
-# Gemfile note describes.
+# Uncommenting one is half the job: an attachment also needs
+# `config.active_storage.service` in the environment files, a `config/storage.yml`,
+# a volume to persist it, and the image_processing/ruby-vips pair (see the Gemfile).
 require "rails"
-
-%w[
-  active_record/railtie
-  action_controller/railtie
-  action_view/railtie
-  action_mailer/railtie
-  active_job/railtie
-  action_cable/engine
-  rails/test_unit/railtie
-].each { |railtie| require railtie }
+# Pick the frameworks you want:
+require "active_model/railtie"
+require "active_job/railtie"
+require "active_record/railtie"
+# require "active_storage/engine"
+require "action_controller/railtie"
+require "action_mailer/railtie"
+# require "action_mailbox/engine"
+# require "action_text/engine"
+require "action_view/railtie"
+require "action_cable/engine"
+require "rails/test_unit/railtie"
 
 # Require the gems listed in Gemfile, including any gems
 # you've limited to :test, :development, or :production.

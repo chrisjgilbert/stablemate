@@ -18,9 +18,6 @@
 /log/*
 /tmp/*
 
-# Ignore storage (uploaded files in development and any SQLite databases).
-/storage/*
-
 # Ignore assets.
 /node_modules/
 /app/assets/builds/*

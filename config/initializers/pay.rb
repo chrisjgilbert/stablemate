@@ -13,6 +13,11 @@
 # available here. stablemate.rb self-guards against the redundant second load.
 require_relative "stablemate"
 
+# `Pay.support_email=` below wraps its argument in ::Mail::Address, and Action
+# Mailer only requires "mail" from eager_load! — which development and test don't
+# do. Ask for it rather than inherit it from a framework we don't load.
+require "mail"
+
 # Hand Stripe its keys from our single config-gate source. Pay has no key
 # setters — `Pay::Stripe.public_key/private_key/signing_secret` are *readers* that
 # resolve via `find_value_by_name(:stripe, …)`, i.e. ENV["STRIPE_PUBLIC_KEY"] /
@@ -44,16 +49,6 @@ end
 # where the mount is appended — app config/initializers run first (they land
 # ~index 110 vs the engine's ~372), so here is early enough.
 Pay.automount_routes = false
-
-# Pay#support_email= wraps its argument in ::Mail::Address, so the constant has
-# to exist by the time this block runs. Action Mailer only requires "mail" from
-# eager_load!, which does not happen in development or test — the constant used
-# to be here anyway because rails/all loaded Action Mailbox, which requires
-# "mail" outright. Dropping that framework in config/application.rb turned an
-# incidental dependency into a boot failure (test env only; development was
-# covered by letter_opener). Ask for it explicitly instead of relying on a
-# framework we don't otherwise use.
-require "mail"
 
 Pay.setup do |config|
   config.application_name = "Stablemate"

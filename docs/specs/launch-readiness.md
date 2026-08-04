@@ -325,8 +325,10 @@ browser-actions/setup-chrome v1→v2 (#4), webfactory/ssh-agent 0.9→0.10 (#35)
   config today. **Corrected on landing: merging it is *not* harmless** — with
   the gem present Active Storage still needs a `ruby-vips` backend to boot. So
   it was **dropped** rather than bumped, and `variant_processor` set to
-  `:disabled` (mechanics in the Gemfile note). Still don't read the
-  volume/backup advice as load-bearing.
+  `:disabled`. Still don't read the volume/backup advice as load-bearing.
+  **Superseded by chunk 5**, which stopped loading Active Storage altogether —
+  so the `:disabled` line, the storage volume and `config/storage.yml` are all
+  gone now. See `config/application.rb`.
 
 Not strictly launch-blocking, but a clean queue means dependabot noise never
 masks a real security PR later.

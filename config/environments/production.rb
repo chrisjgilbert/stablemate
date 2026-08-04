@@ -22,7 +22,6 @@ Rails.application.configure do
   # Enable serving of images, stylesheets, and JavaScripts from an asset server.
   # config.asset_host = "http://assets.example.com"
 
-
   # SSL handling. By default we assume a TLS-terminating reverse proxy in front
   # (the Kamal proxy — see config/deploy.yml) and force HTTPS, so the signed
   # session cookie and the ping_token are never sent without the Secure flag

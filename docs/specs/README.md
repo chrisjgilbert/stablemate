@@ -76,13 +76,9 @@ Stablemate is a deliberately boring, idiomatic, vanilla Rails app (full rules in
 #### System tests (`[system]`) — required, browser-driven
 Every key user-facing flow ships with a browser-driven Capybara system test — see
 the rule in [`../../CLAUDE.md`](../../CLAUDE.md).
-- **Real browser, headless.** The driver is **cuprite** (Ferrum) everywhere —
-  `driven_by :stablemate_cuprite`, registered in
-  `test/application_system_test_case.rb`. It speaks CDP straight to a Chromium
-  binary, so there is no chromedriver to fetch. Chromium is preinstalled at
-  `$PLAYWRIGHT_BROWSERS_PATH`; **never run `playwright install`.** The
-  SessionStart hook ensures the browser is available. (See `CLAUDE.md` for why
-  this no longer names Selenium as the preferred driver.)
+- **Real browser, headless, driven by cuprite** — see the driver rule in
+  [`../../CLAUDE.md`](../../CLAUDE.md). The SessionStart hook ensures the
+  browser is available.
 - **Drive the UI, assert what the user sees** — they exist to catch Turbo/Stimulus
   behaviour (live status replacement over Solid Cable, the copy button, the
   generate-key modal, waitlist mode) that request tests can't.
