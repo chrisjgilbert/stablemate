@@ -144,9 +144,9 @@ path-borne secret cannot:
 | The re-fetch mechanism, its throttle, mutex and timer | 25 |
 | The two methods that populate the map | 21 |
 | `list_monitors` and the "address rejected" state | 20 |
-| The startup wiring, `register_on_boot`, the read-only fetch | 8 |
+| The startup wiring and the read-only fetch (`register_on_boot` stays, as a no-op — §11) | 8 |
 
-~110 lines of the 646 non-comment lines in `gem/lib` — but the count understates
+~100 lines of the 646 non-comment lines in `gem/lib` — but the count understates
 it. This is the gem's only state shared between threads, and most of its hard
 reasoning: an immutable snapshot swapped under a lock, readers guaranteed never to
 block, re-fetches throttled against a clock that cannot run backwards.
@@ -163,7 +163,7 @@ With one creator, these become unreachable rather than merely unused:
 
 | Dead | Why |
 |---|---|
-| `Monitor::Transfer`, `Monitors::ProjectsController`, the manual branch of `_move.html.erb` | Its first line is `return … unless @monitor.manual?` |
+| `Monitor::Transfer`, `Monitors::ProjectsController`, the manual branch of `_move.html.erb` (§11) | Its first line is `return … unless @monitor.manual?` |
 | `awaiting_setup?` and the branch it drives | `manual? && !ever_pinged? && !suspended?` |
 | The provenance chip, `from_gem?`, `manual?`, `source` | Every monitor has one provenance |
 
@@ -203,7 +203,8 @@ monitor's next due date moves to 2094 **immediately** — no follow-up check-in
 needed, nothing visible, one request.
 
 **An API key can also page the owner, in a worse form than the ping key can.**
-`monitor_mailer.rb:22` interpolates the monitor name straight into the subject:
+`monitor_mailer.rb:22` and `:29` interpolate the monitor name straight into both
+subjects:
 
 ```ruby
 subject = "#{monitor.name} missed its check-in"
@@ -415,12 +416,10 @@ Mandate `rescue_from` for at least `RecordInvalid` and `RecordNotFound`,
 rendering JSON.
 
 **But be clear about what that does and does not fix.** It corrects the content
-type; it does not stop the misleading alert, because the harm comes from the
-*status*. §6.5 classifies anything that is not `401` or `404` as transient, so a
-JSON 422 is absorbed exactly as an HTML one was. Closing the loop needs the gem to
-treat an unexpected `4xx` as loud rather than transient — log it once per task
-name, the same as a `404` — since a `4xx` on this endpoint means the server is
-refusing the check-in for a reason that will not fix itself.
+type; on its own it would not stop the misleading alert, because the harm comes
+from the *status* — an absorbing classifier treats a JSON 422 exactly as it
+treated an HTML one. That is why §6.5 makes an unexpected `4xx` loud rather than
+transient. Both halves are needed, and neither substitutes for the other.
 
 **Name the whole response contract**, since none of it can be inherited:
 
@@ -475,7 +474,10 @@ the key — do both.
 The per-monitor layer is keyed on values readable before authentication:
 
 ```ruby
-by: -> { "#{Digest::SHA256.hexdigest(request.authorization.to_s.presence || request.remote_ip)}|#{params[:registration_key]}" }
+by: -> {
+  credential = Digest::SHA256.hexdigest(request.authorization.to_s.presence || request.remote_ip)
+  "#{credential}|#{Digest::SHA256.hexdigest(params[:registration_key].to_s)}"
+}
 ```
 
 **Digest it.** Rails emits `by:` and the cache key into an
@@ -876,19 +878,16 @@ deliberately.
 little while `Project::MonitorSync` is the only *ongoing* writer — the backfill
 below is a one-shot migration, not a second write path, which is the sense in
 which §0 calls it a second writer. Backfill so every existing
-monitor is addressable — deriving from the name, iterating deterministically with
-a set of keys already taken. **Seed that set per project from the rows that
-already hold one** (`where.not(registration_key: nil)`), not just from what this
-run assigns: gem monitors already have keys, and a legacy manual monitor *named*
-after one of them derives straight into it. Reproduced — the partial unique index
-raises `RecordNotUnique`, Postgres rolls back the wrapping transaction, and the
-migration fails the deploy. Do **not** use `String#parameterize`: it
-strips non-Latin characters entirely, so 日本語のジョブ derives to empty, which
-contradicts §5.1's unicode support. Strip only `/` and surrounding whitespace, and
-handle duplicate names, names deriving to blank, and collisions on the
-`monitor-<id>` fallback.
+monitor is addressable. **The algorithm is `manual-<id>`; see §8.1 for why
+deriving from the name is unsafe.**
 
-### 8.1 Cutover: this must ship in two phases
+Two guards it still needs. Check for a collision before assigning — a
+`recurring.yml` task key may literally be `manual-7`, and the partial unique index
+would otherwise raise `RecordNotUnique`, roll back the wrapping transaction and
+fail the deploy. And run the backfill and any later `NOT NULL` in one migration,
+since the constraint cannot be added while nulls remain.
+
+### 8.1 Cutover: this must ship in three phases
 
 **Shipping all of this in one deploy takes every healthy monitor dark and emails a
 false outage for each one.** The server and the gem are separate repositories with
@@ -913,7 +912,7 @@ untouched. For a 15-minute job the grace is `max(interval × 0.15, 5.minutes)` =
 5 minutes, so the whole window to beat is 20 minutes — server deploy, copy a ping
 key from the UI, edit host credentials, redeploy the host. That does not fit.
 
-**Two phases, and the split is free** — the new route does not collide with
+**Three phases, and the split is free** — the new route does not collide with
 `match "/ping/:ping_token"`, and `ping_keys` can be created while `ping_token`
 still exists:
 
@@ -935,8 +934,9 @@ still exists:
   window.
 
   So **backfill into a namespace the gem cannot produce** — `manual-<id>` — rather
-  than deriving from the name. §8's collision guard only protects against keys
-  present at migration time; this is the collision that arrives afterwards.
+  than deriving from the name. A name-derived key is only checked against what
+  exists at migration time; this is the collision that arrives afterwards, when
+  the gem next syncs.
 - **Phase 2 — the host cuts over.** Issue a ping key, add it to the host's
   credentials, deploy gem `0.2.0`, run `stablemate:sync`, and **verify a real
   check-in has landed** before continuing.
@@ -1129,10 +1129,16 @@ means `c.register_on_boot = false` raises `NoMethodError` *inside the host's
 initializer* — **the host app does not boot.** Verified. Keep the accessor, ignore
 the value, and log once that it no longer does anything.
 
-The same applies to `Stablemate.ping_urls`, which is likewise documented for
-hand-wired hosts. `merge_ping_urls`, `EMPTY_PING_URLS`, `MERGE_LOCK`,
-`Registration#refresh_ping_urls!` and the cache line in `reset!` are internal and
-can go outright; §3.2's table implies them but does not name them.
+The same applies to `Stablemate.ping_urls` — but with a correction. It is *not* documented
+anywhere a host copies from, so it can simply go. If it is kept for safety, keep
+`EMPTY_PING_URLS` with it: the body is `@ping_urls || EMPTY_PING_URLS`, and with
+the writers gone `@ping_urls` is always nil, so retaining the method while
+deleting the constant raises `NameError` on every call — the same crash class as
+the paragraph above.
+
+`merge_ping_urls`, `MERGE_LOCK`, `Registration#refresh_ping_urls!` and the cache
+line in `reset!` are internal and go outright; §3.2's table implies them without
+naming them.
 
 **"Registered but never checked in"** is `pending? && !ever_pinged?`. §3.3 deletes
 `awaiting_setup?`, but §7's replacement copy and §9.1's alert both need the
@@ -1180,9 +1186,8 @@ design dependency. Decide §10 when convenient; do not stop for it.
 - **Cutover (§8.1).** After phase 1 and before phase 2, a monitor still checking
   in through the old ping-token URL keeps working and does not go overdue. This is
   the test that proves the phases are separable.
-- **Backfill collision (§8).** A legacy monitor named after an existing gem
-  monitor's task key backfills to a *different*, usable key — the migration must
-  not raise.
+- **Backfill collision (§8).** A `recurring.yml` task key that literally equals a
+  generated `manual-<id>` must not make the migration raise.
 - **Gem on a plain-Ruby host (§6.4).** A check-in with a space in the task name
   succeeds without Rails loaded, which fails if `erb` is not required.
 - **Never-checked-in alert (§9.1).** A monitor registered and never checked in
@@ -1201,8 +1206,8 @@ design dependency. Decide §10 when convenient; do not stop for it.
   masked afterwards, revoke it.
 - **The mismatch guard fires on a real mismatch and stays silent during a
   rotation** with two live keys (§9.4).
-- **Monitor name length is bounded**, and an oversized name cannot reach an email
-  subject (§9.3).
+- **An oversized monitor name cannot reach an email subject** (§9.3) — truncated
+  in the mailer, *not* rejected by a validation, which would abort the sweep.
 - **An out-of-range `expected_interval_seconds` in a sync payload is reported as
   skipped, not raised**, and leaves the other entries applied (§9.5).
 - **Rate limiting, three ways.** Two task names under one key must not share a
@@ -1221,8 +1226,9 @@ design dependency. Decide §10 when convenient; do not stop for it.
   the user as their job missing a check-in.
 - **Gem: the URL encoder round-trips.** A task name containing a space must reach
   the server intact, which `CGI.escape` would not achieve (§6.4).
-- **Backfill.** Duplicate names, a name deriving to blank, and a non-Latin name
-  each produce a distinct, usable, slash-free key.
+- **Backfill.** Every monitor without a task name gets a distinct, usable,
+  slash-free one, and none of them is a name the gem could generate from
+  `recurring.yml`.
 - **Command.** Exits non-zero on all four register-nothing paths, prints the
   server's reasons, and refuses to run outside its configured environment.
 - **Gem: unlisted job classes never report**, and a task with an underivable
