@@ -30,7 +30,7 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
 
     timestamp = Time.now
     signature = ::Stripe::Webhook::Signature.compute_signature(
-      timestamp, payload, Stablemate::TEST_STRIPE_WEBHOOK_SECRET
+      timestamp, payload, TestCredentials::STRIPE_WEBHOOK_SECRET
     )
     header = ::Stripe::Webhook::Signature.generate_header(
       timestamp, signature, scheme: "v1"

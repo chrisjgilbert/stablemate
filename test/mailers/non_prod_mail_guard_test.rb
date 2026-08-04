@@ -10,13 +10,7 @@ class NonProdMailGuardTest < ActiveSupport::TestCase
     message
   end
 
-  def with_allowlist(value)
-    prev = ENV["MAIL_ALLOWLIST"]
-    ENV["MAIL_ALLOWLIST"] = value
-    yield
-  ensure
-    ENV["MAIL_ALLOWLIST"] = prev
-  end
+  def with_allowlist(value, &block) = with_env("MAIL_ALLOWLIST", value, &block)
 
   test "drops recipients not on the allowlist and halts delivery" do
     with_allowlist("me@allowed.test") do

@@ -7,7 +7,7 @@ class NotifyWaitlistSignupJobTest < ActiveJob::TestCase
   test "perform loads the waitlist signup and delivers its slack alert" do
     with_slack_enabled do
       signup = WaitlistSignup.create!(email_address: "waiter@example.com")
-      request = stub_request(:post, Stablemate::TEST_SLACK_WEBHOOK_URL)
+      request = stub_request(:post, TestCredentials::SLACK_WEBHOOK_URL)
         .with(body: { text: "New Stablemate waitlist signup: #{signup.email_address}" }.to_json)
         .to_return(status: 200, body: "ok")
 
