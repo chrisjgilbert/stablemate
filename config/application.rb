@@ -9,6 +9,12 @@ require_relative "boot"
 # Uncommenting one is half the job: an attachment also needs
 # `config.active_storage.service` in the environment files, a `config/storage.yml`,
 # a volume to persist it, and the image_processing/ruby-vips pair (see the Gemfile).
+#
+# ON A RAILS UPGRADE, run `bin/rails app:update`. With `rails/all` a new framework
+# arrived for free; naming them means a Rails that adds one leaves us silently
+# without it. app:update regenerates this file from the current template and
+# re-derives the three skips from what is actually loaded, so the omissions
+# survive and anything new shows up as a conflict to review.
 require "rails"
 # Pick the frameworks you want:
 require "active_model/railtie"
