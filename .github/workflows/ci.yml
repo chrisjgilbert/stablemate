@@ -152,7 +152,7 @@ jobs:
 
       - name: Load the deploy key into ssh-agent
         if: steps.preflight.outputs.ready == 'true'
-        uses: webfactory/ssh-agent@v0.9.0
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
