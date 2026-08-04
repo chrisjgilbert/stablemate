@@ -34,7 +34,7 @@ boxes here → next chunk.
 | 3 | Findings follow-ups + Honeybadger secret move | launch-findings tail | **MERGED** | #67 |
 | 4 | Dependabot backlog | WS-B | **MERGED** | #70 |
 | 5 | Chunk 4 follow-ups — Action SHA pins, drop `rails/all`, driver convention | — | **MERGED** | #72 |
-| 6 | Chunk 5 review follow-ups — dead Pay setting, boot-order coupling, pin guard | — | **IN REVIEW** | — |
+| 6 | Chunk 5 review follow-ups — dead Pay setting, boot-order coupling, pin guard | — | **MERGED** | #74 |
 
 Deliberately **not** in these chunks: WS-E (publishing the gem needs an
 MFA'd RubyGems account — owner action, though the repo-side prep can ride in a
