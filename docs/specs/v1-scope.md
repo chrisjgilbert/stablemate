@@ -414,6 +414,14 @@ check-in* — §9.1's exact complaint, manufactured by an unhandled exception.
 Mandate `rescue_from` for at least `RecordInvalid` and `RecordNotFound`,
 rendering JSON.
 
+**But be clear about what that does and does not fix.** It corrects the content
+type; it does not stop the misleading alert, because the harm comes from the
+*status*. §6.5 classifies anything that is not `401` or `404` as transient, so a
+JSON 422 is absorbed exactly as an HTML one was. Closing the loop needs the gem to
+treat an unexpected `4xx` as loud rather than transient — log it once per task
+name, the same as a `404` — since a `4xx` on this endpoint means the server is
+refusing the check-in for a reason that will not fix itself.
+
 **Name the whole response contract**, since none of it can be inherited:
 
 | Case | Response |
@@ -710,7 +718,11 @@ the key through.
 - `401` — the key is wrong or revoked. Log **once**, loudly.
 - `404` — this task is not registered. Log **once per task name**, naming the
   remedy: run `bin/rails stablemate:sync`.
-- Anything else — transient, absorbed by the grace period.
+- Any other `4xx` — the server is refusing this check-in for a reason that will
+  not resolve itself. Log **once per task name**, as for a `404`. Absorbing it is
+  how a server-side fault reaches the user as their job missing a check-in (§5.2).
+- `5xx`, a timeout, or a transport failure — transient, absorbed by the grace
+  period.
 
 **Route these through `Rails.logger` when Rails is defined.** The gem's logger is
 `config.logger || Logger.new($stderr)`, and nothing in the gem ever assigns
@@ -908,7 +920,23 @@ still exists:
 - **Phase 1 — additive, server only.** Add `PingKey`, the new endpoint, the route,
   the rate limiters, the `registration_key` backfill. Change nothing else. The old
   ping endpoint, `ping_token`, the rotation controllers and `ping_url` in the sync
-  response all keep working. Nothing breaks, nothing is dark.
+  response all keep working.
+
+  **The backfill is the one part of phase 1 that is not inert, and it needs a
+  namespace.** `registration_key` is not just an address — it is the upsert
+  identity in `Project::MonitorSync`. Derive a backfilled key from the monitor's
+  name and a hand-created monitor called `daily_digest` acquires the key
+  `daily_digest`; the next `stablemate:sync` then **adopts it** instead of
+  creating its own. Reproduced: what is two monitors today becomes one, fed by
+  both a shell cron and a Rails job — so killing the shell script leaves the
+  monitor green, which is exactly the failure §6.3 forbids elsewhere. It also
+  inherits the manual interval, because `gem_may_write?` refuses on a first sync
+  where nothing was last sent, so a fifteen-minute job silently keeps an hour-long
+  window.
+
+  So **backfill into a namespace the gem cannot produce** — `manual-<id>` — rather
+  than deriving from the name. §8's collision guard only protects against keys
+  present at migration time; this is the collision that arrives afterwards.
 - **Phase 2 — the host cuts over.** Issue a ping key, add it to the host's
   credentials, deploy gem `0.2.0`, run `stablemate:sync`, and **verify a real
   check-in has landed** before continuing.
@@ -973,9 +1001,25 @@ subject = "#{monitor.name} missed its check-in"
 unbounded `varchar`, so any API key holder can put arbitrary, unbounded text in an
 email subject line. The mailer's own comment states the assumption being violated:
 *"The subject carries only the monitor name, never the error (headers stay
-injection-proof, lock-screen previews clean)."* Add a length validation and cap
-what reaches the subject. This is independent of the credential split and should
-ship regardless.
+injection-proof, lock-screen previews clean)."*
+
+**Fix it in the mailer, by truncating what reaches the subject.** That alone
+closes it, and it is independent of the credential split.
+
+**Do not simply add a length validation** — an earlier draft said to, and it is
+worse than the bug. `CheckIn#check_in!` and `MissedPing#flag_missed!` both `save!`
+the whole record, so a validation on `name` gates every check-in and every
+down-transition, not just renames. And `ApplicationJob#each_record` rescues only
+`RecordNotFound`, so `DetectMissedPingsJob` **aborts on the first over-length
+row** — leaving every monitor after it in the sweep, across all tenants, `up` with
+no incident and no email, on that run and every subsequent one. Reproduced: one
+long-named monitor left a second, genuinely overdue monitor un-flagged.
+
+That turns one API-key request into a fleet-wide alerting outage, which is a worse
+version of the capability §4 is measuring. If a validation is wanted as well, it
+needs `on: :create`/`on: :update` scoping plus a truncating backfill — **and**
+`each_record` must rescue `RecordInvalid` per record and log, which is a
+pre-existing fragility this would be the first thing to expose.
 
 Everything else in the content path checks out: `error` is truncated
 unconditionally in the model layer, every render escapes, and header injection via
@@ -1075,12 +1119,19 @@ is derived from the task key. Keep `registration_key` in those payloads, since i
 is now the address. `POST /api/v1/monitors/:id/rotate` goes with the token; answer
 it **410 Gone**, not 404, so an old client can tell "removed" from "wrong id".
 
-**`register_on_boot` is removed from `Configuration`**, not merely ignored. Its
-meaning is entirely gone, and an existing initializer that sets it would otherwise
-`NoMethodError` at boot — the one place this document must not introduce a crash.
-Same for `Stablemate.ping_urls`, `merge_ping_urls`, `EMPTY_PING_URLS`,
-`MERGE_LOCK`, `Registration#refresh_ping_urls!`, and the cache line in `reset!`;
-§3.2's table implies them but does not name them.
+**`register_on_boot` becomes a deprecated no-op — do not remove the accessor.**
+An earlier draft of this section said the opposite and had the reasoning exactly
+backwards. It is documented public configuration in `gem/README.md`'s options
+table and in the sample initializer in `docs/integrating.md`, so hosts have it in
+`config/initializers/stablemate.rb`. Deleting `attr_accessor :register_on_boot`
+means `c.register_on_boot = false` raises `NoMethodError` *inside the host's
+initializer* — **the host app does not boot.** Verified. Keep the accessor, ignore
+the value, and log once that it no longer does anything.
+
+The same applies to `Stablemate.ping_urls`, which is likewise documented for
+hand-wired hosts. `merge_ping_urls`, `EMPTY_PING_URLS`, `MERGE_LOCK`,
+`Registration#refresh_ping_urls!` and the cache line in `reset!` are internal and
+can go outright; §3.2's table implies them but does not name them.
 
 **"Registered but never checked in"** is `pending? && !ever_pinged?`. §3.3 deletes
 `awaiting_setup?`, but §7's replacement copy and §9.1's alert both need the
@@ -1118,6 +1169,11 @@ work starts, not alongside it.
 
 - **Browser: the monitor lifecycle without creation.** A registered monitor can be
   edited, paused and deleted; the create route is gone.
+- **The detection sweep survives one bad record (§9.3).** A monitor that fails
+  validation must not stop `DetectMissedPingsJob` flagging the monitors after it.
+- **Backfilled keys cannot be adopted by the gem (§8.1).** A hand-created monitor
+  named after a `recurring.yml` task must remain a separate monitor after
+  `stablemate:sync` runs.
 - **Cutover (§8.1).** After phase 1 and before phase 2, a monitor still checking
   in through the old ping-token URL keeps working and does not go overdue. This is
   the test that proves the phases are separable.
@@ -1154,9 +1210,12 @@ work starts, not alongside it.
   is bounded.
 - **Routing.** A dotted task name arrives intact, and a body-supplied
   `registration_key` cannot override the path parameter.
-- **Every response is JSON.** In particular, a monitor that fails validation
-  during check-in returns JSON rather than an HTML error page (§5.2) — this is
-  what stops a server-side fault being reported to the user as a missed check-in.
+- **Every response is JSON**, including a monitor that fails validation during
+  check-in (§5.2). Note this is a hygiene test, not the fix for the misleading
+  alert — that is the next one.
+- **An unexpected `4xx` is logged, not absorbed** (§5.2, §6.5). A check-in that
+  the server refuses for a reason that will not fix itself must not be reported to
+  the user as their job missing a check-in.
 - **Gem: the URL encoder round-trips.** A task name containing a space must reach
   the server intact, which `CGI.escape` would not achieve (§6.4).
 - **Backfill.** Duplicate names, a name deriving to blank, and a non-Latin name
