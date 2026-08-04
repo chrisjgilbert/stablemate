@@ -296,6 +296,29 @@ Measured and deliberately **not** actioned:
 - **`setup-chrome` is ~6s/run**, not the ~9s previously assumed — 4% of the job,
   and the price of a pinned browser. Keep.
 
+The correctness re-run found **no defects** (pristine worktree; every test file
+run in isolation and mixed both orders; all three environments booted including
+production with `eager_load`; `zeitwerk:check`; `assets:precompile`; a real
+development Puma server serving every page, since development is the environment
+CI never exercises). Two things it surfaced that are not defects but are worth
+knowing:
+
+- **Dropping Action Mailbox incidentally closed a live hole.** Its *conductor*
+  routes — `/rails/conductor/action_mailbox/*`, which include unauthenticated
+  `POST`s for injecting inbound email — were being drawn **in production**, purely
+  because `rails/all` loaded the engine. Verified: 0 such routes now, and the
+  parent commit did use `rails/all`. Nobody was routing mail there, so nothing was
+  exploitable end-to-end, but the endpoints existed and no longer do.
+- **One silent behavioural carry-over.** `ActionView::Helpers::FormHelper
+  .multiple_file_field_include_hidden` flips `true` → `false` in eager-loaded
+  environments, because the `action_view.configuration` initializer that sets it
+  lives inside `activestorage/engine.rb`. Inert here — there is no `file_field`
+  anywhere in `app/` — but it is the one thing the removal changes that isn't
+  obviously about Active Storage.
+- `active_model/railtie` in the explicit list is **redundant but harmless**:
+  `activerecord/railtie.rb` already requires it, so registration order is
+  unchanged.
+
 > **Review note (2026-08-01).** An adversarial pressure-test pass verified every
 > file/behaviour claim in this spec against the code and the installed gems.
 > Material corrections it forced, now folded in: Pay declares **no**
