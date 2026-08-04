@@ -12,8 +12,10 @@
     * projects/monitors names, api_keys (digest + last4), waitlist_signups
     * PING_RETENTION / ERROR_MESSAGE_LIMIT, rendered from the constants
     * cookies: signed permanent :session_id + Rails' _stablemate_session
-    * subprocessors: Hetzner + Cloudflare (deploy.yml/production.rb), Stripe
-      (Pay), Honeybadger (config/honeybadger.yml + config/initializers/
+    * subprocessors: Hetzner + Cloudflare (deploy.yml/production.rb), Cloudflare
+      Web Analytics (config/initializers/stablemate.rb, config-gated — only on
+      when CLOUDFLARE_ANALYTICS_TOKEN/credentials are set), Stripe (Pay),
+      Honeybadger (config/honeybadger.yml + config/initializers/
       honeybadger.rb), Slack (User::SignupAlert + WaitlistSignup::SlackAlert, D4)
   If any of those change, this page changes in the same PR. An unverifiable
   sentence in a privacy policy is a liability, so don't add one.
@@ -38,7 +40,7 @@
       standfirst: "What we collect, why, how long we keep it, and who else sees it. Written against the actual code, so it says what really happens."
     } do %>
   <p class="legal__meta">
-    Last updated <time datetime="2026-08-02">2 August 2026</time><br>
+    Last updated <time datetime="2026-08-04">4 August 2026</time><br>
     Privacy questions and requests: <a href="mailto:support@stablemate.dev">support@stablemate.dev</a><br>
     See also our <%= link_to "Terms of Service", terms_path %>.
   </p>
@@ -127,10 +129,17 @@
     </li>
   </ul>
 
+  <h3>Website analytics</h3>
+  <p>
+    We use <strong>Cloudflare Web Analytics</strong> to count page views and see which pages are popular. It is
+    <strong>cookieless</strong> &mdash; it doesn&rsquo;t set a cookie, doesn&rsquo;t use fingerprinting, and can&rsquo;t
+    follow you across other sites. It is not tied to your account and cannot be linked back to who you are.
+  </p>
+
   <h3>What we do not collect</h3>
   <p>
-    No analytics, no advertising, no tracking pixels, no third-party scripts, no profiling and no automated
-    decision-making. We do not buy data about you, and we never sell or share yours.
+    No advertising, no tracking pixels, no cross-site tracking, no profiling and no automated decision-making. We
+    do not buy data about you, and we never sell or share yours.
   </p>
 
   <h2>3. Cookies</h2>
@@ -149,17 +158,22 @@
     </li>
   </ul>
   <p>Signing out deletes the session cookie and the session record behind it.</p>
+  <p>
+    Cloudflare Web Analytics (above) sets <strong>no cookie of its own</strong> &mdash; that&rsquo;s why it doesn&rsquo;t
+    change the count above or require a consent banner.
+  </p>
 
   <h2>4. Our lawful bases (UK GDPR)</h2>
   <ul>
     <li><strong>Performance of a contract</strong> &mdash; running your account, receiving pings, sending alerts, taking payment.</li>
     <li>
       <strong>Legitimate interests</strong> &mdash; keeping the service secure and abuse-free (session IPs, ping
-      source IPs, rate limiting), fixing errors, and knowing when someone signs up.
+      source IPs, rate limiting), fixing errors, knowing when someone signs up, and understanding how the site is
+      used via cookieless, non-tracking page-view analytics (Cloudflare Web Analytics).
     </li>
     <li><strong>Legal obligation</strong> &mdash; keeping records of payments and tax for as long as the law requires.</li>
   </ul>
-  <p>We don&rsquo;t rely on consent for anything, because we don&rsquo;t do marketing email, analytics or tracking.</p>
+  <p>We don&rsquo;t rely on consent for anything, because we don&rsquo;t do marketing email or any tracking that requires it &mdash; our page-view analytics is cookieless and can&rsquo;t identify you.</p>
 
   <h2>5. How long we keep it</h2>
   <ul>
@@ -199,7 +213,10 @@
   </p>
   <ul>
     <li><strong>Hetzner</strong> (Germany) &mdash; the servers and database. Everything above lives here at rest.</li>
-    <li><strong>Cloudflare</strong> &mdash; DNS, TLS and the proxy in front of the site. Sees the metadata of every request, including IP addresses.</li>
+    <li>
+      <strong>Cloudflare</strong> &mdash; DNS, TLS and the proxy in front of the site, so it sees the metadata of
+      every request, including IP addresses. It also provides our cookieless page-view analytics, described above.
+    </li>
     <li><strong>Stripe</strong> &mdash; payments and subscriptions. Receives your email address, card details (directly from you) and billing/tax location.</li>
     <li>
       <strong>Postmark</strong> &mdash; delivery of our email. Receives your email address and the contents of

@@ -235,4 +235,30 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
       assert_match stripped, report.text, "what Honeybadger strips must be stated"
     end
   end
+
+  # Cloudflare Web Analytics (Stablemate.cloudflare_analytics_token) is
+  # config-gated like billing/Honeybadger/Slack — a self-host instance must
+  # never render the beacon, since it has no token by default.
+  test "the analytics beacon is absent by default (self-host, keyless)" do
+    get root_path
+    assert_no_match "static.cloudflareinsights.com/beacon.min.js", response.body
+  end
+
+  test "the analytics beacon renders with the configured token when one is set" do
+    with_cloudflare_analytics_token("test-token-123") do
+      get root_path
+      assert_match "static.cloudflareinsights.com/beacon.min.js", response.body
+      assert_match "test-token-123", response.body
+    end
+  end
+
+  private
+
+    def with_cloudflare_analytics_token(value)
+      original = ENV["CLOUDFLARE_ANALYTICS_TOKEN"]
+      ENV["CLOUDFLARE_ANALYTICS_TOKEN"] = value
+      yield
+    ensure
+      ENV["CLOUDFLARE_ANALYTICS_TOKEN"] = original
+    end
 end
