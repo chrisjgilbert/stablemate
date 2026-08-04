@@ -118,13 +118,18 @@ routinely skip this layer; here we don't.
   via Capybara, exercising Turbo/Stimulus behaviour (live status updates, the
   copy button, the generate-key modal, the waitlist mode) — things rack-test
   can't see. Assert on what the user sees, not on internals.
-- **Driver / environment.** Chromium is preinstalled at
-  `$PLAYWRIGHT_BROWSERS_PATH` — **never run `playwright install`.** Prefer the
-  Rails default `driven_by :selenium, using: :headless_chrome`; if the sandbox
-  blocks Selenium Manager's driver download, fall back to **cuprite** (Ferrum)
-  pointed at the preinstalled Chromium binary — it talks CDP directly, no
-  chromedriver needed. Either way the system suite must run headless in CI and in
-  web sessions.
+- **Driver / environment.** The driver is **cuprite** (Ferrum), everywhere —
+  `driven_by :stablemate_cuprite`, registered in
+  `test/application_system_test_case.rb`. It talks CDP straight to a Chromium
+  binary, so there is no chromedriver to fetch. Chromium is preinstalled at
+  `$PLAYWRIGHT_BROWSERS_PATH` — **never run `playwright install`.** The suite
+  must run headless in CI and in web sessions.
+
+  `selenium-webdriver` is deliberately **not** in the bundle. This rule used to
+  prefer Selenium with cuprite as a sandbox fallback; the code never did that,
+  so the rule was rewritten to match it — see the chunk 5 entry in
+  [`docs/specs/launch-readiness.md`](docs/specs/launch-readiness.md). One
+  driver, not a seam that picks between two.
 - **Keep them about flows, not coverage theatre.** One robust test per key flow
   (sign-up → dashboard; create monitor → ping-URL card; outage → down email →
   recovery; generate API key modal; at-capacity → waitlist). Don't system-test

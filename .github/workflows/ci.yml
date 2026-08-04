@@ -5,6 +5,24 @@ on:
     branches: ["main"]
   pull_request:
 
+# Third-party actions are pinned to a COMMIT SHA, with the human-readable
+# version in the trailing comment. A tag is a moving pointer: `@v7` and even
+# `@v0.10.0` can be repointed at any time by whoever owns the repo, and the
+# deploy job below runs those actions with five secrets and an authenticated SSH
+# agent already in its environment. A retag there is remote code execution
+# against our production credentials, with no diff and no review. A SHA can't be
+# moved.
+#
+# This does NOT freeze updates — dependabot understands SHA pins and bumps both
+# the SHA and the version comment. To change one by hand, resolve the tag to the
+# COMMIT it points at:
+#   git ls-remote https://github.com/<owner>/<repo> 'refs/tags/<tag>*'
+# and take the `refs/tags/<tag>^{}` line if there is one. An ANNOTATED tag has
+# its own object, and `--refs` hides exactly that peel line — pin the tag object
+# by mistake and dependabot no longer recognises the pin as a version, so the
+# action silently stops being updated. setup-chrome below is annotated; the other
+# three are lightweight, where the ref is already the commit.
+#
 # Runs the full bin/ci (system tests included) on every push and PR — this is
 # the authoritative "is main mergeable?" gate; require it as a branch-protection
 # status check on main. The local pre-push hook only runs `bin/ci --fast`
@@ -38,7 +56,7 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check for a scaffolded app
         id: app
@@ -52,7 +70,7 @@ jobs:
 
       - name: Set up Ruby
         if: steps.app.outputs.present == 'true'
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           bundler-cache: true
         timeout-minutes: 10
@@ -60,7 +78,7 @@ jobs:
       - name: Install Chrome for system tests
         id: chrome
         if: steps.app.outputs.present == 'true'
-        uses: browser-actions/setup-chrome@v2
+        uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
         with:
           # Stated, not defaulted: v1 defaulted to bleeding-edge Chromium
           # snapshots, v2 to the Chrome for Testing stable channel. Pin the
@@ -137,7 +155,7 @@ jobs:
     steps:
       # Checkout is unconditional because the preflight below reads the repo to
       # work out what a deploy needs.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Deploying needs a set of secrets and variables that only the owner of a
       # real server can supply. Until they are set, every push to main failed
@@ -192,13 +210,13 @@ jobs:
 
       - name: Set up Ruby (gives us bin/kamal)
         if: steps.preflight.outputs.ready == 'true'
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           bundler-cache: true
 
       - name: Load the deploy key into ssh-agent
         if: steps.preflight.outputs.ready == 'true'
-        uses: webfactory/ssh-agent@v0.10.0
+        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 

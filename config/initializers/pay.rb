@@ -13,6 +13,11 @@
 # available here. stablemate.rb self-guards against the redundant second load.
 require_relative "stablemate"
 
+# `Pay.support_email=` below wraps its argument in ::Mail::Address, and Action
+# Mailer only requires "mail" from eager_load! — which development and test don't
+# do. Ask for it rather than inherit it from a framework we don't load.
+require "mail"
+
 # Hand Stripe its keys from our single config-gate source. Pay has no key
 # setters — `Pay::Stripe.public_key/private_key/signing_secret` are *readers* that
 # resolve via `find_value_by_name(:stripe, …)`, i.e. ENV["STRIPE_PUBLIC_KEY"] /

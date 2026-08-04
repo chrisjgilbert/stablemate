@@ -2,9 +2,9 @@ require "test_helper"
 require "capybara/cuprite"
 
 # Browser-driven system tests run headless against the Chromium that ships in the
-# sandbox/CI image. We use Cuprite (Ferrum/CDP) rather than Selenium because
-# Selenium Manager's chromedriver download is blocked here; Cuprite talks CDP to
-# the preinstalled binary directly — no chromedriver needed. (CLAUDE.md system-test rule.)
+# sandbox/CI image. Cuprite (Ferrum) is the driver in every environment: it talks
+# CDP straight to that binary, so there is no chromedriver to fetch and no
+# Selenium Manager to depend on. (CLAUDE.md system-test rule.)
 # Which binary to drive, most specific first: CHROMIUM_PATH (CI passes the one
 # setup-chrome installed), the sandbox's preinstalled Chromium, then nil so
 # Ferrum searches PATH. `.presence` rather than ENV.fetch's default block,

@@ -43,10 +43,6 @@ services:
       # Thruster (the production server) listens on 80 inside the container.
       # Map it to 80 on the host, or change the left side (e.g. "8080:80").
       - "${WEB_PORT:-80}:80"
-    volumes:
-      # Persist Active Storage uploads written to /rails/storage.
-      - storage_data:/rails/storage
 
 volumes:
   postgres_data:
-  storage_data:

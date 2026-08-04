@@ -41,32 +41,17 @@ gem "thruster", require: false
 
 # NO image_processing, despite `rails new` putting it here — deliberate, and the
 # line is absent rather than commented so nobody has to wonder whether it was an
-# accident. Nothing in this app declares an attachment (no has_one_attached, no
-# has_many_attached, and active_storage:install was never run — the schema has no
-# active_storage_* tables), so it processed exactly zero variants.
+# accident. It backed Active Storage's image variants, and this app doesn't load
+# Active Storage at all (see the note in config/application.rb), so there is
+# nothing for it to back. Dropping it also took mini_magick, ruby-vips and ffi
+# out of the bundle, and libvips out of the Dockerfile.
 #
-# Dependabot proposed 1.2 → 2.0 (#6), which forced the question. From 2.0 the
-# backends are soft dependencies, but Active Storage's transformers/vips.rb still
-# requires image_processing/vips eagerly at boot whenever the gem is present and
-# variant_processor is :vips (the default under load_defaults 7.0+). Its rescue
-# only recognises LoadErrors naming `libvips` or `image_processing`, and 2.0's
-# message names neither — so the bump alone doesn't boot, it needs ruby-vips too.
-#
-# So the bump is "add a second gem to keep an unused one working". Dropping it
-# instead takes four gems out of the bundle — image_processing, mini_magick,
-# ruby-vips and ffi, the last two a native extension needing libvips on every
-# machine that runs this app, self-hosters included. libvips leaves the
-# Dockerfile with them.
-#
-# Absent, the gem's LoadError DOES match Active Storage's rescue, so the app
-# boots — but it warns "Generating image variants require the image_processing
-# gem…" on every boot, in every environment, which self-hosters would read in
-# their own production log. config/application.rb answers that by declaring
-# `variant_processor = :disabled`, the escape hatch that warning itself names.
-# The two belong together: restoring either without the other is a bug.
-#
-# Add `gem "image_processing", "~> 2.0"` and `gem "ruby-vips", "~> 2.0"` back —
-# and drop the :disabled line — the day something here needs a variant.
+# Adding an attachment later means all of it together: the active_storage railtie
+# in config/application.rb, a `config/storage.yml`, `active_storage.service` in
+# the environment files, a volume to persist it, and
+# `gem "image_processing", "~> 2.0"` plus `gem "ruby-vips", "~> 2.0"` here — both
+# of them, because from 2.0 the backends are soft dependencies and Active Storage
+# still requires image_processing/vips eagerly.
 
 # Hosted-tier billing (issue #19, hosted-only / config-gated). Pay wraps Stripe
 # subscription state via the pay_* tables — we don't hand-roll it. Dormant unless
@@ -95,17 +80,15 @@ end
 
 group :test do
   # Use system testing [https://guides.rubyonrails.org/testing.html#system-testing]
-  # require: false on both, matching cuprite and webmock below. Bundler.require
-  # loads every gem in the group at boot, but the things that actually use these
-  # two require them lazily — ActionDispatch::SystemTestCase and cuprite pull in
-  # capybara, and capybara's own selenium driver requires selenium-webdriver —
-  # so eager-loading them only taxes the unit runs that never open a browser.
+  # require: false, matching cuprite and webmock below. Bundler.require loads
+  # every gem in the group at boot, but ActionDispatch::SystemTestCase and
+  # cuprite both require capybara lazily — eager-loading it only taxes the unit
+  # runs that never open a browser.
   gem "capybara", require: false
-  # Unused today — Cuprite below drives the suite — but CLAUDE.md names
-  # `driven_by :selenium, using: :headless_chrome` as the preferred driver.
-  gem "selenium-webdriver", require: false
-  # Cuprite (Ferrum/CDP) drives the preinstalled Chromium directly when Selenium
-  # Manager's chromedriver download is blocked in the sandbox.
+  # Cuprite (Ferrum/CDP) is the driver in every environment — it talks CDP to a
+  # preinstalled Chromium, so there is no chromedriver to fetch. There is
+  # deliberately NO selenium-webdriver; capybara loads it lazily, so restoring
+  # `driven_by :selenium` is just adding the gem back.
   gem "cuprite", require: false
   # Block real outbound HTTP in the suite (localhost stays open for Capybara/
   # Puma/Cuprite). Stripe paths are exercised end-to-end against stubbed

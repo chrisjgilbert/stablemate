@@ -64,7 +64,7 @@ Stablemate is a deliberately boring, idiomatic, vanilla Rails app (full rules in
 
 ### Testing
 - **Default framework: Minitest** (Rails 8 default) with fixtures and
-  Capybara/Selenium **system tests**.
+  Capybara/Cuprite **system tests**.
 - Layers: `[model]` unit, `[request]` controller/integration, `[job]` Solid Queue
   jobs (use `perform_enqueued_jobs` / inline adapter), `[mailer]` Action Mailer
   (assert via `ActionMailer::Base.deliveries`), `[system]` end-to-end Capybara,
@@ -76,12 +76,9 @@ Stablemate is a deliberately boring, idiomatic, vanilla Rails app (full rules in
 #### System tests (`[system]`) — required, browser-driven
 Every key user-facing flow ships with a browser-driven Capybara system test — see
 the rule in [`../../CLAUDE.md`](../../CLAUDE.md).
-- **Real browser, headless.** Chromium is preinstalled at
-  `$PLAYWRIGHT_BROWSERS_PATH`; **never run `playwright install`.** Prefer the Rails
-  default `driven_by :selenium, using: :headless_chrome`; if Selenium Manager's
-  driver download is blocked in the sandbox, use **cuprite** (Ferrum) pointed at
-  the preinstalled Chromium binary (CDP, no chromedriver). The SessionStart hook
-  ensures the browser is available.
+- **Real browser, headless, driven by cuprite** — see the driver rule in
+  [`../../CLAUDE.md`](../../CLAUDE.md). The SessionStart hook ensures the
+  browser is available.
 - **Drive the UI, assert what the user sees** — they exist to catch Turbo/Stimulus
   behaviour (live status replacement over Solid Cable, the copy button, the
   generate-key modal, waitlist mode) that request tests can't.

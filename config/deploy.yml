@@ -102,10 +102,7 @@ aliases:
   logs: app logs -f
   dbc: app exec --interactive --reuse "bin/rails dbconsole --include-password"
 
-# Persist Active Storage uploads written to /rails/storage across releases.
-# Recommended to back this path up off-server.
-volumes:
-  - "stablemate_storage:/rails/storage"
+# No volumes: no Active Storage, so nothing writes to /rails/storage.
 
 # Bridge fingerprinted assets between versions to avoid 404s on in-flight requests.
 asset_path: /rails/public/assets

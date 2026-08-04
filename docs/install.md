@@ -217,7 +217,8 @@ neither is set.
 - **Backups.** Your data lives in the `postgres_data` Docker volume. Back it up
   with `docker compose exec postgres pg_dump -U "$DB_USERNAME" "$POSTGRES_DB"`.
   See [`runbook.md`](runbook.md) for restore and deliverability (SPF/DKIM) details.
-- **Uploads** (if any) persist in the `storage_data` volume.
+  Postgres is the only thing to back up — Stablemate has no file uploads, so
+  there is no storage volume to worry about.
 - **Logs.** `docker compose logs -f web`.
 - **Console.** `docker compose exec web bin/rails console`.
 
