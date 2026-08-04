@@ -33,6 +33,7 @@ boxes here → next chunk.
 | 2 | Legal pages — Terms + Privacy + consent | WS-C | **MERGED** | #65 |
 | 3 | Findings follow-ups + Honeybadger secret move | launch-findings tail | **MERGED** | #67 |
 | 4 | Dependabot backlog | WS-B | **MERGED** | #70 |
+| 5 | Chunk 4 follow-ups — Action SHA pins, drop `rails/all`, driver convention | — | **IN REVIEW** | — |
 
 Deliberately **not** in these chunks: WS-E (publishing the gem needs an
 MFA'd RubyGems account — owner action, though the repo-side prep can ride in a
@@ -157,24 +158,37 @@ Two things worth remembering from this chunk:
   in dev *and* test), so no test or dev session exercises it. Its 4.0.2
   persistence path was verified directly instead.
 
-**Follow-ups, deliberately not in this chunk:**
-- **Pin third-party Actions to commit SHAs.** The `deploy` job puts five
-  secrets and an authenticated SSH agent in scope of `webfactory/ssh-agent`
-  and `browser-actions/setup-chrome`, both pinned to *mutable tags* — a retag
-  runs new code with those secrets. Repo-wide policy call (also implicates
-  `ruby/setup-ruby@v1`), so it belongs to the owner.
-- **Stop loading Active Storage at all.** `require "rails/all"` boots
-  ActiveStorage + ActionMailbox + ActionText — measured ~126ms per process, 65
-  initializers and 15 unreachable routes — for a subsystem this chunk just
-  formally declared dead. Swapping in the explicit railtie list also deletes
-  `config/storage.yml`, three `active_storage.service` lines and two storage
-  volumes. It is a boot-path change and deserves its own commit and CI run,
-  not a rider on a dependency sweep.
-- **Reconcile the driver convention.** CLAUDE.md names Selenium as preferred
-  and Cuprite as the sandbox fallback, but `application_system_test_case.rb`
-  hard-codes Cuprite unconditionally, including in Actions where chromedriver
-  isn't blocked. Either update the convention and drop the gem, or build the
-  seam the doc describes. Changing a stated convention is the owner's call.
+**Follow-ups** — all three deferred out of chunk 4, all three done in **chunk 5**.
+
+### Chunk 5 — the chunk 4 follow-ups
+- [x] **Actions pinned to commit SHAs.** A tag is a moving pointer, and the
+      `deploy` job runs `webfactory/ssh-agent` with five secrets already in its
+      environment — a retag there is RCE against production credentials with no
+      diff to review. All four pinned by SHA with the version in a trailing
+      comment, `ruby/setup-ruby@v1` included (the loosest pin in the file, and
+      in the same job). Not a freeze: dependabot bumps SHA pins. Each SHA was
+      resolved with `git ls-remote` and verified back against its tag.
+- [x] **`require "rails/all"` replaced by the explicit railtie list**, dropping
+      `active_storage/engine`, `action_mailbox/engine` and `action_text/engine`.
+      Measured 1318ms → 1211ms per boot (~107ms), routes 101 → 78, initializers
+      404 → 323. Took `config/storage.yml`, three `active_storage.service`
+      lines, the `variant_processor` line from #70, and both `/rails/storage`
+      volumes with it.
+      **Found a latent bug doing it:** `config/initializers/pay.rb` calls
+      `Pay.support_email=`, which needs `::Mail::Address`. Action Mailer only
+      requires `mail` from `eager_load!`, so the constant was present only
+      because `rails/all` loaded Action Mailbox. Dropping that framework turned
+      an undeclared dependency into a **test-env boot failure** — development
+      was masked by `letter_opener`. The initializer now requires `mail` itself.
+- [x] **Driver convention reconciled toward the code.** CLAUDE.md preferred
+      `driven_by :selenium` with Cuprite as the sandbox fallback; the code has
+      always used Cuprite unconditionally, and Cuprite runs green on
+      `ubuntu-latest` where chromedriver isn't blocked — so no environment was
+      left for the selenium branch. Doc now states Cuprite;
+      `selenium-webdriver` dropped (it existed only to satisfy that paragraph,
+      and generated a dependabot PR every few weeks for a code path that didn't
+      exist). Capybara requires it lazily, so restoring it is a one-line change.
+- [x] Review → `/simplify` → `/verify` → CI → PR → merge
 
 > **Review note (2026-08-01).** An adversarial pressure-test pass verified every
 > file/behaviour claim in this spec against the code and the installed gems.
