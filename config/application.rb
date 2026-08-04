@@ -16,6 +16,13 @@ module Stablemate
     # Common ones are `templates`, `generators`, or `middleware`, for example.
     config.autoload_lib(ignore: %w[assets tasks])
 
+    # No image_processing / ruby-vips backend — nothing here declares an
+    # attachment (see the note in the Gemfile). Declaring :disabled silences
+    # Active Storage's every-boot "Generating image variants require the
+    # image_processing gem…" log and leaves a NullTransformer, so an attachment
+    # added later fails clearly rather than with a NoMethodError.
+    config.active_storage.variant_processor = :disabled
+
     # Configuration for the application, engines, and railties goes here.
     #
     # These settings can be overridden in specific environments using the files

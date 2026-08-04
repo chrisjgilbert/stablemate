@@ -38,7 +38,7 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check for a scaffolded app
         id: app
@@ -57,13 +57,34 @@ jobs:
           bundler-cache: true
         timeout-minutes: 10
 
-      - name: Install Chromium for system tests
+      - name: Install Chrome for system tests
+        id: chrome
         if: steps.app.outputs.present == 'true'
-        uses: browser-actions/setup-chrome@v1
+        uses: browser-actions/setup-chrome@v2
+        with:
+          # Stated, not defaulted: v1 defaulted to bleeding-edge Chromium
+          # snapshots, v2 to the Chrome for Testing stable channel. Pin the
+          # channel we want so a future default can't move the suite's browser.
+          chrome-version: stable
         timeout-minutes: 5
 
       - name: Run CI (bin/ci)
+        # Point Cuprite at the binary the step above installed rather than
+        # letting it guess from PATH; the tiers it falls back to live in
+        # test/application_system_test_case.rb.
+        #
+        # Then fail loudly if that binary never arrived. The fallback exists for
+        # the sandbox and for laptops, and on a runner it would quietly hand the
+        # suite whatever Chrome the image happens to ship — voiding the version
+        # pinned above with a green check and no signal. A pin you can't detect
+        # losing isn't a pin.
+        env:
+          CHROMIUM_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
+          if [ -z "$CHROMIUM_PATH" ]; then
+            echo "::error title=No browser::setup-chrome reported no chrome-path; refusing to run the system suite against an unpinned browser."
+            exit 1
+          fi
           chmod +x bin/ci
           bin/ci
         timeout-minutes: 15
@@ -96,6 +117,10 @@ jobs:
       KAMAL_REGISTRY_USER: ${{ vars.KAMAL_REGISTRY_USER }}
       STABLEMATE_SERVER_IP: ${{ vars.STABLEMATE_SERVER_IP }}
       STABLEMATE_HOST: ${{ vars.STABLEMATE_HOST }}
+      # Also ERB-read by deploy.yml, and also ENV.fetch'd with no default, so a
+      # deploy without them dies on a KeyError rather than falling back.
+      STABLEMATE_MAIL_FROM: ${{ vars.STABLEMATE_MAIL_FROM }}
+      STABLEMATE_MAIL_REPLY_TO: ${{ vars.STABLEMATE_MAIL_REPLY_TO }}
       # Secrets — consumed by .kamal/secrets (env-first, file fallback).
       KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
       RAILS_MASTER_KEY: ${{ secrets.RAILS_MASTER_KEY }}
@@ -110,25 +135,49 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
     steps:
-      # Deploying needs eight secrets/variables that only the owner of a real
-      # server can supply. Until they are set, every push to main failed here —
-      # a permanently red main that trains you to ignore the X, and would hide a
-      # genuine CI failure behind an expected one. So: check first, and skip the
-      # rest of the job cleanly when the deployment isn't configured.
+      # Checkout is unconditional because the preflight below reads the repo to
+      # work out what a deploy needs.
+      - uses: actions/checkout@v7
+
+      # Deploying needs a set of secrets and variables that only the owner of a
+      # real server can supply. Until they are set, every push to main failed
+      # here — a permanently red main that trains you to ignore the X, and would
+      # hide a genuine CI failure behind an expected one. So: check first, and
+      # skip the rest of the job cleanly when the deploy isn't configured.
       #
-      # Deliberately NOT a silent skip. It emits a GitHub notice naming exactly
-      # what is missing, so "we never set this up" and "our deploy broke" stay
+      # DERIVED, not listed. The first version of this step kept its own list of
+      # names, and that list was wrong the day it was written: config/deploy.yml
+      # ENV.fetches STABLEMATE_MAIL_FROM and STABLEMATE_MAIL_REPLY_TO with no
+      # default, neither was in the list, so a fully configured repo would have
+      # passed this check and then died inside `kamal deploy` on a KeyError —
+      # the exact failure the step exists to prevent. Reading the requirement
+      # out of the files that declare it means a new ENV.fetch in deploy.yml or
+      # a new $VAR in .kamal/secrets is covered with no edit here, and a name
+      # that never reaches the job `env:` block above reports as missing rather
+      # than failing later.
+      #
+      # Deliberately NOT a silent skip: it emits a notice naming exactly what is
+      # absent, so "we never set this up" and "our deploy broke" stay
       # distinguishable — the whole point of turning the red green is that red
-      # starts meaning something again.
-      #
-      # Only names are printed, never values.
+      # starts meaning something again. Only names are printed, never values.
       - name: Check the deploy is configured
         id: preflight
         run: |
+          required=$(
+            {
+              # ENV.fetch("X") with no second argument — a fetch WITH a default
+              # cannot fail, so it isn't a requirement.
+              grep -oE 'ENV\.fetch\("[A-Z_0-9]+"\)' config/deploy.yml
+              # Every variable .kamal/secrets interpolates, comments stripped so
+              # the 1Password example in the header doesn't count.
+              sed 's/#.*//' .kamal/secrets | grep -oE '\$\{?[A-Z_0-9]+\}?'
+              # Needed by this workflow itself; declared in neither file.
+              printf 'SSH_PRIVATE_KEY\nKNOWN_HOSTS\n'
+            } | grep -oE '[A-Z_0-9]{4,}' | sort -u
+          )
+
           missing=""
-          for name in KAMAL_REGISTRY_USER STABLEMATE_SERVER_IP STABLEMATE_HOST \
-                      KAMAL_REGISTRY_PASSWORD RAILS_MASTER_KEY STABLEMATE_DATABASE_PASSWORD \
-                      STABLEMATE_SSL_CERT STABLEMATE_SSL_KEY SSH_PRIVATE_KEY KNOWN_HOSTS; do
+          for name in $required; do
             if [ -z "${!name}" ]; then missing="$missing $name"; fi
           done
 
@@ -141,9 +190,6 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
-        if: steps.preflight.outputs.ready == 'true'
-
       - name: Set up Ruby (gives us bin/kamal)
         if: steps.preflight.outputs.ready == 'true'
         uses: ruby/setup-ruby@v1
@@ -152,7 +198,7 @@ jobs:
 
       - name: Load the deploy key into ssh-agent
         if: steps.preflight.outputs.ready == 'true'
-        uses: webfactory/ssh-agent@v0.9.0
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 

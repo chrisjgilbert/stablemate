@@ -32,7 +32,7 @@ boxes here → next chunk.
 | 1 | Account page — deletion + password change | WS-D | **MERGED** | #64 |
 | 2 | Legal pages — Terms + Privacy + consent | WS-C | **MERGED** | #65 |
 | 3 | Findings follow-ups + Honeybadger secret move | launch-findings tail | **MERGED** | #67 |
-| 4 | Dependabot backlog | WS-B | **NOT STARTED** | — |
+| 4 | Dependabot backlog | WS-B | **IN REVIEW** | — |
 
 Deliberately **not** in these chunks: WS-E (publishing the gem needs an
 MFA'd RubyGems account — owner action, though the repo-side prep can ride in a
@@ -124,12 +124,55 @@ Two things worth remembering from this chunk:
    *while hiding* the Manage-card link that would have fixed the payment.
 
 ### Chunk 4 — Dependabot backlog (WS-B)
-- [ ] solid_queue 1.5.0 (#61) — eye the recurring-task changelog
-- [ ] solid_cable 4.0.2 (#59), thruster 0.1.23 (#58), honeybadger 6.9.1 (#57)
-- [ ] selenium-webdriver 4.46 (#40), image_processing 2.0.2 (#6)
-- [ ] actions/checkout v7 (#5), setup-chrome v2 (#4), ssh-agent 0.10 (#35)
-- [ ] Watch one auto-deploy complete after the Actions bumps land
-- [ ] Review → `/simplify` → `/verify` → CI → PR → merge
+- [x] solid_queue **1.6.0**, not the 1.5.0 dependabot opened at (#61) — no
+      schema drift, queue.yml unchanged bar our deliberate `polling_interval`.
+      1.6 does reinterpret cron recurring tasks in `config.time_zone` rather
+      than the process zone; UTC either way for us, noted in `recurring.yml`
+      for self-hosters who set `TZ`
+- [x] solid_cable 4.0.2 (#59), thruster 0.1.23 (#58), honeybadger 6.9.1 (#57)
+- [x] selenium-webdriver 4.46 (#40)
+- [x] image_processing (#6) — **dropped, not bumped.** See the Gemfile note and
+      the correction to §3 below; `variant_processor` is now `:disabled` so
+      Active Storage stops asking for a backend nothing here needs
+- [x] actions/checkout v7 (#5), setup-chrome v2 (#4), ssh-agent 0.10 (#35)
+- [x] Review → `/simplify` → `/verify` → CI → PR → merge
+- [ ] ~~Watch one auto-deploy complete~~ — **not possible: there is no
+      auto-deploy.** The `deploy` job has never run; none of its twelve
+      Secrets/Variables are set. It skipped cleanly rather than failing as of
+      #69, and stays skipped until the owner configures it (WS-F).
+
+**Surfaced by this chunk's review passes** (fixed here unless marked):
+- The #69 preflight's hand-written list was **already wrong**:
+  `config/deploy.yml` `ENV.fetch`es `STABLEMATE_MAIL_FROM` and
+  `STABLEMATE_MAIL_REPLY_TO` with no default and neither was checked, so a
+  fully configured repo would have passed preflight and then died inside
+  `kamal deploy`. The list is now **derived** from `deploy.yml` and
+  `.kamal/secrets`, so it cannot drift again.
+- `capybara` and `selenium-webdriver` were eager-loaded by `Bundler.require` on
+  every test-env boot (~119ms) though both consumers require them lazily — now
+  `require: false`.
+- `solid_cable` is **production-only** here (`cable.yml` uses the async adapter
+  in dev *and* test), so no test or dev session exercises it. Its 4.0.2
+  persistence path was verified directly instead.
+
+**Follow-ups, deliberately not in this chunk:**
+- **Pin third-party Actions to commit SHAs.** The `deploy` job puts five
+  secrets and an authenticated SSH agent in scope of `webfactory/ssh-agent`
+  and `browser-actions/setup-chrome`, both pinned to *mutable tags* — a retag
+  runs new code with those secrets. Repo-wide policy call (also implicates
+  `ruby/setup-ruby@v1`), so it belongs to the owner.
+- **Stop loading Active Storage at all.** `require "rails/all"` boots
+  ActiveStorage + ActionMailbox + ActionText — measured ~126ms per process, 65
+  initializers and 15 unreachable routes — for a subsystem this chunk just
+  formally declared dead. Swapping in the explicit railtie list also deletes
+  `config/storage.yml`, three `active_storage.service` lines and two storage
+  volumes. It is a boot-path change and deserves its own commit and CI run,
+  not a rider on a dependency sweep.
+- **Reconcile the driver convention.** CLAUDE.md names Selenium as preferred
+  and Cuprite as the sandbox fallback, but `application_system_test_case.rb`
+  hard-codes Cuprite unconditionally, including in Actions where chromedriver
+  isn't blocked. Either update the convention and drop the gem, or build the
+  seam the doc describes. Changing a stated convention is the owner's call.
 
 > **Review note (2026-08-01).** An adversarial pressure-test pass verified every
 > file/behaviour claim in this spec against the code and the installed gems.
@@ -155,9 +198,12 @@ The product is done and healthy:
   portal, webhooks, involuntary-downgrade grace + backstop job), pricing page.
 - **Full `bin/ci` is green** as of 2026-08-01 on `main` (rubocop, brakeman,
   bundle-audit, unit/request suite, 57-run browser system suite, gem suite).
-- **Production is already deployed** (Kamal → Hetzner behind Cloudflare,
-  auto-deploy on every green push to `main` via the `deploy` job in
-  `.github/workflows/ci.yml`) — but in **pre-launch posture**:
+- **Production is already deployed** (Kamal → Hetzner behind Cloudflare) — but
+  deployed *by hand*. The `deploy` job in `.github/workflows/ci.yml` exists and
+  has **never run**: none of the twelve Secrets/Variables it needs are set, so
+  it failed on every push to `main` until #69 made it skip cleanly. There is no
+  auto-deploy until the owner configures it (WS-F). Also in **pre-launch
+  posture**:
   `STABLEMATE_SIGNUP_ACCOUNT_CAP: 1` in `config/deploy.yml` keeps the waitlist
   on, and every page wears a "Coming soon" badge.
 
@@ -245,7 +291,8 @@ the test-mode webhook round-trip observed working, not just unit-tested.
 
 ## 3 · WS-B: dependabot backlog
 
-Nine open PRs, all small: solid_queue 1.5.0 (#61), solid_cable 4.0.2 (#59),
+Nine open PRs, all small: solid_queue 1.5.0 (#61 — landed at 1.6.0, the current
+release, since the Gemfile carries no constraint), solid_cable 4.0.2 (#59),
 thruster 0.1.23 (#58), honeybadger 6.9.1 (#57), selenium-webdriver 4.46 (#40),
 image_processing 2.0.2 (#6), actions/checkout v4→v7 (#5),
 browser-actions/setup-chrome v1→v2 (#4), webfactory/ssh-agent 0.9→0.10 (#35).
@@ -259,8 +306,11 @@ browser-actions/setup-chrome v1→v2 (#4), webfactory/ssh-agent 0.9→0.10 (#35)
   watch one auto-deploy complete rather than assuming.
 - `image_processing` (#6) updates a gem nothing uses: no model declares an
   attachment, so Active Storage — and `deploy.yml`'s storage volume — is dead
-  config today. Merging is harmless; just don't read the volume/backup advice
-  as load-bearing.
+  config today. **Corrected on landing: merging it is *not* harmless** — with
+  the gem present Active Storage still needs a `ruby-vips` backend to boot. So
+  it was **dropped** rather than bumped, and `variant_processor` set to
+  `:disabled` (mechanics in the Gemfile note). Still don't read the
+  volume/backup advice as load-bearing.
 
 Not strictly launch-blocking, but a clean queue means dependabot noise never
 masks a real security PR later.

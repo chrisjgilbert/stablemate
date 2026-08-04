@@ -37,14 +37,20 @@ wrapping shell, not the forked puma process).
 - **Raw HTML / routing / copy checks** — `curl` the path, `grep` the
   response body. Fast, good for confirming interpolated values (plan
   limits, retention days) actually rendered.
-- **Rendered / visual checks** — headless Chromium via Ferrum directly
-  (the same binary the Capybara/Cuprite system tests use, found at
-  `ENV["PLAYWRIGHT_BROWSERS_PATH"]/chromium`). No need for the full
-  Capybara/Rails-test harness just to look at a page:
+- **Rendered / visual checks** — headless Chromium via Ferrum directly, on
+  the same binary the Capybara/Cuprite system tests drive. No need for the
+  full Capybara/Rails-test harness just to look at a page. Resolve the path
+  the same way `test/application_system_test_case.rb` does — CHROMIUM_PATH
+  first, then the preinstalled Chromium, then `nil` so Ferrum searches PATH
+  — or the two quietly diverge, and a bare
+  `File.join(ENV["PLAYWRIGHT_BROWSERS_PATH"], …)` raises on any machine
+  where only CHROMIUM_PATH is set:
 
   ```ruby
   require "ferrum"
-  chromium_path = File.join(ENV["PLAYWRIGHT_BROWSERS_PATH"], "chromium")
+  preinstalled  = File.join(ENV["PLAYWRIGHT_BROWSERS_PATH"].to_s, "chromium")
+  chromium_path = ENV["CHROMIUM_PATH"] if ENV["CHROMIUM_PATH"].to_s != ""
+  chromium_path ||= preinstalled if File.exist?(preinstalled)
   browser = Ferrum::Browser.new(
     headless: true, browser_path: chromium_path,
     browser_options: { "no-sandbox" => nil, "disable-gpu" => nil },
