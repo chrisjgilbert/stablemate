@@ -127,6 +127,16 @@ module ActiveSupport
     include PaySubscriptionMirror
     include QueryCountingTestHelper
 
+    # Force CLOUDFLARE_ANALYTICS_TOKEN for the duration of a block, restoring
+    # the original afterward. nil disables it.
+    def with_cloudflare_analytics_token(value)
+      original = ENV["CLOUDFLARE_ANALYTICS_TOKEN"]
+      ENV["CLOUDFLARE_ANALYTICS_TOKEN"] = value
+      yield
+    ensure
+      ENV["CLOUDFLARE_ANALYTICS_TOKEN"] = original
+    end
+
     # Rate-limit stores are dedicated in-process MemoryStores that persist across
     # tests within a worker; clear them before each test so ordinary per-test
     # requests never accumulate into a spurious throttle. Throttle tests drive the

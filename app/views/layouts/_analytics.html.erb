@@ -1,0 +1,6 @@
+<%# landing only, never layouts/application — the beacon reports
+    location.pathname, and /passwords/:token/edit has a live reset token
+    sitting in that path. %>
+<% if cloudflare_analytics_enabled? %>
+  <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon="<%= { token: Stablemate.cloudflare_analytics_token }.to_json %>"></script>
+<% end %>

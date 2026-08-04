@@ -23,6 +23,11 @@ module ApplicationHelper
     Stablemate.billing_enabled?
   end
 
+  # Whether to render the Cloudflare Web Analytics beacon (see layouts/_analytics).
+  def cloudflare_analytics_enabled?
+    Stablemate.cloudflare_analytics_token.present?
+  end
+
   # The GitHub repo, and a doc within it — one source for the marketing pages
   # (home, pricing, and their shared nav/colophon partials) so a docs move or a
   # repo rename can't leave one of them pointing at a stale link.

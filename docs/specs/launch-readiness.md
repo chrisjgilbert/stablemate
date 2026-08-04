@@ -301,10 +301,14 @@ and the sign-up form should reference them.
     *both* Slack alert paths, not just sign-ups.
   - Cookies: strictly necessary first-party cookies only, plural — the signed
     permanent `session_id` and Rails' `_stablemate_session` (return-to, flash,
-    CSRF). No analytics, no tracking pixels.
-  - Subprocessors: Hetzner (hosting), Cloudflare (proxy/TLS), Stripe (payments
-    — card data never touches our servers), the SMTP provider (owner to name —
-    D2), Honeybadger (error reports), Slack (internal ops alerts).
+    CSRF). No tracking pixels. Cloudflare Web Analytics (below) is cookieless,
+    so it doesn't add to this list.
+  - Subprocessors: Hetzner (hosting), Cloudflare (proxy/TLS, and cookieless
+    Web Analytics page-view counts — config-gated on
+    `CLOUDFLARE_ANALYTICS_TOKEN`/credentials, `Stablemate.cloudflare_analytics_token`),
+    Stripe (payments — card data never touches our servers), the SMTP provider
+    (owner to name — D2), Honeybadger (error reports), Slack (internal ops
+    alerts).
   - ⚠️ `User::SignupAlert` (via `NotifySignupJob`) posts each **new user's email
     address** to the team Slack webhook. Either the policy discloses this
     processor for that purpose, or we redact the address from the Slack message

@@ -118,6 +118,12 @@ module Stablemate
     ENV["HONEYBADGER_API_KEY"].presence ||
       Rails.application.credentials.dig(:honeybadger, :api_key)
   end
+
+  # Cloudflare Web Analytics beacon token. Config-gated like the rest: unset ⇒ off.
+  def self.cloudflare_analytics_token
+    ENV["CLOUDFLARE_ANALYTICS_TOKEN"].presence ||
+      Rails.application.credentials.dig(:cloudflare, :analytics_token)
+  end
 end
 
 Rails.application.config.x.stablemate.tap do |c|

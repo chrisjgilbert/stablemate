@@ -31,6 +31,15 @@ class PasswordsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  # This URL's path is a live reset token — the beacon must stay off it.
+  test "the analytics beacon never renders on the password-reset page, even with analytics enabled" do
+    with_cloudflare_analytics_token("test-token-123") do
+      get edit_password_path(@user.password_reset_token)
+      assert_response :success
+      assert_no_match "static.cloudflareinsights.com/beacon.min.js", response.body
+    end
+  end
+
   test "edit with invalid password reset token" do
     get edit_password_path("invalid token")
     assert_redirected_to new_password_path
