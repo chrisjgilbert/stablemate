@@ -57,10 +57,19 @@ jobs:
           bundler-cache: true
         timeout-minutes: 10
 
-      - name: Install Chromium for system tests
+      - name: Install Chrome for system tests
         id: chrome
         if: steps.app.outputs.present == 'true'
         uses: browser-actions/setup-chrome@v2
+        with:
+          # Stated, not defaulted. v1 defaulted to `latest` — a bleeding-edge
+          # Chromium *snapshot*; v2 defaults to the Chrome for Testing *stable*
+          # channel. That is the browser change we actually want (reproducible
+          # over bleeding-edge), but it arrived as a side effect of the major
+          # bump rather than a decision, and a future default could move it
+          # again under us. Pinning the channel keeps the suite's browser a
+          # thing this file says out loud.
+          chrome-version: stable
         timeout-minutes: 5
 
       - name: Run CI (bin/ci)

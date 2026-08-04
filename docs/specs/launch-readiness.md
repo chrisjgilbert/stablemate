@@ -124,10 +124,17 @@ Two things worth remembering from this chunk:
    *while hiding* the Manage-card link that would have fixed the payment.
 
 ### Chunk 4 — Dependabot backlog (WS-B)
-- [ ] solid_queue 1.5.0 (#61) — eye the recurring-task changelog
-- [ ] solid_cable 4.0.2 (#59), thruster 0.1.23 (#58), honeybadger 6.9.1 (#57)
-- [ ] selenium-webdriver 4.46 (#40), image_processing 2.0.2 (#6)
-- [ ] actions/checkout v7 (#5), setup-chrome v2 (#4), ssh-agent 0.10 (#35)
+- [x] solid_queue **1.6.0**, not the 1.5.0 dependabot opened at (#61) — no
+      schema drift, queue.yml unchanged bar our deliberate `polling_interval`.
+      1.6 does reinterpret cron recurring tasks in `config.time_zone` rather
+      than the process zone; UTC either way for us, noted in `recurring.yml`
+      for self-hosters who set `TZ`
+- [x] solid_cable 4.0.2 (#59), thruster 0.1.23 (#58), honeybadger 6.9.1 (#57)
+- [x] selenium-webdriver 4.46 (#40)
+- [x] image_processing (#6) — **dropped, not bumped.** See the Gemfile note and
+      the correction to §3 below; `variant_processor` is now `:disabled` so
+      Active Storage stops asking for a backend nothing here needs
+- [x] actions/checkout v7 (#5), setup-chrome v2 (#4), ssh-agent 0.10 (#35)
 - [ ] Watch one auto-deploy complete after the Actions bumps land
 - [ ] Review → `/simplify` → `/verify` → CI → PR → merge
 
@@ -245,7 +252,8 @@ the test-mode webhook round-trip observed working, not just unit-tested.
 
 ## 3 · WS-B: dependabot backlog
 
-Nine open PRs, all small: solid_queue 1.5.0 (#61), solid_cable 4.0.2 (#59),
+Nine open PRs, all small: solid_queue 1.5.0 (#61 — landed at 1.6.0, the current
+release, since the Gemfile carries no constraint), solid_cable 4.0.2 (#59),
 thruster 0.1.23 (#58), honeybadger 6.9.1 (#57), selenium-webdriver 4.46 (#40),
 image_processing 2.0.2 (#6), actions/checkout v4→v7 (#5),
 browser-actions/setup-chrome v1→v2 (#4), webfactory/ssh-agent 0.9→0.10 (#35).
@@ -259,8 +267,15 @@ browser-actions/setup-chrome v1→v2 (#4), webfactory/ssh-agent 0.9→0.10 (#35)
   watch one auto-deploy complete rather than assuming.
 - `image_processing` (#6) updates a gem nothing uses: no model declares an
   attachment, so Active Storage — and `deploy.yml`'s storage volume — is dead
-  config today. Merging is harmless; just don't read the volume/backup advice
-  as load-bearing.
+  config today. **Corrected on landing: merging is *not* harmless.** 2.0 makes
+  the backends soft dependencies, but Active Storage still requires
+  `image_processing/vips` whenever the gem is present and `variant_processor`
+  is `:vips`, and the resulting LoadError names neither `libvips` nor
+  `image_processing`, so its rescue re-raises and the app doesn't boot — the
+  bump only works if you also add `ruby-vips`. So the gem was **dropped**
+  (taking `mini_magick`, `ruby-vips` and `ffi` with it, plus `libvips` out of
+  the Dockerfile) and `variant_processor` set to `:disabled`. Still don't read
+  the volume/backup advice as load-bearing.
 
 Not strictly launch-blocking, but a clean queue means dependabot noise never
 masks a real security PR later.

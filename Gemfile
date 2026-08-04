@@ -55,12 +55,18 @@ gem "thruster", require: false
 # So the bump is "add a second gem to keep an unused one working". Dropping it
 # instead takes four gems out of the bundle — image_processing, mini_magick,
 # ruby-vips and ffi, the last two a native extension needing libvips on every
-# machine that runs this app, self-hosters included. Removing it boots clean,
-# because Active Storage's rescue handles the gem being ABSENT correctly; it is
-# only the present-but-backendless state it mishandles.
+# machine that runs this app, self-hosters included. libvips leaves the
+# Dockerfile with them.
 #
-# Add `gem "image_processing", "~> 2.0"` and `gem "ruby-vips", "~> 2.0"` back
-# together the day something here actually needs a variant.
+# Absent, the gem's LoadError DOES match Active Storage's rescue, so the app
+# boots — but it warns "Generating image variants require the image_processing
+# gem…" on every boot, in every environment, which self-hosters would read in
+# their own production log. config/application.rb answers that by declaring
+# `variant_processor = :disabled`, the escape hatch that warning itself names.
+# The two belong together: restoring either without the other is a bug.
+#
+# Add `gem "image_processing", "~> 2.0"` and `gem "ruby-vips", "~> 2.0"` back —
+# and drop the :disabled line — the day something here needs a variant.
 
 # Hosted-tier billing (issue #19, hosted-only / config-gated). Pay wraps Stripe
 # subscription state via the pay_* tables — we don't hand-roll it. Dormant unless
@@ -90,6 +96,12 @@ end
 group :test do
   # Use system testing [https://guides.rubyonrails.org/testing.html#system-testing]
   gem "capybara"
+  # Kept, though nothing currently drives it — CLAUDE.md names
+  # `driven_by :selenium, using: :headless_chrome` as the preferred driver, with
+  # Cuprite below as the sandbox fallback, so this is stated intent rather than
+  # leftover scaffolding. (Which is why it is bumped and image_processing above
+  # was dropped: same "unused", different reason for being here.) Revisit if the
+  # Cuprite fallback ever becomes the documented default.
   gem "selenium-webdriver"
   # Cuprite (Ferrum/CDP) drives the preinstalled Chromium directly when Selenium
   # Manager's chromedriver download is blocked in the sandbox.

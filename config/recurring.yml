@@ -16,6 +16,14 @@
 # Dev and production share the same schedule (anchor below). In development the
 # sweep only fires while a Solid Queue worker is running — start one with
 # `bin/jobs` (alongside `bin/rails server`) so monitors actually go down locally.
+#
+# TIME ZONE: from Solid Queue 1.6 these crons are read in
+# `Rails.application.config.time_zone` (UTC here — config/application.rb leaves
+# the default), not in the worker process's local zone as they were up to 1.5.
+# Our own image runs UTC either way, so nothing moved. A self-hoster who sets
+# `TZ` on the container WILL see the daily times shift: pre-1.6 `00:10` meant
+# 00:10 in TZ, now it means 00:10 UTC. Set `config.solid_queue.time_zone` if you
+# want them back on local time. The every-30-seconds sweep is unaffected.
 default: &default
   detect_missed_pings:
     class: DetectMissedPingsJob
