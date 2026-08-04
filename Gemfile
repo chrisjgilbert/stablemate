@@ -95,14 +95,15 @@ end
 
 group :test do
   # Use system testing [https://guides.rubyonrails.org/testing.html#system-testing]
-  gem "capybara"
-  # Kept, though nothing currently drives it — CLAUDE.md names
-  # `driven_by :selenium, using: :headless_chrome` as the preferred driver, with
-  # Cuprite below as the sandbox fallback, so this is stated intent rather than
-  # leftover scaffolding. (Which is why it is bumped and image_processing above
-  # was dropped: same "unused", different reason for being here.) Revisit if the
-  # Cuprite fallback ever becomes the documented default.
-  gem "selenium-webdriver"
+  # require: false on both, matching cuprite and webmock below. Bundler.require
+  # loads every gem in the group at boot, but the things that actually use these
+  # two require them lazily — ActionDispatch::SystemTestCase and cuprite pull in
+  # capybara, and capybara's own selenium driver requires selenium-webdriver —
+  # so eager-loading them only taxes the unit runs that never open a browser.
+  gem "capybara", require: false
+  # Unused today — Cuprite below drives the suite — but CLAUDE.md names
+  # `driven_by :selenium, using: :headless_chrome` as the preferred driver.
+  gem "selenium-webdriver", require: false
   # Cuprite (Ferrum/CDP) drives the preinstalled Chromium directly when Selenium
   # Manager's chromedriver download is blocked in the sandbox.
   gem "cuprite", require: false

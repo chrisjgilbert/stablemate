@@ -5,18 +5,14 @@ require "capybara/cuprite"
 # sandbox/CI image. We use Cuprite (Ferrum/CDP) rather than Selenium because
 # Selenium Manager's chromedriver download is blocked here; Cuprite talks CDP to
 # the preinstalled binary directly — no chromedriver needed. (CLAUDE.md system-test rule.)
-# Three tiers, most specific first: an explicit CHROMIUM_PATH (CI hands over the
-# binary setup-chrome installed), then the sandbox's preinstalled Chromium, then
-# nil — which lets Ferrum find Chrome on PATH itself.
-#
-# .presence, not ENV.fetch's default block: a workflow that sets the variable
-# from a step output it cannot produce passes an EMPTY STRING, and an empty
-# string is present as far as fetch is concerned. That would hand Ferrum
-# browser_path: "" and fail, instead of falling through to the tiers below.
-CHROMIUM_PATH = ENV["CHROMIUM_PATH"].presence || begin
-  preinstalled = ENV["PLAYWRIGHT_BROWSERS_PATH"].presence&.then { |dir| File.join(dir, "chromium") }
-  preinstalled if preinstalled && File.exist?(preinstalled)
-end
+# Which binary to drive, most specific first: CHROMIUM_PATH (CI passes the one
+# setup-chrome installed), the sandbox's preinstalled Chromium, then nil so
+# Ferrum searches PATH. `.presence` rather than ENV.fetch's default block,
+# because a workflow that sets the variable from a step output it cannot produce
+# passes an EMPTY STRING — present as far as fetch is concerned, and enough to
+# hand Ferrum `browser_path: ""` and fail instead of falling through.
+preinstalled = File.join(ENV["PLAYWRIGHT_BROWSERS_PATH"].to_s, "chromium")
+CHROMIUM_PATH = ENV["CHROMIUM_PATH"].presence || (preinstalled if File.exist?(preinstalled))
 
 Capybara.register_driver(:stablemate_cuprite) do |app|
   Capybara::Cuprite::Driver.new(
