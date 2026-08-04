@@ -32,7 +32,7 @@ boxes here → next chunk.
 | 1 | Account page — deletion + password change | WS-D | **MERGED** | #64 |
 | 2 | Legal pages — Terms + Privacy + consent | WS-C | **MERGED** | #65 |
 | 3 | Findings follow-ups + Honeybadger secret move | launch-findings tail | **MERGED** | #67 |
-| 4 | Dependabot backlog | WS-B | **IN REVIEW** | — |
+| 4 | Dependabot backlog | WS-B | **MERGED** | #70 |
 
 Deliberately **not** in these chunks: WS-E (publishing the gem needs an
 MFA'd RubyGems account — owner action, though the repo-side prep can ride in a
@@ -136,10 +136,12 @@ Two things worth remembering from this chunk:
       Active Storage stops asking for a backend nothing here needs
 - [x] actions/checkout v7 (#5), setup-chrome v2 (#4), ssh-agent 0.10 (#35)
 - [x] Review → `/simplify` → `/verify` → CI → PR → merge
-- [ ] ~~Watch one auto-deploy complete~~ — **not possible: there is no
-      auto-deploy.** The `deploy` job has never run; none of its twelve
-      Secrets/Variables are set. It skipped cleanly rather than failing as of
-      #69, and stays skipped until the owner configures it (WS-F).
+- [x] ~~Watch one auto-deploy complete~~ — **there is no auto-deploy.** The
+      `deploy` job has never run; none of its twelve Secrets/Variables are set.
+      Verified on `main` instead: the merge before #69 (`6cab51a`) ran red on
+      the deploy job; #69's own merge (`e28078c`) is green, with the job
+      concluding **success** in 2s and all five real steps `skipped`. It stays
+      skipped until the owner configures it (WS-F).
 
 **Surfaced by this chunk's review passes** (fixed here unless marked):
 - The #69 preflight's hand-written list was **already wrong**:
