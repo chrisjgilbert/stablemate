@@ -33,7 +33,7 @@ boxes here → next chunk.
 | 2 | Legal pages — Terms + Privacy + consent | WS-C | **MERGED** | #65 |
 | 3 | Findings follow-ups + Honeybadger secret move | launch-findings tail | **MERGED** | #67 |
 | 4 | Dependabot backlog | WS-B | **MERGED** | #70 |
-| 5 | Chunk 4 follow-ups — Action SHA pins, drop `rails/all`, driver convention | — | **IN REVIEW** | — |
+| 5 | Chunk 4 follow-ups — Action SHA pins, drop `rails/all`, driver convention | — | **MERGED** | #72 |
 
 Deliberately **not** in these chunks: WS-E (publishing the gem needs an
 MFA'd RubyGems account — owner action, though the repo-side prep can ride in a
@@ -166,8 +166,20 @@ Two things worth remembering from this chunk:
       environment — a retag there is RCE against production credentials with no
       diff to review. All four pinned by SHA with the version in a trailing
       comment, `ruby/setup-ruby@v1` included (the loosest pin in the file, and
-      in the same job). Not a freeze: dependabot bumps SHA pins. Each SHA was
-      resolved with `git ls-remote` and verified back against its tag.
+      in the same job). Not a freeze: dependabot bumps SHA pins. Note
+      `setup-ruby@v1` was floating *by that action's own recommendation* — it
+      self-updates ruby-build — so pinning it trades that for a recurring
+      dependabot PR. Deliberate.
+      **The first attempt got this wrong**, and it is worth knowing why: the
+      `setup-chrome` pin was the ANNOTATED TAG OBJECT for v2.1.2 rather than the
+      commit, because the recipe used `git ls-remote --tags --refs` and `--refs`
+      suppresses precisely the `^{}` peel line that carries the commit for an
+      annotated tag. Dependabot matches pins against commit SHAs, so it would
+      have silently stopped updating that action. The recipe was the worse half —
+      wrong for *any* annotated tag, so the next re-pin of `ssh-agent` or
+      `setup-ruby` would have reproduced it inside the secret-bearing job. To
+      re-pin: `git ls-remote <url> 'refs/tags/<tag>*'` and take the `^{}` line if
+      one exists; then confirm the object is type `commit`, not `tag`.
 - [x] **`require "rails/all"` replaced by the explicit railtie list**, dropping
       `active_storage/engine`, `action_mailbox/engine` and `action_text/engine`.
       Measured 1318ms → 1211ms per boot (~107ms), routes 101 → 78, initializers
@@ -189,6 +201,15 @@ Two things worth remembering from this chunk:
       and generated a dependabot PR every few weeks for a code path that didn't
       exist). Capybara requires it lazily, so restoring it is a one-line change.
 - [x] Review → `/simplify` → `/verify` → CI → PR → merge
+
+> **Review coverage on chunk 5 was thinner than chunks 1–4.** Six review agents
+> ran; reuse, simplification and security completed and their findings are
+> applied. Correctness, efficiency and altitude **died on a session limit**. The
+> correctness pass got far enough to independently flag the annotated-tag bug
+> before dying, and its remaining checks were re-run by hand — no bundled gem or
+> app code reaches the dropped frameworks, no mailer attachments, no other
+> undeclared-constant sites, no stale references repo-wide. The efficiency and
+> altitude angles produced nothing. Worth a re-run for parity.
 
 > **Review note (2026-08-01).** An adversarial pressure-test pass verified every
 > file/behaviour claim in this spec against the code and the installed gems.
