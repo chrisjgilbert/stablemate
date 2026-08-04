@@ -23,11 +23,7 @@ module ApplicationHelper
     Stablemate.billing_enabled?
   end
 
-  # Whether to render the Cloudflare Web Analytics beacon. False on a keyless
-  # self-host instance (same config-gate shape as billing_enabled?). Only
-  # layouts/landing actually renders the beacon (see
-  # app/views/layouts/_analytics.html.erb) — layouts/application must not, since
-  # it also serves token-bearing URLs the beacon would report.
+  # Whether to render the Cloudflare Web Analytics beacon (see layouts/_analytics).
   def cloudflare_analytics_enabled?
     Stablemate.cloudflare_analytics_token.present?
   end

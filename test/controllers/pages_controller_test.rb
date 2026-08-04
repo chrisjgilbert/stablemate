@@ -236,9 +236,6 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # Cloudflare Web Analytics (Stablemate.cloudflare_analytics_token) is
-  # config-gated like billing/Honeybadger/Slack — a self-host instance must
-  # never render the beacon, since it has no token by default.
   test "the analytics beacon is absent by default (self-host, keyless)" do
     get root_path
     assert_no_match "static.cloudflareinsights.com/beacon.min.js", response.body

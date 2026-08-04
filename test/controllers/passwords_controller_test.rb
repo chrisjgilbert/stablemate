@@ -31,12 +31,7 @@ class PasswordsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
-  # The Cloudflare Web Analytics beacon reports `location.pathname` — which for
-  # this page IS the live password-reset token (config/routes.rb's
-  # `resources :passwords, param: :token`). layouts/application (what this page
-  # renders under) must never render the beacon, even when analytics is
-  # configured on, or every reset-link click ships the token to Cloudflare.
-  # See app/views/layouts/_analytics.html.erb.
+  # This URL's path is a live reset token — the beacon must stay off it.
   test "the analytics beacon never renders on the password-reset page, even with analytics enabled" do
     with_cloudflare_analytics_token("test-token-123") do
       get edit_password_path(@user.password_reset_token)

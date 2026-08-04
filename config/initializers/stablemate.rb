@@ -119,13 +119,7 @@ module Stablemate
       Rails.application.credentials.dig(:honeybadger, :api_key)
   end
 
-  # Cloudflare Web Analytics beacon token. Config-gated like the rest: unset ⇒ no
-  # analytics script is rendered at all, which is the self-host default (nobody
-  # else's page views should land in our dashboard, and self-hosters' traffic is
-  # none of our business). Read by app/views/layouts/_analytics.html.erb (rendered
-  # by layouts/landing only — see that partial for why layouts/application must
-  # not render it) via the cloudflare_analytics_enabled?/cloudflare_analytics_token
-  # helpers.
+  # Cloudflare Web Analytics beacon token. Config-gated like the rest: unset ⇒ off.
   def self.cloudflare_analytics_token
     ENV["CLOUDFLARE_ANALYTICS_TOKEN"].presence ||
       Rails.application.credentials.dig(:cloudflare, :analytics_token)
