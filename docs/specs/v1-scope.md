@@ -167,8 +167,13 @@ With one creator, these become unreachable rather than merely unused:
 | `awaiting_setup?` and the branch it drives | `manual? && !ever_pinged? && !suspended?` |
 | The provenance chip, `from_gem?`, `manual?`, `source` | Every monitor has one provenance |
 
-Keep the rest of `_move.html.erb` — lines `:7-11` and `:26-30` are the only place
-the detail page shows which project a monitor belongs to.
+Keep the rest of `_move.html.erb`, described by structure rather than by line
+range. The heading and the "In &lt;project&gt;" link *above* the branch are the only
+place the detail page shows which project a monitor belongs to, and the closing
+`</div>` *below* it belongs to that block. What goes is the manual arm: the
+`if monitor.manual?` line, its body, the `else` and the `end` — leaving the
+non-manual arm's markup in place, unwrapped. Taking a literal line range instead
+strands the `else` or drops the closing tag.
 
 **`source` is a breaking API change, not a cleanup.** It is served by
 `GET /api/v1/monitors/:id` via `monitor_detail_json` and documented at
@@ -203,8 +208,8 @@ monitor's next due date moves to 2094 **immediately** — no follow-up check-in
 needed, nothing visible, one request.
 
 **An API key can also page the owner, in a worse form than the ping key can.**
-`monitor_mailer.rb:22` and `:29` interpolate the monitor name straight into both
-subjects:
+`monitor_mailer.rb:22`, `:29` and `:42` interpolate the monitor name straight into
+all three subjects:
 
 ```ruby
 subject = "#{monitor.name} missed its check-in"
@@ -562,7 +567,7 @@ affordable — the place that needs a finished command already holds the credent
 **It must report what the server refused.** `sync!` currently returns the
 process-wide address cache, and the rake task prints `cache.size` — which has
 never been a per-run count. Return a result carrying both a count and the
-`skipped` reasons, since §11 requires printing them. Two traps: `{}` is truthy, so
+`skipped` reasons, since §12 requires printing them. Two traps: `{}` is truthy, so
 a `nil`-returning replacement flips "synced 0" into a failure message; and
 `0.size` is `8`, so `.size` must be removed, not just re-pointed.
 
@@ -638,7 +643,7 @@ fallback as its vehicle and needs a different one).
 
 **Add a fixture.** On every shipped fixture the intersection is a no-op —
 `reportable == class_to_keys` exactly, because none of them has a task with a
-`class:` and an underivable schedule. §11 requires a test for precisely that case,
+`class:` and an underivable schedule. §12 requires a test for precisely that case,
 so it needs a fifth fixture to exist at all.
 
 **`c.monitors` also needs translating.** The server's entry struct reads
@@ -855,14 +860,14 @@ Measured, not estimated.
 | `PingKey` model, issuance, controller, views, migration, project-page wiring | ~200 |
 | Never-checked-in alert: scope, job, mailer, notification cause, copy (§9.1) | ~120 |
 | **Server subtotal** | **~855** |
-| Gem deletions (§3.2) | ~110 |
+| Gem deletions (§3.2) | ~100 |
 | **Tests broken by UI removal** | ~393 across 15 files, 4 deleted whole |
 | **Tests broken by the check-in move** | ~647 across 9 files, 3 deleted whole |
 | **Gem suite** | 48 of 94 tests error under the deletions |
 
 Two things the totals hide:
 
-**Capybara cannot set an `Authorization` header.** Six call sites across
+**Capybara cannot set an `Authorization` header.** Eight call sites across
 `outage_recovery_test.rb`, `uptime_history_test.rb` and `error_notices_test.rb`
 drive check-ins with `visit ping_path(...)`. Each must become a direct
 `monitor.check_in!` or an in-test HTTP call — weakening them from "the real
@@ -933,10 +938,13 @@ still exists:
   where nothing was last sent, so a fifteen-minute job silently keeps an hour-long
   window.
 
-  So **backfill into a namespace the gem cannot produce** — `manual-<id>` — rather
-  than deriving from the name. A name-derived key is only checked against what
-  exists at migration time; this is the collision that arrives afterwards, when
-  the gem next syncs.
+  So **backfill into a namespace the gem does not derive from job names** —
+  `manual-<id>` — rather than deriving from the name. A name-derived key is only
+  checked against what exists at migration time; this is the collision that
+  arrives afterwards, when the gem next syncs. (This narrows the collision to one
+  a *human* has to author deliberately — a literal `manual-7` typed into
+  `recurring.yml` or `c.monitors` — which is why §8 still guards the migration
+  rather than treating the namespace as sufficient.)
 - **Phase 2 — the host cuts over.** Issue a ping key, add it to the host's
   credentials, deploy gem `0.2.0`, run `stablemate:sync`, and **verify a real
   check-in has landed** before continuing.
@@ -993,9 +1001,10 @@ said content handling was "clean — truncation is unconditional in the model
 layer… Checked, not assumed." That is true of `error` and **false of `name`**:
 
 ```ruby
-# app/mailers/monitor_mailer.rb:22 and :29 — both subjects interpolate the name
-subject = "#{monitor.name} reported an error"
-subject = "#{monitor.name} missed its check-in"
+# app/mailers/monitor_mailer.rb — all three subjects interpolate the name
+subject = "#{monitor.name} reported an error"      # :22
+subject = "#{monitor.name} missed its check-in"    # :29
+subject: "#{monitor.name} is back up"              # :42
 ```
 
 `validates :name, presence: true` is the only name validation and the column is an
@@ -1005,7 +1014,10 @@ email subject line. The mailer's own comment states the assumption being violate
 injection-proof, lock-screen previews clean)."*
 
 **Fix it in the mailer, by truncating what reaches the subject.** That alone
-closes it, and it is independent of the credential split.
+closes it, and it is independent of the credential split. It wants one private
+helper used at all three interpolations, not a fix at the two `down` sites — the
+`recovered` subject at `:42` is built inline and is the one an implementer reading
+only the first code block above would miss.
 
 **Do not simply add a length validation** — an earlier draft said to, and it is
 worse than the bug. `CheckIn#check_in!` and `MissedPing#flag_missed!` both `save!`
@@ -1113,11 +1125,12 @@ scope; if it stays, it should be because the price is about to be set.
 A build-through of this document produced 45 open questions. Most are safely the
 implementer's; these are the ones where guessing wrong causes a defect.
 
-**The API surface after the ping token goes.** `monitor_json` and
-`monitor_detail_json` both serve `ping_url`, and the sync response serves it per
-registered monitor. All three lose it — there is no URL to serve once the address
-is derived from the task key. Keep `registration_key` in those payloads, since it
-is now the address. `POST /api/v1/monitors/:id/rotate` goes with the token; answer
+**The API surface after the ping token goes.** Three payloads carry `ping_url` but
+there are only **two** literal keys to delete: `monitor_json` has one, the sync
+response has its own, and `monitor_detail_json` inherits it by `merge`-ing
+`monitor_json` rather than declaring it. `ping_url_for` then has no callers and
+goes too. There is no URL to serve once the address is derived from the task key.
+Keep `registration_key` in those payloads, since it is now the address. `POST /api/v1/monitors/:id/rotate` goes with the token; answer
 it **410 Gone**, not 404, so an old client can tell "removed" from "wrong id".
 
 **`register_on_boot` becomes a deprecated no-op — do not remove the accessor.**
@@ -1129,7 +1142,7 @@ means `c.register_on_boot = false` raises `NoMethodError` *inside the host's
 initializer* — **the host app does not boot.** Verified. Keep the accessor, ignore
 the value, and log once that it no longer does anything.
 
-The same applies to `Stablemate.ping_urls` — but with a correction. It is *not* documented
+`Stablemate.ping_urls` is the opposite case. It is *not* documented
 anywhere a host copies from, so it can simply go. If it is kept for safety, keep
 `EMPTY_PING_URLS` with it: the body is `@ping_urls || EMPTY_PING_URLS`, and with
 the writers gone `@ping_urls` is always nil, so retaining the method while
@@ -1206,8 +1219,9 @@ design dependency. Decide §10 when convenient; do not stop for it.
   masked afterwards, revoke it.
 - **The mismatch guard fires on a real mismatch and stays silent during a
   rotation** with two live keys (§9.4).
-- **An oversized monitor name cannot reach an email subject** (§9.3) — truncated
-  in the mailer, *not* rejected by a validation, which would abort the sweep.
+- **An oversized monitor name cannot reach an email subject** (§9.3) — asserted on
+  all three subjects, including `recovered`; truncated in the mailer, *not*
+  rejected by a validation, which would abort the sweep.
 - **An out-of-range `expected_interval_seconds` in a sync payload is reported as
   skipped, not raised**, and leaves the other entries applied (§9.5).
 - **Rate limiting, three ways.** Two task names under one key must not share a
@@ -1227,8 +1241,9 @@ design dependency. Decide §10 when convenient; do not stop for it.
 - **Gem: the URL encoder round-trips.** A task name containing a space must reach
   the server intact, which `CGI.escape` would not achieve (§6.4).
 - **Backfill.** Every monitor without a task name gets a distinct, usable,
-  slash-free one, and none of them is a name the gem could generate from
-  `recurring.yml`.
+  slash-free one, and none of them is a name the gem *derives* from a
+  `recurring.yml` job class. (A hand-authored literal `manual-7` is still
+  possible, which is the separate collision bullet above.)
 - **Command.** Exits non-zero on all four register-nothing paths, prints the
   server's reasons, and refuses to run outside its configured environment.
 - **Gem: unlisted job classes never report**, and a task with an underivable
