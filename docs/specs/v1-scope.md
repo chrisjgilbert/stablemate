@@ -641,6 +641,24 @@ reportable   = registrar.class_to_keys
                         .reject { |_, ks| ks.empty? }
 ```
 
+**Whichever file computes this must `require "set"`** — the same trap as §6.4's
+`require "erb"`, one file over, and with a worse ending. The gemspec sets
+`required_ruby_version = ">= 3.1"` and dev-depends on `activesupport >= 7.0`, so a
+Rails 7 host on Ruby 3.1 is a supported target — and **`Set` is only autoloaded
+from Ruby 3.2**. Measured across the three interpreters installed here: `[1,2].to_set`
+raises `NoMethodError` on 3.1.6 and works on 3.2.6 and 3.3.6.
+
+The ending is worse than §6.4's because §6.5 puts this call inside the railtie's
+`after_initialize`, whose `rescue StandardError` catches `NoMethodError` — so on
+Ruby 3.1 the gem logs `boot wiring skipped`, never attaches the subscriber, and
+**every check-in is disabled**. That is the incident this document exists to fix,
+reproduced on the gem's own oldest supported Ruby, differing only in that this
+time there is a log line. `execution/subscriber.rb:3` already requires `set`; the
+railtie requires only `rails/railtie`, and §6.5 moves the map-building there.
+
+Treat this as the general rule, not one more special case: **the gem's floor is
+Ruby 3.1, so no stdlib that 3.2+ merely autoloads may be used unrequired.**
+
 **`c.monitors` keys must never enter this map.** They have no job class by
 definition, and the keys are arbitrary user strings — so a key matching a host job
 class name binds them, and an unrelated Rails job advances the shell script's
@@ -1231,6 +1249,11 @@ design dependency. Decide §10 when convenient; do not stop for it.
   generated `manual-<id>` must not make the migration raise.
 - **Gem on a plain-Ruby host (§6.4).** A check-in with a space in the task name
   succeeds without Rails loaded, which fails if `erb` is not required.
+- **Gem on Ruby 3.1 (§6.3).** The listener attaches and a check-in lands on the
+  gemspec's oldest supported interpreter. `Set` is not autoloaded before 3.2, and
+  the boot rescue converts the resulting `NoMethodError` into a silently
+  disabled gem — so this must run on 3.1 in CI, not be argued about. The gem's CI
+  has no Ruby matrix today; a test that only ever runs on 3.3 cannot catch it.
 - **Never-checked-in alert (§9.1).** A monitor registered and never checked in
   alerts once, after its own interval rather than a fixed delay, with copy
   distinct from a missed check-in — and does not alert twice.
