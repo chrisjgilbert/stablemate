@@ -26,7 +26,7 @@ Section numbers in the left column are **`README.md`'s**; those in the right are
 | §2 Security defaults, the whole `ping_token` bullet | **Void.** Every clause — plaintext by design, the dashboard showing it, the API re-serving it, the uninformative 404, per-token rate limiting, rotation — describes surfaces this removes. |
 | §3 Data model, `Monitor` | `ping_token` and its unique index are deleted; `source` becomes constant (§3.3). |
 | §3 Data model, table set | **Gains `PingKey`** — `project_id`, `name`, `token_digest` (unique), `token_last4`, `last_used_at`, timestamps. A project may hold more than one, so rotation can overlap (§4). |
-| §2 Security defaults, the `ApiKey` bullet | **Widened**, not replaced. The same posture — hashed, constant-time compared, shown once, opaque `401` — now covers both credentials, with the addition that the API key is no longer the credential on the check-in path (§4). |
+| §2 Security defaults, the `ApiKey` bullet | **Widened**, not replaced. The same handling — hashed, constant-time compared, shown once, uninformative `401` — now covers both credentials, with the addition that the API key is no longer the credential on the check-in path (§4). |
 
 Decision #5 (*"user can tighten via UI override"*) **survives, and that is
 deliberate.** Monitor *editing* is retained precisely because #5 requires it — and
@@ -377,8 +377,13 @@ the shapes identical to `/api/v1`.
 It resolves the project from the key and reaches the monitor only through it:
 
 ```ruby
-current_project.monitors.find_by(registration_key: params[:registration_key])
+monitor = current_project.monitors.find_by(registration_key: params[:registration_key])
+return render_not_found unless monitor
 ```
+
+Use `find_by` and an explicit guard, not `find_by!`. The contract below promises
+`404 {"error": "not_found"}`, and a bang method raises `RecordNotFound` — which,
+with no inherited `rescue_from`, is an HTML page, not that.
 
 **That scoping is now the only thing keeping tenants apart.** The old ping token
 was unique across the whole database, so isolation was a property of the schema.
@@ -486,9 +491,15 @@ tests. Measured at these values: 40 tasks checking in twice a minute under one k
 pass unthrottled; the per-monitor bound, not the per-IP one, is what a
 small-job-count app meets first.
 
-**Say the thing a Kamal operator needs to know:** the app and its job workers sit
-behind one proxy, so **the whole host shares a single per-IP bucket**. 300/minute
+**Two things a Kamal operator needs to know.** The app and its job workers sit
+behind one proxy, so **the whole host shares a single per-IP bucket** — 300/minute
 is the machine's total check-in budget, not one process's.
+
+And **behind Cloudflare, `request.remote_ip` is a Cloudflare edge address** unless
+`STABLEMATE_BEHIND_CLOUDFLARE` is set so the trusted-proxy list is configured. If
+it is not, the per-IP layer — the *only* pre-authentication bound — collapses to a
+handful of buckets shared across every tenant, and one noisy client throttles
+everyone. Setting it is a prerequisite of this design, not an optimisation.
 
 The per-monitor ceiling also bounds the alert-flood in §9.3. Put it on the controller, alongside
 `PingsController::PER_TOKEN_LIMIT` and `Api::V1::BaseController::PER_KEY_LIMIT` —
@@ -643,7 +654,22 @@ the middle.
 
 ```ruby
 def ping(registration_key)
-  post_form(check_in_uri(registration_key), {}, headers: ping_headers)
+  classify(post_check_in(registration_key, {}))
+end
+
+def report_failure(registration_key, message:)
+  classify(post_check_in(registration_key,
+                         status: 1, message: message.to_s[0, ERROR_MESSAGE_LIMIT]))
+end
+
+# Client has no post_form today; report_failure builds its own request inline
+# (client.rb:78-81). Extract that shape rather than inventing a new helper.
+def post_check_in(registration_key, params)
+  uri = check_in_uri(registration_key)
+  http_for(uri).post(uri.request_uri,
+                     URI.encode_www_form(params),
+                     "Content-Type" => "application/x-www-form-urlencoded",
+                     "Authorization" => "Bearer #{config.ping_key}")
 end
 
 def check_in_uri(registration_key)
@@ -850,7 +876,7 @@ contradicts §5.1's unicode support. Strip only `/` and surrounding whitespace, 
 handle duplicate names, names deriving to blank, and collisions on the
 `monitor-<id>` fallback.
 
-## 8.1 · Cutover: this must ship in two phases
+### 8.1 Cutover: this must ship in two phases
 
 **Shipping all of this in one deploy takes every healthy monitor dark and emails a
 false outage for each one.** The server and the gem are separate repositories with
@@ -907,7 +933,7 @@ cheapest first:
   longer"* is a positive statement with no false positives. Phrase the threshold
   in hours, not minutes — §5.2 coarsens that write to five-minute granularity.
 - **Alert on monitors that have never checked in. This one is IN scope** — see
-  §7 for why, §8 for its budget and §11 for its test. It sits here because it
+  §7 for why, §8 for its budget and §12 for its test. It sits here because it
   belongs with its siblings, not because it is deferred. The threshold must be
   relative to the monitor's own interval, it must fire once, and it needs its own
   wording pointing at setup docs.
@@ -1037,7 +1063,58 @@ A smaller adjacent candidate: the waitlist, signup cap and two Slack alerts,
 **Not proposed here — flagged for a decision.** If it goes, it belongs in this V1
 scope; if it stays, it should be because the price is about to be set.
 
-## 11 · Test plan
+## 11 · Decisions an implementer would otherwise have to guess
+
+A build-through of this document produced 45 open questions. Most are safely the
+implementer's; these are the ones where guessing wrong causes a defect.
+
+**The API surface after the ping token goes.** `monitor_json` and
+`monitor_detail_json` both serve `ping_url`, and the sync response serves it per
+registered monitor. All three lose it — there is no URL to serve once the address
+is derived from the task key. Keep `registration_key` in those payloads, since it
+is now the address. `POST /api/v1/monitors/:id/rotate` goes with the token; answer
+it **410 Gone**, not 404, so an old client can tell "removed" from "wrong id".
+
+**`register_on_boot` is removed from `Configuration`**, not merely ignored. Its
+meaning is entirely gone, and an existing initializer that sets it would otherwise
+`NoMethodError` at boot — the one place this document must not introduce a crash.
+Same for `Stablemate.ping_urls`, `merge_ping_urls`, `EMPTY_PING_URLS`,
+`MERGE_LOCK`, `Registration#refresh_ping_urls!`, and the cache line in `reset!`;
+§3.2's table implies them but does not name them.
+
+**"Registered but never checked in"** is `pending? && !ever_pinged?`. §3.3 deletes
+`awaiting_setup?`, but §7's replacement copy and §9.1's alert both need the
+concept, and it must not be quietly reinvented in two places with different
+meaning.
+
+**`_move.html.erb` keeps its non-manual branch**, described that way rather than
+as line numbers — the literal ranges an earlier draft gave would strand an `else`
+and drop a closing tag. Note the retained copy ("Managed by the gem…") becomes the
+text *every* monitor shows once every monitor is gem-sourced, so it needs a reread.
+
+**The `PingKey` mirror is exact unless stated otherwise.** Token length and
+alphabet, `masked` format, default key name, revoke-by-destroy, indexes and
+foreign key: whatever `ApiKey` does. The three deliberate differences are the
+`sm_ping_` prefix, no `last_used_at` write on the check-in path beyond the
+five-minute coarsening, and **more than one live key per project**, which rotation
+requires.
+
+**§9.4's wire field** is `ping_key_last4`, an array of strings, in the sync
+response envelope alongside `monitors` and `skipped`.
+
+**The docs that describe the removed endpoint** are not optional follow-up:
+`docs/api.md` (the ping endpoint, `ping_url` in two payloads, rotate),
+`docs/install.md`'s "Create a monitor and send a ping", `docs/integrating.md`'s
+manual-path section and its manual-fallback note, and
+`docs/deploy-hetzner-cloudflare.md`'s verification `curl`. Each describes something
+that will 404.
+
+**§10 gates part of §8.** The billing decision changes whether `suspended` remains
+a status, and therefore whether the uptime rollup, the live-day stat, the check-in
+transition and the cap scope keep their special cases. Decide §10 **before** this
+work starts, not alongside it.
+
+## 12 · Test plan
 
 - **Browser: the monitor lifecycle without creation.** A registered monitor can be
   edited, paused and deleted; the create route is gone.
