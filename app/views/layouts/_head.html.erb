@@ -18,10 +18,3 @@
     time. %>
 <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
 <%= javascript_importmap_tags %>
-
-<% if cloudflare_analytics_enabled? %>
-  <%# Cloudflare Web Analytics — cookieless, no cross-site tracking or
-      fingerprinting. Config-gated (Stablemate.cloudflare_analytics_token) so a
-      self-host instance never reports page views into our dashboard. %>
-  <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon="<%= { token: Stablemate.cloudflare_analytics_token }.to_json %>"></script>
-<% end %>

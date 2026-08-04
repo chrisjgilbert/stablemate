@@ -1,0 +1,17 @@
+<%# Cloudflare Web Analytics — cookieless, no cross-site tracking or
+    fingerprinting. Config-gated (Stablemate.cloudflare_analytics_token) so a
+    self-host instance never reports page views into our dashboard.
+
+    Rendered ONLY by layouts/landing (the public marketing pages: home,
+    pricing, terms, privacy) — never by layouts/application. The beacon
+    reports `location.pathname` on every page it runs on, and the
+    authenticated app layout also serves token-bearing URLs
+    (`/passwords/:token/edit` — a live, 15-minute password-reset credential
+    sitting in the path, config/routes.rb's `resources :passwords,
+    param: :token`). Rendering this partial from layouts/application would
+    ship that token to a third party on every reset-link click. Keep this
+    partial off layouts/application; if app-wide analytics is ever wanted,
+    it needs a path-based exclusion first, not a blanket include. %>
+<% if cloudflare_analytics_enabled? %>
+  <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon="<%= { token: Stablemate.cloudflare_analytics_token }.to_json %>"></script>
+<% end %>

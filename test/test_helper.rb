@@ -50,6 +50,12 @@ module SlackGateTestHelper
   end
 end
 
+module CloudflareAnalyticsGateTestHelper
+  def with_cloudflare_analytics_token(value)
+    Stablemate.stub_cloudflare_analytics_token(value) { yield }
+  end
+end
+
 module Stablemate
   # Test-only fixed Stripe credentials used when billing is forced on. Never real
   # keys — just enough for the config-gate and signature verification in tests.
@@ -81,6 +87,16 @@ module Stablemate
     yield
   ensure
     define_singleton_method(:stripe_price_id_pro, original)
+  end
+
+  # Test-only: force cloudflare_analytics_token for the duration of a block, nil
+  # or a token string. Same method-swap pattern as stub_slack/stub_price_id_pro.
+  def self.stub_cloudflare_analytics_token(value)
+    original = method(:cloudflare_analytics_token)
+    define_singleton_method(:cloudflare_analytics_token) { value }
+    yield
+  ensure
+    define_singleton_method(:cloudflare_analytics_token, original)
   end
 
   # Test-only: force billing_enabled? (and the Stripe keys it reads) for the
@@ -124,6 +140,7 @@ module ActiveSupport
 
     include BillingGateTestHelper
     include SlackGateTestHelper
+    include CloudflareAnalyticsGateTestHelper
     include PaySubscriptionMirror
     include QueryCountingTestHelper
 

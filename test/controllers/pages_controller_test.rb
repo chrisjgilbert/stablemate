@@ -251,14 +251,4 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
       assert_match "test-token-123", response.body
     end
   end
-
-  private
-
-    def with_cloudflare_analytics_token(value)
-      original = ENV["CLOUDFLARE_ANALYTICS_TOKEN"]
-      ENV["CLOUDFLARE_ANALYTICS_TOKEN"] = value
-      yield
-    ensure
-      ENV["CLOUDFLARE_ANALYTICS_TOKEN"] = original
-    end
 end
