@@ -1019,6 +1019,27 @@ cheapest first:
   belongs with its siblings, not because it is deferred. The threshold must be
   relative to the monitor's own interval, it must fire once, and it needs its own
   wording pointing at setup docs.
+
+  **Two things it must specify that an implementer cannot read off the model,
+  because on this monitor every obvious answer is `nil`.**
+
+  *What the threshold is measured from.* `persist_create` sets `status: "pending"`
+  and **no `next_due_at`** (`project/monitor_sync.rb:234-245`), so on a monitor
+  that has never checked in `last_ping_at` is nil, `next_due_at` is nil,
+  `due_with_grace_at` returns nil and `overdue_now?` is false. None of the
+  existing detection machinery applies. The anchor is **`created_at`**, which
+  under §3.1 is the moment `stablemate:sync` registered it — state that, because
+  the tempting alternative is to set `next_due_at` in `persist_create` and reuse
+  the `overdue` scope, and that quietly changes what the UI shows (`next_check_upcoming?`
+  starts reporting a due time for a monitor that has never run).
+
+  *That the first sweep after deploy is not a broadcast.* Every monitor already
+  sitting `pending` is instantly past any threshold measured from `created_at`, so
+  the job's first run emails for all of them at once — and under §7 `pending` is
+  the *normal* state for a newly-registered app, so this is a real population, not
+  an edge case. Either bound the first sweep to monitors created after the feature
+  ships, or backfill the alert as already-sent. §12's "does not alert twice" does
+  not cover "does not alert forty times on the first run".
 - **Notice a whole project going quiet** — the most recent check-in anywhere in
   the project older than the shortest interval-plus-grace in it. Needs a
   project-level incident record.
@@ -1256,7 +1277,11 @@ design dependency. Decide §10 when convenient; do not stop for it.
   has no Ruby matrix today; a test that only ever runs on 3.3 cannot catch it.
 - **Never-checked-in alert (§9.1).** A monitor registered and never checked in
   alerts once, after its own interval rather than a fixed delay, with copy
-  distinct from a missed check-in — and does not alert twice.
+  distinct from a missed check-in — and does not alert twice. Measured from
+  `created_at`, since `next_due_at` and `last_ping_at` are both nil on such a
+  monitor. **And the first sweep after deploy does not alert for a backlog of
+  pre-existing `pending` monitors** — seed several, run the job, assert on the
+  delivery count, not just on one monitor's behaviour.
 - **Browser: onboarding.** A brand-new user reaches real instructions from the
   page they land on, and no surface offers monitor creation (§7).
 - **Tenant isolation.** The same task name in two projects; checked in with project
