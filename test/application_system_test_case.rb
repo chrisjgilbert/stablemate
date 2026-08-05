@@ -14,16 +14,9 @@ require "capybara/cuprite"
 preinstalled = File.join(ENV["PLAYWRIGHT_BROWSERS_PATH"].to_s, "chromium")
 CHROMIUM_PATH = ENV["CHROMIUM_PATH"].presence || (preinstalled if File.exist?(preinstalled))
 
-# In CI, an explicit path is not optional. The workflow pins the Chrome version it
-# installs and passes that binary here; if it ever stops arriving, falling back to
-# whatever Chrome the runner image happens to ship would silently void that pin —
-# a green check against an unpinned browser. A pin you can't detect losing is not
-# a pin.
-#
-# The rule lives here rather than as a shell test on one workflow step, because
-# this file owns the tiers: every route into the system suite under CI inherits it,
-# and a step that never reaches the suite (a docs-only run with no Gemfile) is not
-# wrongly failed by it.
+# In CI the path is not optional: the workflow installs a pinned Chrome and passes
+# it here, and falling back to whatever the runner image ships would mean a green
+# check against an unpinned browser.
 if ENV["CI"].present? && ENV["CHROMIUM_PATH"].blank?
   raise "CHROMIUM_PATH is not set. CI must drive the pinned browser it installed, " \
         "not whichever Chrome the runner image ships — see .github/workflows/ci.yml."

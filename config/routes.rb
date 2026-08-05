@@ -1,8 +1,10 @@
 Rails.application.routes.draw do
   # Authentication (Rails 8 generator). The session resource is the sign-in/out
   # endpoint; we add friendly /sign_in + /sign_up aliases per the design (R3).
-  resource :session
-  resources :passwords, param: :token
+  # `only:` trims the generator's default seven-a-piece down to the actions the
+  # controllers implement — the rest routed to nothing.
+  resource :session, only: %i[new create destroy]
+  resources :passwords, param: :token, only: %i[new create edit update]
 
   get  "sign_in",  to: "sessions#new",        as: :sign_in
   get  "sign_up",  to: "registrations#new",   as: :sign_up

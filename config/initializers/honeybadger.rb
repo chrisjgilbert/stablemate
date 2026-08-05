@@ -1,45 +1,22 @@
-# The two Honeybadger settings that are ours rather than the gem's, both of them
-# here rather than in config/honeybadger.yml: WHERE THE API KEY COMES FROM (see
-# the assignment inside `configure` below) and WHAT AN ERROR REPORT IS ALLOWED TO
-# CARRY off our infrastructure (the rest of this note). Everything else — env,
-# root, insights — stays in the YAML, which is where the gem's docs put it.
+# The two Honeybadger settings that are ours rather than the gem's: where the API
+# key comes from, and what an error report may carry off our infrastructure.
+# Everything else — env, root, insights — stays in config/honeybadger.yml.
 #
-# Honeybadger is a third party, so filtering is a privacy decision, not a tuning
-# knob — and its own defaults are far narrower than ours: it filters `password`,
-# `password_confirmation` and `HTTP_AUTHORIZATION`, and nothing else. (It does
-# pick up Rails' `config.filter_parameters` for notices raised inside a request,
-# from the Rack env — but not for one raised in a job or a rake task, where the
-# only list is the one below.) Everything we already decided was too sensitive to
-# write to our own logs was still being sent to someone else's.
+# Honeybadger is a third party, so filtering is a privacy decision. Its defaults
+# cover only `password`, `password_confirmation` and `HTTP_AUTHORIZATION`, and it
+# picks up Rails' filter_parameters only for notices raised inside a request —
+# not in a job. Four fields leak separately, so each is closed separately:
 #
-# FOUR leaks, closed separately because Honeybadger reports each in its own
-# field, and a fix to one does not reach the others:
+#   1. PARAMS — reuse Rails' list verbatim so the two can't drift.
+#   2. HTTP_COOKIE — reported raw, and carries the signed session_id cookie.
+#      Honeybadger's per-cookie filter matches NAMES, and neither of ours looks
+#      like a secret to a keyword match, so the whole header goes.
+#   3. THE URL — the ping token is a credential in the path (/ping/:ping_token),
+#      which no param filtering reaches. A before_notify hook rewrites it.
+#   4. THE BREADCRUMB TRAIL — the same path arrives again via Rails'
+#      process_action payload, which filters the query string only.
 #
-#   1. PARAMS — reuse Rails' list verbatim (`:token`, `:_key`, `:secret`,
-#      `:crypt`, `:salt`, `:email`, …) so the two can never drift. Adding a key
-#      in filter_parameter_logging.rb now protects both places at once.
-#
-#   2. THE COOKIE HEADER — `HTTP_COOKIE` is reported raw, and it carries the
-#      signed `session_id` cookie: anyone holding that value resumes the
-#      session. No param list covers it (it is a header, not a param), and the
-#      per-cookie filter matches on cookie NAMES — neither `session_id` nor
-#      `_stablemate_session` looks like a secret to a keyword match. Both of our
-#      cookies are credentials, so the whole header goes.
-#
-#   3. THE URL — the ping token is a credential and travels in the path
-#      (`/ping/:ping_token`), where no amount of param filtering reaches it. A
-#      before_notify hook rewrites it out of the reported URL. Anyone holding a
-#      raw ping token can forge check-ins for that monitor, so this is the same
-#      class of secret as an API key, not merely an identifier.
-#
-#   4. THE BREADCRUMB TRAIL — the same path arrives a second time, because
-#      Honeybadger records Rails' `start_processing`/`process_action` events and
-#      keeps their `:path` payload. That is `request.filtered_path`, which
-#      filters the QUERY STRING only, so a path-segment credential is still raw.
-#      Redacting the `url` field alone left the token sitting in the trail.
-#
-# The privacy policy describes exactly this behaviour; if you change what is
-# filtered, change that page too.
+# The privacy policy describes this behaviour; change it there too.
 
 # Initializers load alphabetically, so `stablemate.rb` hasn't run yet — load it
 # now for honeybadger_api_key below. stablemate.rb self-guards the second load.
@@ -50,24 +27,18 @@ ping_token_in_path = %r{/ping/[^/?#]+}
 redacted_ping_path = "/ping/[FILTERED]"
 
 Honeybadger.configure do |config|
-  # The key is NOT in config/honeybadger.yml, because that file is git-tracked and
-  # self-hosters clone it: a literal there ships our project's credential to
-  # everyone and routes their exceptions into it. ENV first, then credentials —
-  # the same rule as every other third-party secret. nil is a supported state: the
-  # gem logs "API key is missing" and drops the notice, so a keyless instance
-  # boots and runs normally with reporting off.
+  # Not in config/honeybadger.yml: that file is git-tracked and self-hosters clone
+  # it, so a literal there would ship our credential to everyone. ENV first, then
+  # credentials — the rule for every third-party secret. nil is supported; the gem
+  # drops the notice and a keyless instance runs normally with reporting off.
   #
-  # ⚠️ OWNER ACTION: the key that used to live in the YAML is in this repository's
-  # git history permanently and must be ROTATED in the Honeybadger dashboard. No
-  # code change can undo that; deleting the line only stops it spreading further.
+  # ⚠️ OWNER ACTION: the key that used to live in the YAML is permanently in this
+  # repository's git history and must be ROTATED in the Honeybadger dashboard.
   #
-  # Assigned only when we actually have one. A value set from a `configure` block
-  # outranks every other source the gem reads (Config#get checks @ruby first), so
-  # an unconditional assignment would push `nil` over a key a self-hoster set the
-  # gem's own way — in their honeybadger.yml, or via HONEYBADGER_CONFIG_PATH —
-  # and switch their reporting off with nothing to read that said why. Skipping
-  # the assignment leaves those paths intact, and there is no key in the
-  # repository for them to fall back TO.
+  # Assigned only when we have one. A value set from `configure` outranks every
+  # other source the gem reads, so an unconditional assignment would push nil over
+  # a key a self-hoster set the gem's own way and silently switch their reporting
+  # off.
   if (api_key = Stablemate.honeybadger_api_key)
     config.api_key = api_key
   end

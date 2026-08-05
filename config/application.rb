@@ -1,20 +1,15 @@
 require_relative "boot"
 
-# Not `rails/all` — nothing here declares an attachment or rich text, so three
-# frameworks were booting per process and mounting routes that could never match.
-# This is exactly what `rails new --skip-active-storage --skip-action-mailbox
-# --skip-action-text` generates, commented-out lines included, so the omissions
-# say so themselves.
+# Not `rails/all` — nothing here declares an attachment or rich text. This is what
+# `rails new --skip-active-storage --skip-action-mailbox --skip-action-text`
+# generates. Re-enabling one takes more than uncommenting: Active Storage also
+# needs a service in the environment files, a config/storage.yml, a volume, the
+# image_processing/ruby-vips pair (plus libvips back in the Dockerfile), and the
+# `/storage` ignore rules restored to .gitignore and .dockerignore — they went
+# with the directory, so uploads would otherwise be committed and shipped.
 #
-# Uncommenting one is half the job: an attachment also needs
-# `config.active_storage.service` in the environment files, a `config/storage.yml`,
-# a volume to persist it, and the image_processing/ruby-vips pair (see the Gemfile).
-#
-# ON A RAILS UPGRADE, run `bin/rails app:update`. With `rails/all` a new framework
-# arrived for free; naming them means a Rails that adds one leaves us silently
-# without it. app:update regenerates this file from the current template and
-# re-derives the three skips from what is actually loaded, so the omissions
-# survive and anything new shows up as a conflict to review.
+# Run `bin/rails app:update` on a Rails upgrade — naming the frameworks means a
+# Rails that adds one leaves us without it until this list is regenerated.
 require "rails"
 # Pick the frameworks you want:
 require "active_model/railtie"

@@ -52,15 +52,10 @@ module Monitoring
       # restoring a stale `up`/`down` verbatim would either hide a real outage or
       # assert one that may have ended.
       #
-      # NO BACKFILL for the migration cohort, deliberately (launch-findings tail).
-      # A monitor already `suspended` when status_before_suspension was added reads
-      # nil here and takes the re-evaluating branch — the F12 bug, for that cohort
-      # only. It stays that way because nothing anywhere records whether such a
-      # monitor had been paused, so there is nothing to backfill FROM: a migration
-      # could only guess, and guessing "paused" would silently stop monitoring live
-      # jobs, which is strictly worse than the un-pause it would prevent. The
-      # cohort is also empty in production — suspension is reachable only through
-      # the Stripe downgrade path, and the managed instance has not launched.
+      # Monitors suspended before status_before_suspension existed read nil here
+      # and take the re-evaluating branch. Deliberately not backfilled: nothing
+      # records whether they had been paused, and guessing "paused" would silently
+      # stop monitoring live jobs.
       def reactivate!
         return unless @monitor.suspended?
 

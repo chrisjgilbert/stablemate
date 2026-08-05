@@ -5,31 +5,19 @@ on:
     branches: ["main"]
   pull_request:
 
-# Third-party actions are pinned to a COMMIT SHA, with the human-readable
-# version in the trailing comment. A tag is a moving pointer: `@v7` and even
-# `@v0.10.0` can be repointed at any time by whoever owns the repo, and the
-# deploy job below runs those actions with five secrets and an authenticated SSH
-# agent already in its environment. A retag there is remote code execution
-# against our production credentials, with no diff and no review. A SHA can't be
-# moved.
+# Third-party actions are pinned to a COMMIT SHA with the version in a trailing
+# comment. A tag can be repointed at any time, and the deploy job below runs
+# these actions with five production secrets and an authenticated SSH agent in
+# its environment. Dependabot understands SHA pins and bumps both parts.
 #
-# This does NOT freeze updates — dependabot understands SHA pins and bumps both
-# the SHA and the version comment. To change one by hand, resolve the tag to the
-# COMMIT it points at:
+# To re-pin by hand, resolve the tag to the commit it points at:
 #   git ls-remote https://github.com/<owner>/<repo> 'refs/tags/<tag>*'
-# and take the `refs/tags/<tag>^{}` line if there is one. An ANNOTATED tag has
-# its own object, and `--refs` hides exactly that peel line — pin the tag object
-# by mistake and dependabot no longer recognises the pin as a version, so the
-# action silently stops being updated. setup-chrome below is annotated; the other
-# three are lightweight, where the ref is already the commit.
+# and take the `^{}` line if there is one — an annotated tag's plain ref is the
+# tag object, not the commit, and pinning that stops dependabot recognising it.
 #
-# Runs the full bin/ci (system tests included) on every push and PR — this is
-# the authoritative "is main mergeable?" gate; require it as a branch-protection
-# status check on main. The local pre-push hook only runs `bin/ci --fast`
-# (skips test:system) so `git push` stays quick — this workflow is what catches
-# the rest before merge. While the repo is docs-only (no Gemfile), bin/ci exits
-# 0 and this workflow stays green; once the app is scaffolded the full suite
-# runs.
+# Runs the full bin/ci (system tests included) on every push and PR — the
+# authoritative "is main mergeable?" gate; require it as a branch-protection
+# check. The local pre-push hook only runs `bin/ci --fast`.
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -148,27 +136,14 @@ jobs:
       # work out what a deploy needs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Deploying needs a set of secrets and variables that only the owner of a
-      # real server can supply. Until they are set, every push to main failed
-      # here — a permanently red main that trains you to ignore the X, and would
-      # hide a genuine CI failure behind an expected one. So: check first, and
-      # skip the rest of the job cleanly when the deploy isn't configured.
+      # Deploying needs secrets only the owner of a real server can supply. Until
+      # they are set, skip the rest of the job rather than leaving main
+      # permanently red — a red X you're trained to ignore hides real failures.
       #
-      # DERIVED, not listed. The first version of this step kept its own list of
-      # names, and that list was wrong the day it was written: config/deploy.yml
-      # ENV.fetches STABLEMATE_MAIL_FROM and STABLEMATE_MAIL_REPLY_TO with no
-      # default, neither was in the list, so a fully configured repo would have
-      # passed this check and then died inside `kamal deploy` on a KeyError —
-      # the exact failure the step exists to prevent. Reading the requirement
-      # out of the files that declare it means a new ENV.fetch in deploy.yml or
-      # a new $VAR in .kamal/secrets is covered with no edit here, and a name
-      # that never reaches the job `env:` block above reports as missing rather
-      # than failing later.
-      #
-      # Deliberately NOT a silent skip: it emits a notice naming exactly what is
-      # absent, so "we never set this up" and "our deploy broke" stay
-      # distinguishable — the whole point of turning the red green is that red
-      # starts meaning something again. Only names are printed, never values.
+      # The required list is DERIVED from the files that declare it, so a new
+      # ENV.fetch in deploy.yml or a new $VAR in .kamal/secrets is covered with no
+      # edit here. Not a silent skip: it names what is absent (names only, never
+      # values) so "never set up" and "broke" stay distinguishable.
       - name: Check the deploy is configured
         id: preflight
         run: |

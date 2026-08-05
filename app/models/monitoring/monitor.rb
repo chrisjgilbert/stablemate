@@ -50,19 +50,12 @@ module Monitoring
     has_many :notifications, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
     has_many :uptime_day_stats, dependent: :delete_all, foreign_key: :monitor_id, inverse_of: :monitor
 
-    # Deleting a monitor can be the act that SETTLES an account. A user dropped to
+    # Deleting a monitor can be the act that settles an account: a user dropped to
     # Free over the cap is locked into the choose-N picker (User::Subscription),
-    # and having fewer monitors is one of the two ways out — deleting a few is the
-    # obvious one, and the dashboard is where they'd do it. The release used to run
-    # only on a billing page load (M4), so until they happened to visit /billing
-    # they kept a grace banner telling them to choose which 5 monitors to keep out
-    # of a set that already fits.
-    #
-    # It hangs off the record rather than MonitorsController#destroy so EVERY
-    # deletion path gets it: deleting a whole project cascades through here, and so
-    # does a console `destroy`. after_destroy_commit, not after_destroy, because
-    # the release reactivates monitors and rewrites the user row — it must see the
-    # deletion committed, and must not run at all if it rolls back.
+    # and deleting monitors is one of the two ways out. On the record rather than
+    # MonitorsController#destroy so every deletion path gets it — a project cascade
+    # and a console destroy included. after_destroy_commit because the release
+    # rewrites the user row, so it must not run if the deletion rolls back.
     after_destroy_commit :release_owner_downgrade_lock
 
     validates :name, presence: true
@@ -77,13 +70,11 @@ module Monitoring
     # operations so they fire exactly on a real state change, not every save.)
     #
     # Deferred to after commit for the same reason Notifications::Dispatch is
-    # (F10): the webhook and choose-N reactivation paths reach here from inside
-    # ProcessedEvent.record_once's transaction, and Solid Queue is a SEPARATE
-    # database — a job enqueued pre-commit can be claimed by a worker that renders
-    # the monitor as it was BEFORE the change (a badge stuck on the old status),
-    # and a rollback (the designed Stripe-retry path) leaves an orphan job for a
-    # change that never happened. With no transaction open — the ping paths, which
-    # already broadcast outside their own with_lock — this runs inline, unchanged.
+    # (F10): the webhook paths reach here inside ProcessedEvent.record_once's
+    # transaction, and Solid Queue is a SEPARATE database — a job enqueued
+    # pre-commit can be claimed by a worker that renders the monitor as it was
+    # before the change, and a rollback leaves an orphan job. With no transaction
+    # open this runs inline, unchanged.
     def broadcast_status_update
       ActiveRecord.after_all_transactions_commit do
         %i[row badge].each do |fragment|

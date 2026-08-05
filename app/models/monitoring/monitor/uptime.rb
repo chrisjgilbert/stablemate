@@ -189,24 +189,14 @@ module Monitoring
         # disagree, and today is classified by the same up/down/partial cutoffs it
         # will get once the rollup persists it (UptimeDayStat#status).
         #
-        # Memoized because the detail page's uptime panel renders BOTH readers off
-        # one monitor — the bar and the percent — so every one of those responses
-        # ran today's incident scan twice for the same answer. (The API detail
-        # endpoint serves only the percent, so it was already paying once.) Two
-        # readers, one number, one scan. Keyed on the second it was taken in rather
-        # than memoized outright: this is a snapshot of *now*, and a `travel_to` in
-        # a test (or a day rolling over under a long-lived object) must get a fresh
-        # one instead of yesterday's. Within a render the clock does not move, so
-        # the key is stable exactly where the saving is.
+        # Deliberately NOT memoized. The only page that calls both readers is the
+        # monitor detail panel, so a memo saves exactly one scoped incidents query
+        # on one single-record page — and any memo here answers with the state at
+        # first read, which is wrong for a snapshot of *now* the moment the row
+        # changes or the day rolls over.
         def live_today_stat
           now = Time.current
-          return @live_today_stat if @live_today_stat_second == now.to_i
 
-          @live_today_stat_second = now.to_i
-          @live_today_stat = compute_live_today_stat(now)
-        end
-
-        def compute_live_today_stat(now)
           return UptimeDayStat.new(up_seconds: 0, down_seconds: 0) if paused? || suspended? || pending?
 
           window_start = [ created_at, first_ping_at, Date.current.to_time(:utc) ].compact.max

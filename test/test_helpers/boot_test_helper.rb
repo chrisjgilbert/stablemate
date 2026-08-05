@@ -2,18 +2,14 @@ require "open3"
 
 # Booting a THROWAWAY Rails process to test the things that only happen at boot.
 #
-# Some of our configuration exists only in an initializer: pay.rb registers the
-# Stripe processor and bridges its keys, honeybadger.rb assigns the API key,
-# production.rb reads STABLEMATE_HOST/SMTP_*, and Pay decides whether to mount its
-# own routes. None of that can be exercised from inside the already-booted test
-# process — the suite would have to re-run an initializer under different
-# environment variables, which is exactly what a process boundary is for. A broken
-# initializer would otherwise crash the real instance on boot with every test green.
+# Some configuration exists only in an initializer, read once under a particular
+# set of environment variables — Stripe keys, the Honeybadger key, STABLEMATE_HOST
+# and SMTP_*. The already-booted test process can't re-run an initializer under a
+# different env, which is what the process boundary is for.
 #
-# So: boot with the env under test, print the resulting config as JSON, read it
-# back. Each call pays for a full boot, so this belongs to the handful of decisions
-# that genuinely only exist at boot — see BillingBootTest, HoneybadgerApiKeyTest,
-# PayAutomountRoutesTest and ProductionEnvConfigTest, which are its only callers.
+# Each call pays for a FULL Rails boot, so keep the callers few: this is for
+# decisions that genuinely cannot be reached any other way, not for anything
+# merely convenient to assert at boot.
 module BootTestHelper
   # `env` defaults to the test environment; pass RAILS_ENV yourself to override it
   # (ProductionEnvConfigTest boots production). A nil value UNSETS the variable in
