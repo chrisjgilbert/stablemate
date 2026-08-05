@@ -22,7 +22,7 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
   # Fixed ids, and the subscription's id returned: the downgrade actually reaches
   # Stripe to cancel (cancel_now!), so every test here has to stub and assert on
   # that same subscription.
-  def give_active_pro_subscription!(subscription_id: "sub_dg_123", status: "active")
+  def pro_subscription_id!(subscription_id: "sub_dg_123", status: "active")
     give_pro_subscription!(status: status, customer_id: "cus_dg_123",
       subscription_id: subscription_id).processor_id
   end
@@ -52,7 +52,7 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
   test "create cancels the Stripe subscription end-to-end and suspends the rest" do
     with_billing_enabled do
       monitors = build_monitors(FREE + 2)
-      sub_id = give_active_pro_subscription!
+      sub_id = pro_subscription_id!
       stub_stripe_subscription_cancel(sub_id)
       sign_in @user
 
@@ -75,7 +75,7 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
     with_billing_enabled do
       build_monitors(FREE - 2)
       @user.update!(plan: "free") # a failed payment already dropped the plan
-      sub_id = give_active_pro_subscription!(status: "past_due")
+      sub_id = pro_subscription_id!(status: "past_due")
       stub_stripe_subscription_cancel(sub_id)
       sign_in @user
 
@@ -89,7 +89,7 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
   test "a Stripe cancel failure leaves no monitor suspended (nothing half-done)" do
     with_billing_enabled do
       monitors = build_monitors(FREE + 2)
-      sub_id = give_active_pro_subscription!
+      sub_id = pro_subscription_id!
       stub_stripe_error(:delete, "/v1/subscriptions/#{sub_id}", status: 500)
       sign_in @user
 
@@ -130,7 +130,7 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
   test "a Pro user under the cap downgrades via confirm, cancelling Stripe" do
     with_billing_enabled do
       build_monitors(FREE - 2)
-      sub_id = give_active_pro_subscription!
+      sub_id = pro_subscription_id!
       stub_stripe_subscription_cancel(sub_id)
       sign_in @user
 
@@ -226,7 +226,7 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
   test "resolving the involuntary choice cancels a subscription Stripe is still dunning" do
     with_billing_enabled do
       monitors = build_monitors(FREE + 2)
-      sub_id = give_active_pro_subscription!(status: "past_due")
+      sub_id = pro_subscription_id!(status: "past_due")
       @user.sync_plan_from_subscription! # ⇒ free + choose-N lock, nothing suspended
       assert @user.reload.must_choose_downgrade?
       stub_stripe_subscription_cancel(sub_id)
@@ -263,7 +263,7 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
   test "a voluntary over-cap downgrade says the subscription will be cancelled" do
     with_billing_enabled do
       build_monitors(FREE + 2)
-      give_active_pro_subscription!
+      pro_subscription_id!
       sign_in @user
 
       get new_billing_downgrade_path

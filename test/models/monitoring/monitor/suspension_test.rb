@@ -162,15 +162,10 @@ class Monitoring::Monitor::SuspensionTest < ActiveSupport::TestCase
     monitor.update!(next_due_at: 10.minutes.ago)
     monitor.flag_missed!
 
-    statements = sql_executed_during { monitor.suspend! }
-    locked_at  = statements.index { |sql| sql.match?(/FROM "monitors".*FOR UPDATE/m) }
-    read_at    = statements.index { |sql| sql.match?(/FROM "incidents".*resolved_at/m) }
-
-    assert locked_at, "suspend! must lock the monitor row"
-    assert read_at, "suspend! must read the open incident"
-    assert locked_at < read_at,
-      "suspend! must hold the row lock before reading the incident, or a racing sweep " \
-      "can open one between the read and the flip"
+    # Lock first, then read: with the order reversed a concurrent sweep can open
+    # an incident between the read and the flip, and it survives the suspend!.
+    assert_sql_order(before: /FROM "monitors".*FOR UPDATE/m,
+      after: /FROM "incidents".*resolved_at/m) { monitor.suspend! }
   end
 
   # The other ordering: the sweep committed first, so the in-memory monitor is
@@ -198,13 +193,4 @@ class Monitoring::Monitor::SuspensionTest < ActiveSupport::TestCase
     refute_includes Monitoring::Monitor.detectable, monitor
     refute_includes Monitoring::Monitor.overdue, monitor
   end
-
-  private
-    # The SQL a block issues, in order — used to pin lock-before-read ordering.
-    def sql_executed_during
-      statements = []
-      collect = ->(*, payload) { statements << payload[:sql] }
-      ActiveSupport::Notifications.subscribed(collect, "sql.active_record") { yield }
-      statements
-    end
 end

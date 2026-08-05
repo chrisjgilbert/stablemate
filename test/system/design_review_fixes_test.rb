@@ -10,11 +10,6 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
 
   setup { @alice = users(:alice); @project = @alice.projects.sole }
 
-  # This file's user is @alice, and the caller names the subscription it stubs.
-  def give_active_pro_subscription!(sub_id)
-    give_pro_subscription!(user: @alice, subscription_id: sub_id)
-  end
-
   # S-DR1 (WU-2, H1) — pausing a DOWN monitor clears its incident, and after a
   # ping + resume the badge returns to Up with no lingering "down" banner. This is
   # the flow that previously stranded an open incident behind an "up" badge.
@@ -51,7 +46,7 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
       @project.monitors.delete_all
       (FREE - 2).times { |i| @project.monitors.create!(name: "Small#{i}", **ATTRS) }
       sub_id = "sub_sys_#{SecureRandom.hex(4)}"
-      give_active_pro_subscription!(sub_id)
+      give_pro_subscription!(user: @alice, subscription_id: sub_id)
       stub_stripe_subscription_cancel(sub_id)
 
       sign_in @alice
