@@ -25,7 +25,7 @@ Actions is green → tick the boxes here → next chunk.
 
 | # | Chunk | Finding | Status | PR |
 |---|-------|---------|--------|-----|
-| 1 | Adopt `minitest-mock`; retire the hand-rolled method/ENV stubs | #3 | **IN REVIEW** | #74 |
+| 1 | Adopt `minitest-mock`; retire the hand-rolled method/ENV stubs | #3 | **IN REVIEW** | #77 |
 | 2 | Finish the half-done extractions; kill `User.take` | #5, #6 | **TODO** | — |
 | 3 | Stop monkey-patching globals in the job tests | #4 | **TODO** | — |
 | 4 | Humble-Object the production env config; retire 8 boots | #2 | **TODO** | — |
