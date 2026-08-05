@@ -22,6 +22,29 @@ if ENV["CI"].present? && ENV["CHROMIUM_PATH"].blank?
         "not whichever Chrome the runner image ships — see .github/workflows/ci.yml."
 end
 
+# Capybara's stock 2s. A page that renders in 200ms locally can exceed that on a
+# loaded CI box or a shared runner, and a waiting assertion that gives up early
+# fails a test the code did nothing wrong in. 5s costs nothing when things are
+# fast — waiting assertions return as soon as the condition holds — and only
+# spends the extra when the machine is busy, which is exactly when it should.
+#
+# NB this does NOT paper over a stale-element race: holding a node reference
+# across a Turbo re-render raises ObsoleteNode however long the window is. Those
+# have to be re-found instead — see the plan cards in pricing_page_test.
+# `.presence`, not ENV.fetch's default: a workflow that sets this from a step
+# output it could not produce passes an EMPTY STRING, which fetch treats as
+# present and Float() then rejects — killing the whole suite at file load rather
+# than falling back. Exactly the hazard CHROMIUM_PATH guards against above.
+Capybara.default_max_wait_time = Float(ENV["CAPYBARA_MAX_WAIT_TIME"].presence || 5)
+
+# Let `fill_in` / `select` find a control by its aria-label. Several controls
+# here are labelled that way (the interval and grace presets), and without this
+# a test has to reach for `find("select[aria-label=…]").select(…)` — which
+# captures a node and then acts on it, the shape that goes stale across a
+# re-render. Asking for the ACCESSIBLE NAME is both the sturdier selector and
+# the more honest description of what the user is looking at.
+Capybara.enable_aria_label = true
+
 Capybara.register_driver(:stablemate_cuprite) do |app|
   Capybara::Cuprite::Driver.new(
     app,

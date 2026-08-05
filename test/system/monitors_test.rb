@@ -10,11 +10,11 @@ class MonitorsTest < ApplicationSystemTestCase
 
   test "S3: create a monitor and reveal the ping-URL card and curl snippet" do
     sign_in @user
-    first(:link, "New monitor").click
+    click_on "New monitor", match: :first
 
     fill_in "Name", with: "Nightly export"
-    find("select[aria-label='Expected interval preset']").select("Hourly")
-    find("select[aria-label='Grace period preset']").select("5 minutes")
+    select "Hourly", from: "Expected interval preset"
+    select "5 minutes", from: "Grace period preset"
     click_on "Create monitor"
 
     # Post-create detail state reveals the ping-URL card + curl snippet.

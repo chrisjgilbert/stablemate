@@ -30,7 +30,8 @@ Actions is green → tick the boxes here → next chunk.
 | 3 | Stop monkey-patching globals in the job tests | #4 | **MERGED** | #87 |
 | 4 | Humble-Object the production env config; retire 8 boots | #2 | **MERGED** | #88 |
 | 5 | Two owners: fixture-free tests get a fixture-free user | #1 | **MERGED** | #89 |
-| 6 | `rubocop-minitest` to stop the regressions | #7 | **IN REVIEW** | #90 |
+| 6 | `rubocop-minitest` to stop the regressions | #7 | **MERGED** | #90 |
+| 7 | The system suite's load sensitivity — an Erratic Test | #8 | **IN REVIEW** | #91 |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
 
@@ -249,6 +250,58 @@ method that minitest then ran with no request behind it, but `private def` is
 the cop's own answer and the pattern this suite already uses. The fix was the
 helper, not the cop.
 
+## Chunk 7 — The system suite's load sensitivity (finding #8)
+
+Recorded in chunk 1 as "the suite is somewhat load-sensitive — worth knowing
+before blaming a diff for it", which was letting it off. **"Passes unless the
+machine is busy" is an Erratic Test**: the result depends on something that is
+not the code under test.
+
+Reproduced by shrinking Capybara's wait window rather than waiting for a loaded
+runner — which turned an intermittent failure into a deterministic one, and
+showed it was **two** bugs wearing one costume.
+
+- [x] **A real race.** A node captured and then acted on goes stale when a Turbo
+      render replaces it in between — Capybara says so by name
+      (`Cuprite::ObsoleteNode`). `first(:link, …).click`,
+      `find("select[aria-label=…]").select(…)` and `within all(".plan")[1]` all
+      have this shape. The action helpers (`click_on`, `select`, `within` with a
+      selector) re-find as part of acting, so they cannot go stale. **No wait
+      time fixes this one.**
+- [x] `enable_aria_label`, which is what lets `select "Hourly", from: "Expected
+      interval preset"` resolve at all — those controls are labelled by
+      aria-label, and without it a test must use the capture-then-act form.
+- [x] `all(".plan")[1]` was doubly wrong: the markup already carries
+      `.plan--pro`, so the test indexed by position into a list it could have
+      named, and would have checked the wrong card if the plans were reordered.
+- [x] **An ordinary timeout.** `default_max_wait_time` was Capybara's stock 2s,
+      never configured. 5s costs nothing when things are fast — waiting
+      assertions return as soon as the condition holds. Read with `.presence`,
+      not `ENV.fetch`'s default: a workflow setting it from a step output it
+      could not produce passes an EMPTY STRING, which `fetch` treats as present
+      and `Float()` then rejects, killing the suite at file load. The first
+      version of this chunk had that bug — twelve lines below the comment in the
+      same file warning about it for `CHROMIUM_PATH`.
+
+**Five capture-then-act sites remain, and are out of scope rather than missed.**
+Capybara's action helpers only re-find for links, buttons and form fields
+addressed by their accessible name. These five target a `<summary>`, a
+`data-testid` on a non-button, and checkboxes selected by CSS attribute — none
+of which `click_on` / `check` can locate — so `find(…).click` is the only form
+available. The window is a single CDP round trip with no intervening render,
+which is why they have never been seen to fail; the eight that were fixed all
+spanned a Turbo re-render.
+
+  billing_test.rb:72, design_review_fixes_test.rb:58 & :83,
+  downgrade_grace_test.rb:44, monitors_test.rb:92
+
+| wait window | before | after |
+|---|---|---|
+| 0.4s | `ObsoleteNode` + a timeout | only the Turbo Stream broadcast, which genuinely needs longer than 400ms for a job + cable round trip |
+| 1s | — | green |
+| 2s (the old stock default) | intermittent under load | green |
+| 5s (the new default) | — | green |
+
 ---
 
 ## Where this leaves the suite
@@ -262,6 +315,8 @@ helper, not the cop.
 | duplicate SQL-capture helpers | 4 | **1** |
 | `delete_all` / `destroy_all` | 44 in 24 files | **30 in 12** |
 | minitest lint cops | none | **on, with probes** |
+| system suite at a 2s wait | intermittent under load | **green** |
+| captured-node interactions, reducible | 8 | **0** |
 
 Still open, and deliberately so: `monitors_controller_test` and
 `projects_controller_test` both use the fixture monitors *and* demolish them per
