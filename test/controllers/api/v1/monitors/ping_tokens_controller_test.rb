@@ -17,7 +17,7 @@ class Api::V1::Monitors::PingTokensControllerTest < ActionDispatch::IntegrationT
 
     new_url = JSON.parse(response.body)["ping_url"]
     refute_equal old_token, @monitor.reload.ping_token
-    assert new_url.include?(@monitor.ping_token)
+    assert_includes new_url, @monitor.ping_token
 
     # Old token no longer pings.
     post ping_url(old_token)

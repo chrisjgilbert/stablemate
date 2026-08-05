@@ -20,7 +20,11 @@ class Accounts::PasswordsControllerTest < ActionDispatch::IntegrationTest
   # What every rejected change must look like from outside. The second half is the
   # one that matters: WU-11 is precisely the bug where the response said one thing
   # and the stored digest another, so "422" alone would have passed happily.
-  def assert_password_unchanged
+  # `private def` because a public, argument-less method with assertions in it is
+  # what a mis-named test looks like — Minitest/TestMethodName can't tell the two
+  # apart, and the cop earns its keep catching the real thing (a `def`ed test that
+  # never runs).
+  private def assert_password_unchanged
     assert_response :unprocessable_entity
     assert @user.reload.authenticate("password1234"), "the old password must still work"
   end

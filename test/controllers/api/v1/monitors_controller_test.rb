@@ -83,7 +83,7 @@ class Api::V1::MonitorsControllerTest < ActionDispatch::IntegrationTest
   test "index includes ping_url and status fields" do
     get api_v1_monitors_url, headers: auth
     monitor = JSON.parse(response.body)["monitors"].first
-    assert monitor["ping_url"].include?("/ping/")
+    assert_includes monitor["ping_url"], "/ping/"
     assert monitor.key?("status")
     assert monitor.key?("next_due_at")
   end

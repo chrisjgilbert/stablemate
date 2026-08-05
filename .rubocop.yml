@@ -1,9 +1,20 @@
 # Omakase Ruby styling for Rails
 inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 
+# Minitest cops, on top of omakase. These are the mechanical half of the test
+# smells docs/specs/test-suite-cleanup.md removed by hand — an assertion that
+# cannot fail, `assert(a == b)` instead of assert_equal, a test with no
+# assertion at all. Without them nothing stops the same shapes coming back.
+plugins:
+  - rubocop-minitest
+
 # The companion gem (gem/) is a separate codebase with its own toolchain and
 # conventions; it is not linted by the host app's rubocop run.
 AllCops:
+  # Opt in to cops added in newer rubocop-minitest releases rather than being
+  # nagged about each one as "pending" — the point of adding the plugin is to
+  # catch these shapes, so a new check should apply on upgrade.
+  NewCops: enable
   Exclude:
     - "gem/**/*"
     # Vendored migrations copied verbatim from the Pay gem's install generator
@@ -16,3 +27,51 @@ AllCops:
 # # Use `[a, [b, c]]` not `[ a, [ b, c ] ]`
 # Layout/SpaceInsideArrayLiteralBrackets:
 #   Enabled: false
+
+# --- rubocop-minitest -------------------------------------------------------
+#
+# The correctness cops are the point: they are the mechanical half of the smells
+# docs/specs/test-suite-cleanup.md removed by hand. Minitest/UselessAssertion in
+# particular catches an assertion that cannot fail — the exact defect the review
+# passes found TWICE in tests written for this ledger, both times in tests whose
+# whole job was to pin something.
+#
+# Four are switched off, because they are style opinions that fight conventions
+# this project has chosen deliberately rather than defects:
+
+# System tests here are one robust test per key user flow (CLAUDE.md: "Keep them
+# about flows, not coverage theatre"), and a flow legitimately asserts a dozen
+# things on the way through. This cop wants them split into fragments that each
+# re-drive the browser, which is slower and reads worse.
+Minitest/MultipleAssertions:
+  Enabled: false
+
+# `assert_predicate monitor, :up?` over `assert monitor.up?`. No failure is
+# caught either way — the message improves slightly, the reading gets worse, and
+# it would rewrite 228 call sites to say the same thing.
+Minitest/AssertPredicate:
+  Enabled: false
+Minitest/RefutePredicate:
+  Enabled: false
+
+# Blank line before every trailing assertion block. Pure layout, 381 sites, and
+# the four-phase spacing in this suite is already deliberate.
+Minitest/EmptyLineBeforeAssertionMethods:
+  Enabled: false
+
+# `assert_equal true, x` over `assert x`. The cop calls this redundant; here it
+# is deliberately STRICTER. The boot tests read their values back out of parsed
+# JSON, where `force_ssl` arriving as the string "true" instead of `true` is a
+# real regression that `assert` would wave through — and these are the SSL and
+# mail-delivery switches, so the distinction is worth keeping. Marked "unsafe
+# correctable" by rubocop-minitest itself for exactly this reason.
+Minitest/AssertTruthy:
+  Enabled: false
+Minitest/RefuteFalse:
+  Enabled: false
+
+# `Minitest/NoAssertions` is opt-in (`Enabled: false` upstream, so `NewCops` does
+# not reach it) — and a test that asserts nothing is the headline smell this
+# plugin is here to stop, so it has to be turned on by name. Zero offences today.
+Minitest/NoAssertions:
+  Enabled: true
