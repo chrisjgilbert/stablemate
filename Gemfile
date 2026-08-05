@@ -97,6 +97,13 @@ group :test do
   # Puma/Cuprite). Stripe paths are exercised end-to-end against stubbed
   # api.stripe.com responses, never the live API.
   gem "webmock", require: false
+  # Object#stub, for the config-gate helpers in test_helper.rb. Minitest 6
+  # dropped minitest/mock.rb — but it was EXTRACTED, not deleted (see minitest's
+  # History.rdoc), to this gem, by minitest's own author and with no runtime
+  # dependencies, so it sits alongside minitest 6 rather than pinning us back.
+  # Without it the gates get hand-rolled define_singleton_method save/restore,
+  # which is what this replaced. require: false — test_helper requires it.
+  gem "minitest-mock", require: false
 end
 
 gem "honeybadger", "~> 6.9"

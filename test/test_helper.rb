@@ -4,6 +4,7 @@ require "rails/test_help"
 require_relative "test_helpers/session_test_helper"
 require_relative "test_helpers/boot_test_helper"
 require_relative "test_helpers/query_counting_test_helper"
+require_relative "test_helpers/config_gate_test_helper"
 
 # Network lockdown: no test may reach the real internet. Outbound HTTP is blocked
 # so an accidental live Stripe call fails loudly instead of hitting the API (or
@@ -14,101 +15,6 @@ require "webmock/minitest"
 WebMock.disable_net_connect!(allow_localhost: true)
 require_relative "test_helpers/stripe_api_stubs"
 require_relative "test_helpers/pay_subscription_mirror"
-
-# Toggle the hosted-tier billing config-gate around a block. Stripe keys drive
-# Stablemate.billing_enabled? at runtime; rather than poke ENV/credentials we
-# swap the predicate (and the keys callers read) for the duration of the block.
-# Mirrors how the cap tests use stub_const for the #16 gate.
-module BillingGateTestHelper
-  def with_billing_enabled
-    Stablemate.stub_billing(true) { yield }
-  end
-
-  def with_billing_disabled
-    Stablemate.stub_billing(false) { yield }
-  end
-
-  # Neutralise the only Pay handler steps that would reach the Stripe API, so a
-  # webhook can be processed end to end in tests without network. The test sets up
-  # the Pay subscription mirror directly; in production these calls keep it fresh.
-  def without_pay_stripe_network
-    sub_original = Pay::Stripe::Subscription.method(:sync)
-    Pay::Stripe::Subscription.define_singleton_method(:sync) { |*, **| nil }
-    yield
-  ensure
-    Pay::Stripe::Subscription.define_singleton_method(:sync, sub_original)
-  end
-end
-
-module SlackGateTestHelper
-  def with_slack_enabled
-    Stablemate.stub_slack(true) { yield }
-  end
-
-  def with_slack_disabled
-    Stablemate.stub_slack(false) { yield }
-  end
-end
-
-module Stablemate
-  # Test-only fixed Stripe credentials used when billing is forced on. Never real
-  # keys — just enough for the config-gate and signature verification in tests.
-  TEST_STRIPE_PUBLISHABLE_KEY = "pk_test_stablemate".freeze
-  TEST_STRIPE_SECRET_KEY      = "sk_test_stablemate".freeze
-  TEST_STRIPE_WEBHOOK_SECRET  = "whsec_stablemate_test".freeze
-
-  # Test-only fake Slack webhook URL used when Slack notifications are forced on.
-  TEST_SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/test".freeze
-
-  # Test-only: force slack_notifications_enabled? (and the webhook URL it reads)
-  # for the duration of a block, restoring the original afterward. Mirrors
-  # stub_billing — minitest 6 dropped Object#stub, so config-gate predicates are
-  # swapped by hand rather than mocked.
-  def self.stub_slack(value)
-    original = method(:slack_webhook_url)
-    define_singleton_method(:slack_webhook_url) { value ? TEST_SLACK_WEBHOOK_URL : nil }
-    yield
-  ensure
-    define_singleton_method(:slack_webhook_url, original)
-  end
-
-  # Test-only: force stripe_price_id_pro (read by Stablemate.pro_price_id) for
-  # the duration of a block. Same method-swap pattern as stub_billing/stub_slack
-  # — stripe_price_id_pro is an ENV/credentials-backed method, not a constant.
-  def self.stub_price_id_pro(value)
-    original = method(:stripe_price_id_pro)
-    define_singleton_method(:stripe_price_id_pro) { value }
-    yield
-  ensure
-    define_singleton_method(:stripe_price_id_pro, original)
-  end
-
-  # Test-only: force billing_enabled? (and the Stripe keys it reads) for the
-  # duration of a block, restoring the originals afterward (exception-safe).
-  def self.stub_billing(value)
-    originals = %i[billing_enabled? stripe_publishable_key stripe_secret_key stripe_webhook_secret]
-      .to_h { |m| [ m, method(m) ] }
-    # In the test env there are no keys at boot, so Pay::Stripe.setup never set
-    # ::Stripe.api_key. HTTP-level tests drive the real SDK, which needs one — set
-    # it to the test secret while billing is forced on, and restore afterwards.
-    original_api_key = ::Stripe.api_key
-
-    if value
-      define_singleton_method(:billing_enabled?)       { true }
-      define_singleton_method(:stripe_publishable_key) { TEST_STRIPE_PUBLISHABLE_KEY }
-      define_singleton_method(:stripe_secret_key)      { TEST_STRIPE_SECRET_KEY }
-      define_singleton_method(:stripe_webhook_secret)  { TEST_STRIPE_WEBHOOK_SECRET }
-      ::Stripe.api_key = TEST_STRIPE_SECRET_KEY
-    else
-      define_singleton_method(:billing_enabled?) { false }
-    end
-
-    yield
-  ensure
-    originals.each { |m, impl| define_singleton_method(m, impl) }
-    ::Stripe.api_key = original_api_key
-  end
-end
 
 module ActiveSupport
   class TestCase
@@ -122,20 +28,12 @@ module ActiveSupport
     # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
     fixtures :all
 
+    include ConfigGateTestHelper
     include BillingGateTestHelper
     include SlackGateTestHelper
+    include CloudflareAnalyticsTestHelper
     include PaySubscriptionMirror
     include QueryCountingTestHelper
-
-    # Force CLOUDFLARE_ANALYTICS_TOKEN for the duration of a block, restoring
-    # the original afterward. nil disables it.
-    def with_cloudflare_analytics_token(value)
-      original = ENV["CLOUDFLARE_ANALYTICS_TOKEN"]
-      ENV["CLOUDFLARE_ANALYTICS_TOKEN"] = value
-      yield
-    ensure
-      ENV["CLOUDFLARE_ANALYTICS_TOKEN"] = original
-    end
 
     # Rate-limit stores are dedicated in-process MemoryStores that persist across
     # tests within a worker; clear them before each test so ordinary per-test

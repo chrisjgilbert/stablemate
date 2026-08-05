@@ -4,13 +4,7 @@ require "test_helper"
 # secret keys (sk_). A live restricted key that read as test-mode would silently
 # drop every real webhook, stranding paying customers on Free.
 class StablemateLivemodeTest < ActiveSupport::TestCase
-  def with_secret_key(key)
-    original = Stablemate.method(:stripe_secret_key)
-    Stablemate.define_singleton_method(:stripe_secret_key) { key }
-    yield
-  ensure
-    Stablemate.define_singleton_method(:stripe_secret_key, original)
-  end
+  def with_secret_key(key, &block) = Stablemate.stub(:stripe_secret_key, key, &block)
 
   test "live secret and restricted keys are both live mode" do
     with_secret_key("sk_live_abc") { assert Stablemate.stripe_livemode? }

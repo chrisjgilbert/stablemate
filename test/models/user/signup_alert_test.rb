@@ -3,7 +3,7 @@ require "test_helper"
 class User::SignupAlertTest < ActiveSupport::TestCase
   test "deliver! posts a message naming the user to the Slack webhook" do
     with_slack_enabled do
-      request = stub_request(:post, Stablemate::TEST_SLACK_WEBHOOK_URL)
+      request = stub_request(:post, TestCredentials::SLACK_WEBHOOK_URL)
         .with(
           headers: { "Content-Type" => "application/json" },
           body: { text: "New Stablemate signup: #{users(:alice).email_address}" }.to_json
@@ -29,7 +29,7 @@ class User::SignupAlertTest < ActiveSupport::TestCase
       alice = users(:alice)
       alice.update_column(:email_address, "a<b&c>d@example.com")
 
-      request = stub_request(:post, Stablemate::TEST_SLACK_WEBHOOK_URL)
+      request = stub_request(:post, TestCredentials::SLACK_WEBHOOK_URL)
         .with(body: { text: "New Stablemate signup: a&lt;b&amp;c&gt;d@example.com" }.to_json)
         .to_return(status: 200, body: "ok")
 
@@ -41,7 +41,7 @@ class User::SignupAlertTest < ActiveSupport::TestCase
 
   test "deliver! logs a non-2xx response instead of treating it as delivered" do
     with_slack_enabled do
-      stub_request(:post, Stablemate::TEST_SLACK_WEBHOOK_URL).to_return(status: 404, body: "no_team")
+      stub_request(:post, TestCredentials::SLACK_WEBHOOK_URL).to_return(status: 404, body: "no_team")
 
       out = StringIO.new
       old_logger = Rails.logger
@@ -58,7 +58,7 @@ class User::SignupAlertTest < ActiveSupport::TestCase
 
   test "deliver! logs and swallows the error instead of raising when the request fails" do
     with_slack_enabled do
-      stub_request(:post, Stablemate::TEST_SLACK_WEBHOOK_URL).to_raise(Net::OpenTimeout)
+      stub_request(:post, TestCredentials::SLACK_WEBHOOK_URL).to_raise(Net::OpenTimeout)
 
       out = StringIO.new
       old_logger = Rails.logger

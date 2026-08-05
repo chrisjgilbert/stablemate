@@ -3,8 +3,8 @@ require "test_helper"
 # The hosted-tier billing config-gate (issue #19) only does anything at BOOT: the
 # pay.rb initializer registers the Stripe processor and feeds Pay its keys when
 # Stablemate.billing_enabled?. The rest of the suite toggles the gate at runtime
-# (stub_billing) and so never re-runs that initializer with real keys — which means
-# a broken initializer (e.g. calling a Pay setter that doesn't exist) would crash
+# (with_billing_enabled) and so never re-runs that initializer with real keys —
+# which means a broken initializer (e.g. calling a Pay setter that doesn't exist) would crash
 # the managed instance on boot while every other test stayed green.
 #
 # These tests close that gap by booting a throwaway process with the Stripe env set

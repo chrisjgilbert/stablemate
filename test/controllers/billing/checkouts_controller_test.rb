@@ -21,7 +21,7 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
   # (which Stripe would happily turn into a second subscription + double charge).
   test "an already-Pro user is bounced from checkout with no Stripe call" do
     with_billing_enabled do
-      Stablemate.stub_price_id_pro("price_pro_123") do
+      Stablemate.stub(:stripe_price_id_pro, "price_pro_123") do
         give_active_pro_subscription!
         sign_in @user
 
@@ -40,7 +40,7 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
   # still succeed later ⇒ two live Pro subscriptions, double billing.
   test "a past_due Pro subscription still blocks a second checkout" do
     with_billing_enabled do
-      Stablemate.stub_price_id_pro("price_pro_123") do
+      Stablemate.stub(:stripe_price_id_pro, "price_pro_123") do
         give_pro_subscription!(status: "past_due")
         sign_in @user
 
@@ -62,7 +62,7 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
   # stale attempt expires on its own).
   test "an incomplete Pro subscription does not block the user retrying checkout" do
     with_billing_enabled do
-      Stablemate.stub_price_id_pro("price_pro_123") do
+      Stablemate.stub(:stripe_price_id_pro, "price_pro_123") do
         give_pro_subscription!(status: "incomplete")
         sign_in @user
 
@@ -83,7 +83,7 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
   # been charged, so cancelling it costs the user nothing.
   test "retrying checkout cancels the abandoned incomplete subscription first" do
     with_billing_enabled do
-      Stablemate.stub_price_id_pro("price_pro_123") do
+      Stablemate.stub(:stripe_price_id_pro, "price_pro_123") do
         give_pro_subscription!(status: "incomplete")
         sign_in @user
 
@@ -100,7 +100,7 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
   # a churned customer could never come back.
   test "a canceled Pro subscription does not block a new checkout" do
     with_billing_enabled do
-      Stablemate.stub_price_id_pro("price_pro_123") do
+      Stablemate.stub(:stripe_price_id_pro, "price_pro_123") do
         give_pro_subscription!(status: "canceled")
         sign_in @user
 
@@ -114,7 +114,7 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
 
   test "creating a checkout redirects to the Stripe hosted session" do
     with_billing_enabled do
-      Stablemate.stub_price_id_pro("price_pro_123") do
+      Stablemate.stub(:stripe_price_id_pro, "price_pro_123") do
         # Pre-seed a Stripe customer id so Pay skips customer creation; the session
         # create is the HTTP call we stub and assert the redirect from.
         @user.set_payment_processor(:stripe).update!(processor_id: "cus_test_123")
@@ -131,7 +131,7 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
 
   test "a Stripe failure surfaces a graceful retry alert, no redirect to Stripe" do
     with_billing_enabled do
-      Stablemate.stub_price_id_pro("price_pro_123") do
+      Stablemate.stub(:stripe_price_id_pro, "price_pro_123") do
         @user.set_payment_processor(:stripe).update!(processor_id: "cus_test_123")
         sign_in @user
 
@@ -146,7 +146,7 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
 
   test "without a configured price, it bails out with an alert (no Stripe call)" do
     with_billing_enabled do
-      Stablemate.stub_price_id_pro(nil) do
+      Stablemate.stub(:stripe_price_id_pro, nil) do
         sign_in @user
         post billing_checkout_path
         assert_redirected_to billing_subscription_path
