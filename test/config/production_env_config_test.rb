@@ -1,28 +1,40 @@
 require "test_helper"
 
-# Self-hosting (#17) requires the production environment to be configured entirely
-# from ENV — no in-repo Rails credentials. We can't flip the running test process
-# into the production environment, so we boot a throwaway production process with
-# the relevant env vars set and read the resulting config back out
-# (BootTestHelper). This proves a self-hoster's STABLEMATE_HOST / SMTP_* /
-# SECRET_KEY_BASE actually drive the app.
+# Self-hosting (#17) requires the production environment to be configured
+# entirely from ENV — no in-repo Rails credentials.
+#
+# The RULES for that (a blank SMTP_PORT falling back to 587, a blank
+# STABLEMATE_FORCE_SSL still forcing SSL, the port stripped from an allowed host)
+# are Stablemate::DeploymentConfig's, and are tested in-process against a plain
+# hash in deployment_config_test.rb — 19 cases, no boot. This file used to prove
+# them by booting a production process each: ~34s for 8 cases, and still only 8.
+#
+# What a boot proves and an object cannot: that production.rb actually WIRES the
+# object into Rails' config, and that a production process boots at all. That
+# needs a real process, so one boot covers it — set every variable at once and
+# read back the setting each is supposed to reach.
 class ProductionEnvConfigTest < ActiveSupport::TestCase
   include BootTestHelper
 
-  BOOT_SCRIPT = <<~RUBY.freeze
+  # Single-quoted heredoc: the script is code for the CHILD process, so nothing
+  # in it may be interpolated here.
+  BOOT_SCRIPT = <<~'RUBY'.freeze
     c = Rails.application.config
-    data = {
+    puts({
       mailer_host: c.action_mailer.default_url_options[:host],
       mailer_protocol: c.action_mailer.default_url_options[:protocol],
+      asset_host: c.action_mailer.asset_host,
       smtp_address: c.action_mailer.smtp_settings[:address],
       smtp_port: c.action_mailer.smtp_settings[:port],
       smtp_user: c.action_mailer.smtp_settings[:user_name],
       raise_delivery_errors: c.action_mailer.raise_delivery_errors,
       perform_deliveries: c.action_mailer.perform_deliveries,
       force_ssl: c.force_ssl,
-      hosts: c.hosts.map(&:to_s)
-    }
-    puts data.to_json
+      assume_ssl: c.assume_ssl,
+      hosts: c.hosts.map(&:to_s),
+      # IPAddr#to_s drops the prefix ("10.9.0.0/16" => "10.9.0.0"), so keep it.
+      trusted_proxies: c.action_dispatch.trusted_proxies.to_a.map { |p| p.respond_to?(:prefix) ? "#{p}/#{p.prefix}" : p.to_s }
+    }.to_json)
   RUBY
 
   # SECRET_KEY_BASE because production demands one and there are no in-repo
@@ -34,82 +46,51 @@ class ProductionEnvConfigTest < ActiveSupport::TestCase
     "DISABLE_DATABASE_ENVIRONMENT_CHECK" => "1"
   }.freeze
 
-  def boot_production(env) = boot_app(BOOT_SCRIPT, PRODUCTION_ENV.merge(env))
-
-  test "STABLEMATE_HOST drives the mailer host and protocol" do
-    cfg = boot_production(
-      "STABLEMATE_HOST" => "status.example.com",
-      "STABLEMATE_PROTOCOL" => "https"
-    )
-    assert_equal "status.example.com", cfg["mailer_host"]
-    assert_equal "https", cfg["mailer_protocol"]
-    assert_includes cfg["hosts"], "status.example.com"
-  end
-
-  test "SMTP settings are read from the environment" do
-    cfg = boot_production(
-      "STABLEMATE_HOST" => "example.com",
+  # Every knob at once, each with a value distinctive enough to trace back to the
+  # setting it is supposed to drive. The blank SMTP_PORT rides along deliberately:
+  # it is the value that used to crash boot via Integer(""), so a boot is exactly
+  # where it is worth re-checking.
+  test "a production instance boots and wires the environment through to Rails' config" do
+    cfg = boot_app(BOOT_SCRIPT, PRODUCTION_ENV.merge(
+      "STABLEMATE_HOST" => "status.example.com:8443",
+      "STABLEMATE_PROTOCOL" => "https",
+      "STABLEMATE_TRUSTED_PROXIES" => "10.9.0.0/16",
       "SMTP_ADDRESS" => "smtp.provider.test",
-      "SMTP_PORT" => "2525",
+      "SMTP_PORT" => "",
       "SMTP_USERNAME" => "postmaster"
-    )
+    ))
+
+    # URL building keeps the port; host authorization matches the bare host.
+    assert_equal "status.example.com:8443", cfg["mailer_host"]
+    assert_equal "https", cfg["mailer_protocol"]
+    assert_equal "https://status.example.com:8443", cfg["asset_host"]
+    assert_includes cfg["hosts"], "status.example.com"
+    assert_not_includes cfg["hosts"], "status.example.com:8443"
+
     assert_equal "smtp.provider.test", cfg["smtp_address"]
-    assert_equal 2525, cfg["smtp_port"]
+    assert_equal 587, cfg["smtp_port"], "a blank SMTP_PORT must fall back, not crash the boot"
     assert_equal "postmaster", cfg["smtp_user"]
-  end
 
-  # F1 — a transient SMTP failure used to be swallowed: the delivery job succeeded,
-  # the alert was gone, and the audit row still said "delivered". With SMTP
-  # configured the error must reach the job so the retry layer can re-send it.
-  test "a configured SMTP relay raises delivery errors so a failed send fails the job" do
-    cfg = boot_production("STABLEMATE_HOST" => "example.com", "SMTP_ADDRESS" => "smtp.provider.test")
-    assert_equal true, cfg["raise_delivery_errors"]
+    # F1 — with SMTP configured, a failed send must fail the job so the retry
+    # layer re-sends it rather than silently discarding an alert.
     assert_equal true, cfg["perform_deliveries"]
+    assert_equal true, cfg["raise_delivery_errors"]
+
+    assert_includes cfg["trusted_proxies"], "10.9.0.0/16"
   end
 
-  # …but the documented self-host tolerance survives: an instance with no SMTP
-  # configured must stay quiet rather than generate a perpetual failing-job storm.
-  test "an instance with no SMTP configured neither attempts nor raises deliveries" do
-    cfg = boot_production("STABLEMATE_HOST" => "example.com")
-    assert_nil cfg["smtp_address"]
-    assert_equal false, cfg["raise_delivery_errors"]
-    assert_equal false, cfg["perform_deliveries"]
-  end
+  # The other deployment shape, and the one a self-hoster meets first: nothing
+  # configured. It must boot, stay quiet about mail, and — critically — not turn
+  # host authorization on, since the managed Kamal deploy sets no STABLEMATE_HOST
+  # and is reached on apex/www/IP/CDN-rewritten Host headers that a single
+  # allow-list entry would 403.
+  test "an unconfigured production instance boots, stays quiet, and authorises every host" do
+    cfg = boot_app(BOOT_SCRIPT, PRODUCTION_ENV)
 
-  test "STABLEMATE_FORCE_SSL=false disables forced SSL for plain-HTTP self-hosting" do
-    cfg = boot_production(
-      "STABLEMATE_HOST" => "localhost",
-      "STABLEMATE_PROTOCOL" => "http",
-      "STABLEMATE_FORCE_SSL" => "false"
-    )
-    assert_equal false, cfg["force_ssl"]
-    assert_equal "http", cfg["mailer_protocol"]
-  end
-
-  test "a blank STABLEMATE_FORCE_SSL still forces SSL (never silently insecure)" do
-    cfg = boot_production("STABLEMATE_HOST" => "example.com", "STABLEMATE_FORCE_SSL" => "")
-    assert_equal true, cfg["force_ssl"]
-  end
-
-  test "a blank SMTP_PORT falls back to 587 instead of crashing boot" do
-    cfg = boot_production("STABLEMATE_HOST" => "example.com", "SMTP_PORT" => "")
-    assert_equal 587, cfg["smtp_port"]
-  end
-
-  test "host authorization is OFF unless STABLEMATE_HOST/STABLEMATE_HOSTS is set" do
-    # The managed Kamal deploy sets neither, so the default must not start
-    # rejecting Host headers (apex/www/IP/CDN-rewritten) that used to be served.
-    cfg = boot_production({})
-    refute_includes cfg["hosts"], "stablemate.dev"
     assert_empty cfg["hosts"]
-  end
-
-  test "a STABLEMATE_HOST with a port allows the bare host (port stripped for matching)" do
-    cfg = boot_production("STABLEMATE_HOST" => "localhost:3000")
-    # URL building keeps the full host:port…
-    assert_equal "localhost:3000", cfg["mailer_host"]
-    # …but host authorization matches the bare host (Rails strips the request port).
-    assert_includes cfg["hosts"], "localhost"
-    refute_includes cfg["hosts"], "localhost:3000"
+    assert_nil cfg["smtp_address"]
+    assert_equal false, cfg["perform_deliveries"], "no relay to retry against — no failing-job storm"
+    assert_equal false, cfg["raise_delivery_errors"]
+    assert_equal true, cfg["force_ssl"], "the default must never be silently insecure"
   end
 end

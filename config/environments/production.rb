@@ -1,5 +1,9 @@
 require "active_support/core_ext/integer/time"
 require "ipaddr"
+# The env → config derivation, extracted so it can be tested without booting a
+# production process (test/config/deployment_config_test.rb). Required here
+# because environment files run before the initializer pass.
+require_relative "../initializers/deployment_config"
 
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
@@ -30,9 +34,10 @@ Rails.application.configure do
   # can set STABLEMATE_FORCE_SSL=false. Defaults to ON, and a blank value
   # (STABLEMATE_FORCE_SSL=) must NOT silently disable SSL — only an explicit
   # false/0/no does (otherwise an empty env var would drop the Secure flag).
-  ssl_enabled = ActiveModel::Type::Boolean.new.cast(ENV["STABLEMATE_FORCE_SSL"].presence || true)
-  config.assume_ssl = ssl_enabled
-  config.force_ssl  = ssl_enabled
+  deployment = Stablemate::DeploymentConfig.new(ENV, credentials: Rails.application.credentials.smtp || {})
+
+  config.assume_ssl = deployment.ssl_enabled?
+  config.force_ssl  = deployment.ssl_enabled?
 
   # Skip http-to-https redirect for the default health check endpoint.
   config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
@@ -67,10 +72,8 @@ Rails.application.configure do
   # A self-hoster sets STABLEMATE_HOST to their own domain so ping URLs and email
   # links resolve to their instance; the managed instance defaults to stablemate.dev.
   # The value may include a port (e.g. "localhost:3000") for URL building.
-  app_host     = ENV["STABLEMATE_HOST"].presence || "stablemate.dev"
-  app_protocol = ENV["STABLEMATE_PROTOCOL"].presence || (ssl_enabled ? "https" : "http")
-  config.action_mailer.default_url_options = { host: app_host, protocol: app_protocol }
-  config.action_mailer.asset_host = "#{app_protocol}://#{app_host}"
+  config.action_mailer.default_url_options = { host: deployment.host, protocol: deployment.protocol }
+  config.action_mailer.asset_host = deployment.asset_host
 
   # Restrict Host headers (DNS-rebinding protection) ONLY when the operator opts in
   # by setting STABLEMATE_HOST (or STABLEMATE_HOSTS) explicitly. We must not enable
@@ -79,11 +82,8 @@ Rails.application.configure do
   # Host headers, all of which a single allow-list entry would 403. Rails strips
   # the port from the incoming Host before matching, so we add the bare host (a
   # configured "localhost:3000" must still accept a real "localhost" request).
-  allowed_hosts = []
-  allowed_hosts << app_host if ENV["STABLEMATE_HOST"].present?
-  allowed_hosts.concat(ENV.fetch("STABLEMATE_HOSTS", "").split(",").map(&:strip).reject(&:empty?))
-  unless allowed_hosts.empty?
-    allowed_hosts.each { |h| config.hosts << h.split(":").first }
+  if deployment.host_authorization?
+    deployment.allowed_hosts.each { |host| config.hosts << host }
     config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
   end
 
@@ -104,24 +104,8 @@ Rails.application.configure do
   #                                        without a redeploy)
   # Whatever is listed is ADDED to Rails' private ranges (which already cover the
   # kamal-proxy hop). Cloudflare ranges: https://www.cloudflare.com/ips/
-  trusted_proxies = ENV.fetch("STABLEMATE_TRUSTED_PROXIES", "").split(",").map(&:strip).reject(&:empty?)
-  if ActiveModel::Type::Boolean.new.cast(ENV["STABLEMATE_BEHIND_CLOUDFLARE"])
-    trusted_proxies.concat(%w[
-      173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22
-      141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20
-      197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13
-      104.24.0.0/14 172.64.0.0/13 131.0.72.0/22
-      2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32
-      2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
-    ])
-  end
-  # NB: assigning trusted_proxies *replaces* Rails' defaults, so prepend the
-  # built-in private ranges (TRUSTED_PROXIES) — otherwise the kamal-proxy hop's
-  # private IP stops being stripped and remote_ip resolves to the proxy, not the
-  # client. (https://api.rubyonrails.org/classes/ActionDispatch/RemoteIp.html)
-  if trusted_proxies.any?
-    config.action_dispatch.trusted_proxies =
-      ActionDispatch::RemoteIp::TRUSTED_PROXIES + trusted_proxies.map { |proxy| IPAddr.new(proxy) }
+  if (trusted_proxies = deployment.trusted_proxies)
+    config.action_dispatch.trusted_proxies = trusted_proxies
   end
 
   # Outgoing SMTP. A self-hoster wires this entirely from the environment (no
@@ -130,26 +114,7 @@ Rails.application.configure do
   # neither path regresses. A missing address means mail isn't sent at all (see
   # the two regimes below); the install guide makes SMTP a required step for
   # down-alerts to work.
-  smtp_creds = Rails.application.credentials.smtp || {}
-  smtp_address = ENV["SMTP_ADDRESS"].presence || smtp_creds[:address]
-  smtp_username = ENV["SMTP_USERNAME"].presence || smtp_creds[:user_name]
-  smtp = {
-    address: smtp_address,
-    # A present-but-empty SMTP_PORT= must fall back, not crash boot via Integer("").
-    # `.presence || …` covers blank, unset, and a real value.
-    port: (ENV["SMTP_PORT"].presence || smtp_creds[:port] || 587).to_i,
-    domain: ENV["SMTP_DOMAIN"].presence || smtp_creds[:domain],
-    enable_starttls: ActiveModel::Type::Boolean.new.cast(ENV["SMTP_ENABLE_STARTTLS"].presence || true)
-  }
-  # Only request AUTH when a username is supplied. An unauthenticated relay (a
-  # common self-host setup — a local Postfix or an internal SMTP that authorises by
-  # IP) otherwise fails with "SMTP-AUTH requested but missing user name".
-  if smtp_username.present?
-    smtp[:user_name] = smtp_username
-    smtp[:password] = ENV["SMTP_PASSWORD"].presence || smtp_creds[:password]
-    smtp[:authentication] = (ENV["SMTP_AUTHENTICATION"].presence || "plain").to_sym
-  end
-  config.action_mailer.smtp_settings = smtp
+  config.action_mailer.smtp_settings = deployment.smtp_settings
 
   # Two deliberate regimes, keyed off whether SMTP is configured at all:
   #
@@ -164,8 +129,8 @@ Rails.application.configure do
   #     perpetual failing-job storm either: there is nothing to retry against, so
   #     retrying would only burn the queue. (Alerts are lost in this state by
   #     design — the install guide makes SMTP a required step.)
-  config.action_mailer.perform_deliveries    = smtp_address.present?
-  config.action_mailer.raise_delivery_errors = smtp_address.present?
+  config.action_mailer.perform_deliveries    = deployment.deliver_mail?
+  config.action_mailer.raise_delivery_errors = deployment.raise_delivery_errors?
 
   # Enable locale fallbacks for I18n (makes lookups for any locale fall back to
   # the I18n.default_locale when a translation cannot be found).
