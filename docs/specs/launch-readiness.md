@@ -242,7 +242,8 @@ against the merged diff. What they found:
 - [x] **Development is boot-tested.** Test boots on every run and
       `ProductionEnvConfigTest` boots production, but development — the only
       environment where `NonProdMailGuard` actually registers — had no cover.
-- [x] **The SHA pins have a guard, not just a comment.** `WorkflowPinsTest`
+- [x] ~~**The SHA pins have a guard, not just a comment.**~~ **REVERTED — see the
+      cleanup pass.** `WorkflowPinsTest`
       asserts every third-party `uses:` is a 40-hex commit pin carrying a
       `# v…` comment. Offline, so it runs wherever `bin/ci` does. It can't tell
       you a SHA is the *wrong* commit, but it catches an unpinned action and a
@@ -266,7 +267,8 @@ against the merged diff. What they found:
 
 The efficiency pass found two things worth real money:
 
-- [x] **The Stripe SDK no longer eager-loads into a keyless instance.** stripe's
+- [x] ~~**The Stripe SDK no longer eager-loads into a keyless instance.**~~
+      **REVERTED — see the cleanup pass.** stripe's
       railtie does `config.eager_load_namespaces << Stripe` unconditionally, so a
       production boot pulled in all **1039** of its files — including on the
       self-host default, where `enabled_processors` is empty, the `Billing::`
@@ -278,7 +280,8 @@ The efficiency pass found two things worth real money:
       would resolve them per-worker instead of once, pre-fork and COW-shared.
       Note `gem "stripe", require: false` is **not** an alternative: Pay never
       requires the SDK itself, so that breaks the hosted instance outright.
-- [x] **`bin/ci` stopped re-installing the companion gem's bundle every run.**
+- [x] ~~**`bin/ci` stopped re-installing the companion gem's bundle every run.**~~
+      **REVERTED — see the cleanup pass.**
       `gem/Gemfile.lock` is gitignored, so `bundle check` could never succeed and
       every CI run fell through to a full resolve against rubygems.org — outside
       setup-ruby's cache, which is keyed on the *app's* lockfile. From the Actions
@@ -336,9 +339,14 @@ undone:
 - [x] **A real bug: `live_today_stat` was memoized on the wall-clock second.** It
       returned a stale answer after any data change within the same second, and
       under `freeze_time` — which this project's conventions mandate — it never
-      expired at all. Now a plain `||=`, matching `windowed_day_stats` beside it.
-      The test that pinned the clock-keyed behaviour described a test-only
-      scenario and went with it; the one-scan-per-render guard stays.
+      expired at all. **Now not memoized at all.** The first attempt here swapped
+      it for a plain `||=`; review caught that this *widened* the staleness window
+      from one second to the instance's whole life (a `reload` doesn't clear an
+      ivar, and the day can roll over under it). The memo was only ever saving one
+      scoped `incidents` query on the single-record detail page — the one page
+      that calls both readers — which is not worth a cache with an invalidation
+      question. Both memoizing tests are replaced by one that pins the opposite
+      property: the same instance must see a change made after its first read.
 - [x] **A latent order-dependent failure on `main`.** Chunk 6 stopped loading
       `Mail` at boot, and `non_prod_mail_guard_test.rb` references `Mail`
       directly — so it passed only when another test in the same parallel worker
@@ -349,19 +357,39 @@ undone:
       third-party railtie, for ~350ms and 34MB on a boot that happens once, is
       not worth the coupling or the two production boots the test paid per run.
 - [x] **`WorkflowPinsTest` removed.** A Minitest case parsing GitHub Actions YAML
-      is the wrong tool, and it had holes: it read only the FIRST line matching
-      each action (so the deploy job's second `actions/checkout` was never
-      checked) and never saw job-level `uses:`. The SHA pins and the re-pinning
-      recipe stay; use `actionlint`/`zizmor` if this needs enforcing.
+      is the wrong layer for a supply-chain control. Its one real gap was
+      job-level `uses:` (reusable workflows), which it never saw. **Correction:**
+      an earlier draft of this entry said it "never checked the deploy job's
+      second `actions/checkout`" — that overstates it. The SHA assertion iterated
+      every step of every job; only the `# vX.Y.Z` comment half read the first
+      matching raw line, and for two byte-identical `uses:` strings that is the
+      same text either way.
+      **Accepted cost:** the pins are now enforced by the comment in `ci.yml`
+      alone, on a deploy job holding five production secrets. Dependabot still
+      bumps them; a human unpinning one is what nothing catches. If that is not
+      good enough, add `actionlint`/`zizmor` to `bin/ci` — do not put it back in
+      the Rails suite.
 - [x] **`bin/ci`'s dependency probe reverted to `bundle check`.** A hardcoded
       require list that silently drifts from the gemspec, to save ~26s on a
-      ~110s CI step nobody was waiting on.
+      ~110s CI step nobody was waiting on. Known and unchanged either way: the
+      gem suite runs on the plain load path against open gemspec constraints, so
+      it tests against whatever is installed rather than a locked set.
+- [x] **`bin/ci` fails closed on an empty gem-test glob.** Pre-existing: renaming
+      `gem/test/` or the `*_test.rb` suffix would have exited 0 with no tests run
+      and printed `CI PASSED`. Found by the review of this branch.
 - [x] **Comment mass cut roughly in half across the files those chunks touched**
       (`pay.rb` was 79 comment lines to 16 of code). What went: decision history
       ("until chunk 6…", "the first version of this step…"), duplicated
       rationale, and recorded measurements — two of which already disagreed with
       each other. What stayed: why the current code is the way it is. The history
       is in the git log and in this ledger, which is where it belongs.
+- [x] **Dead surface removed** (predating these chunks): `hello_controller.js`,
+      the Rails stub still eager-loaded to every page; `pages/_browser_chrome`, an
+      orphaned partial; `app/views/pwa/` and the two `*-web-app-capable` meta tags
+      that paired with its manifest, none of them routed or linked; and six
+      routed-but-unimplemented actions — `resource :session` and
+      `resources :passwords` drew seven apiece against controllers implementing
+      three and four. 63 routes, all resolving.
 
 **Not changed, flagged instead:** `Monitoring::Monitor`'s
 `after_destroy_commit :release_owner_downgrade_lock` reaches up two levels to

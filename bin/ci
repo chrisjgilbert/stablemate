@@ -92,16 +92,26 @@ fi
 
 # --- Companion gem suite ---------------------------------------------------
 # Runs the gem's own Minitest suite when gem/ is present. It is a REQUIRED part
-# of the gate and fails CLOSED: if the deps can't be installed the ruby run below
-# raises on the missing require, so the suite is never silently skipped. Invoked
-# directly via ruby (not `bundle exec rake`) so it's independent of the app's
-# Bundler and of the Bundler 4 binstub quirk in this sandbox.
+# of the gate and fails CLOSED two ways: a missing dependency raises on the
+# require, and an empty glob aborts rather than exiting 0 with nothing run —
+# renaming test/ or the *_test.rb suffix would otherwise print CI PASSED having
+# executed no gem tests at all. Invoked directly via ruby (not `bundle exec
+# rake`) so it's independent of the app's Bundler and of the Bundler 4 binstub
+# quirk in this sandbox.
+#
+# Note the gem runs on the plain load path against open gemspec constraints, so
+# the versions it tests against are whatever is installed, not a locked set
+# (gem/Gemfile.lock is gitignored, per the rubygems convention for libraries).
 if [ -d gem ]; then
   step "stablemate gem tests"
   (
     cd gem
     bundle check >/dev/null 2>&1 || bundle install >/dev/null 2>&1 || true
-    ruby -Ilib -Itest -e 'Dir["test/**/*_test.rb"].each { |f| require File.expand_path(f) }'
+    ruby -Ilib -Itest -e '
+      files = Dir["test/**/*_test.rb"]
+      abort "no gem test files matched test/**/*_test.rb" if files.empty?
+      files.each { |f| require File.expand_path(f) }
+    '
   ) || note_fail "gem tests"
 fi
 

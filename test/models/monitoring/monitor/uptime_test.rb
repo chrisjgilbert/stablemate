@@ -161,18 +161,28 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_in_delta 50.0, @monitor.uptime_percent(days: 90), 0.01
   end
 
-  # The detail page renders the bar AND the percent off one monitor, and the two
-  # have to agree as well as be cheap.
-  test "the live day's stat is computed once for the bar and the percent" do
+  # Today's live stat is a snapshot of *now*, read fresh each time. It has been
+  # memoized twice before — once outright, once keyed on the wall-clock second —
+  # and both answered with the state at first read, which is wrong the moment the
+  # record changes or the day rolls over under a long-lived instance.
+  test "the live day's stat follows the record, not the first read" do
     travel_to Date.current.to_time(:utc) + 12.hours
-    @monitor.incidents.create!(started_at: Date.current.to_time(:utc) + 6.hours, cause: "missed_ping")
 
-    scans = count_incident_scans do
-      @monitor.uptime_series(days: 90)
-      @monitor.uptime_percent(days: 90)
-    end
+    assert_equal :up, @monitor.uptime_series(days: 90).last
 
-    assert_equal 1, scans, "today's incidents should be scanned once per render, not once per reader"
+    @monitor.incidents.create!(
+      started_at: Date.current.to_time(:utc) + 6.hours,
+      resolved_at: Date.current.to_time(:utc) + 9.hours,
+      cause: "missed_ping"
+    )
+
+    assert_equal :partial, @monitor.uptime_series(days: 90).last,
+      "the same instance must see an incident created after its first read"
+
+    @monitor.update!(status: "paused")
+
+    assert_nil @monitor.uptime_percent(days: 90),
+      "a paused today is no-data, even on an instance that already read it as measured"
   end
 
   # Recent events feed: pings + incident open/resolve, cause-aware labels
@@ -271,11 +281,4 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_equal 16, ticks.size
     assert(ticks.all? { |t| %w[up down].include?(t) })
   end
-
-  private
-    # How many times the block scans the incidents table — the query
-    # live_today_stat runs, and the one the memoization is there to halve.
-    def count_incident_scans(&block)
-      count_queries_matching(/\bFROM "incidents"/i, &block)
-    end
 end

@@ -187,14 +187,16 @@ module Monitoring
         # ONE method feeds both readers — the bar's today segment
         # (live_today_status) and uptime_percent — so the % and the bar cannot
         # disagree, and today is classified by the same up/down/partial cutoffs it
-        # will get once the rollup persists it (UptimeDayStat#status). Memoized per
-        # instance for the same reason windowed_day_stats is: the detail panel
-        # renders both readers off one monitor, and that should be one scan.
+        # will get once the rollup persists it (UptimeDayStat#status).
+        #
+        # Deliberately NOT memoized. The only page that calls both readers is the
+        # monitor detail panel, so a memo saves exactly one scoped incidents query
+        # on one single-record page — and any memo here answers with the state at
+        # first read, which is wrong for a snapshot of *now* the moment the row
+        # changes or the day rolls over.
         def live_today_stat
-          @live_today_stat ||= compute_live_today_stat(Time.current)
-        end
+          now = Time.current
 
-        def compute_live_today_stat(now)
           return UptimeDayStat.new(up_seconds: 0, down_seconds: 0) if paused? || suspended? || pending?
 
           window_start = [ created_at, first_ping_at, Date.current.to_time(:utc) ].compact.max
