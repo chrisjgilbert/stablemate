@@ -65,28 +65,32 @@ class DetectMissedPingsJobTest < ActiveJob::TestCase
   # Closing an account cascades away every one of its monitors at once
   # (User::Closure), so a row can vanish between the sweep's query and its turn.
   # flag_missed! re-reads under a lock, which raises RecordNotFound on a missing
-  # row — and one raise used to abort the whole run, leaving real outages
-  # unalerted because someone else deleted their account in the same 30 seconds.
-  test "a monitor deleted mid-sweep does not abort the run" do
+  # row — and one raise aborts the whole run, leaving real outages unalerted
+  # because someone else deleted their account in the same 30 seconds.
+  #
+  # The resilience itself is ApplicationJob#each_record, shared by every sweep
+  # and tested in application_job_test.rb. What this pins is the WIRING: dropping
+  # back to a bare `overdue.find_each` would still pass every other test here.
+  #
+  # The overdue scope is swapped with `Object#stub` (minitest-mock), which
+  # restores it in an ensure — not the alias-on-the-real-singleton-class the
+  # earlier version used, which was one skipped ensure away from breaking every
+  # later test in the worker.
+  test "sweeps through each_record, so a monitor deleted mid-sweep does not abort the run" do
     attrs = { expected_interval_seconds: 3600, grace_period_seconds: 300,
               status: "up", last_ping_at: 3.days.ago, next_due_at: 3.days.ago }
-    ghost = @monitor.project.monitors.create!(name: "ghost", **attrs)
-    survivor = @monitor.project.monitors.create!(name: "survivor", **attrs)
+    ghost = @project.monitors.create!(name: "ghost", **attrs)
+    survivor = @project.monitors.create!(name: "survivor", **attrs)
+
+    # The batch as the job loaded it: a loaded relation iterates the records it
+    # already holds, so it still yields the row deleted underneath it.
+    batch = Monitoring::Monitor.where(id: [ ghost.id, survivor.id ]).load
     Monitoring::Monitor.where(id: ghost.id).delete_all
 
-    # A scope that still yields the vanished record, as the real batch would.
-    fake = Struct.new(:records) { def find_each(&block) = records.each(&block) }
-                 .new([ ghost, survivor ])
-    klass = Monitoring::Monitor.singleton_class
-    klass.send(:alias_method, :real_overdue, :overdue)
-    klass.send(:define_method, :overdue) { fake }
-
-    begin
+    Monitoring::Monitor.stub(:overdue, batch) do
       assert_nothing_raised { DetectMissedPingsJob.perform_now }
-      assert survivor.reload.down?, "the sweep must carry on past a deleted record"
-    ensure
-      klass.send(:alias_method, :overdue, :real_overdue)
-      klass.send(:remove_method, :real_overdue)
     end
+
+    assert survivor.reload.down?, "the sweep must carry on past a deleted record"
   end
 end

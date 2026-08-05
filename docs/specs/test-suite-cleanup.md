@@ -27,7 +27,7 @@ Actions is green → tick the boxes here → next chunk.
 |---|-------|---------|--------|-----|
 | 1 | Adopt `minitest-mock`; retire the hand-rolled method/ENV stubs | #3 | **IN REVIEW** | #77 |
 | 2 | Finish the half-done extractions; kill `User.take` | #5, #6 | **IN REVIEW** | #78 |
-| 3 | Stop monkey-patching globals in the job tests | #4 | **TODO** | — |
+| 3 | Stop monkey-patching globals in the job tests | #4 | **IN REVIEW** | #79 |
 | 4 | Humble-Object the production env config; retire 8 boots | #2 | **TODO** | — |
 | 5 | Shrink the monitors General Fixture | #1 | **TODO** | — |
 | 6 | `rubocop-minitest` to stop the regressions | #7 | **TODO** | — |
@@ -114,11 +114,31 @@ never falls back. Worth knowing before trusting that guard's shape.
 
 ## Chunk 3 — Stop monkey-patching globals (finding #4)
 
-- [ ] `prune_ping_events_job_test.rb:93` patches `ActiveRecord::Relation#in_batches`
-      **globally** to assert an implementation detail → assert the behaviour
-- [ ] `detect_missed_pings_job_test.rb:88` aliases `Monitoring::Monitor.overdue`
-      on the real singleton class → use the plain-array shape already proven in
-      `enforce_overdue_downgrades_job_test.rb:114`
+- [x] `prune_ping_events_job_test.rb` patched `ActiveRecord::Relation#in_batches`
+      **globally** to catch the call → now reads the SQL: past the batch size
+      batching issues more than one delete, each bounded by an explicit id set
+- [x] `detect_missed_pings_job_test.rb` aliased `Monitoring::Monitor.overdue` on
+      the real singleton class → now hands over a pre-**loaded** relation via
+      `Object#stub` (the chunk-1 seam, which restores in an `ensure`)
+- [x] the guarantee itself belongs to `ApplicationJob#each_record`, which every
+      sweep inherits → `application_job_test.rb` pins the contract, the detection
+      test keeps pinning the wiring. Both earn their place: dropping either lets
+      a real mutation through.
+- [x] new coverage the move exposed: that the rescue stays **narrow**. Widening
+      it to `StandardError` would turn a real bug into a silent no-op across
+      every sweep, and now fails.
+
+**No `class_eval` / `alias_method` / `singleton_class` left anywhere in `test/`.**
+
+Every assertion in this chunk was mutation-checked: a bare `delete_all` instead
+of `in_batches`, `find_each` instead of `each_record`, a removed rescue, and a
+widened rescue each fail the test that claims to catch them.
+
+A correction worth recording: the first version of this work claimed a real
+scope could not reproduce a vanished record "by construction". That is wrong —
+a *loaded* relation iterates its cached rows rather than re-querying, so it
+yields the deleted record exactly as a real batch does. The review pass caught
+it, and the tests now use a real relation instead of a hand-written stand-in.
 
 ## Chunk 4 — Humble-Object the production env config (finding #2)
 
