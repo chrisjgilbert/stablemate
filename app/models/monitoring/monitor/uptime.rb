@@ -92,6 +92,13 @@ module Monitoring
         (100.0 * up / measured)
       end
 
+      # Seconds of `window` (a half-open Time range) this monitor was down. The
+      # one rule the live intraday reading and the nightly rollup both measure by,
+      # so the bar and the percentage cannot disagree about the same window.
+      def down_seconds_during(window)
+        DowntimeWindow.new(self, window).down_seconds
+      end
+
       # Dashboard sparkline data, oldest → newest. Pass `kinds:` (newest→oldest, e.g.
       # from Monitoring::Monitor.mini_ticks_for) to avoid the per-monitor query.
       def mini_ticks(kinds: nil)
@@ -166,26 +173,14 @@ module Monitoring
           window_start = [ created_at, first_ping_at, Date.current.to_time(:utc) ].compact.max
           return UptimeDayStat.new(up_seconds: 0, down_seconds: 0) if window_start >= now
 
-          down = today_down_seconds(window_start, now)
+          # The same rule the nightly rollup applies to a completed day, with "now"
+          # as the window end since today isn't rolled up yet.
+          down = down_seconds_during(window_start...now)
           up   = [ (now - window_start).to_i - down, 0 ].max
           UptimeDayStat.new(up_seconds: up, down_seconds: down)
         end
 
         def live_today_status = live_today_stat.status
-
-        # Mirrors UptimeRollup#raw_down_seconds, but the window end is "now" rather
-        # than end-of-day since today isn't rolled up yet. Scoped to incidents that
-        # could actually overlap the window, so a long-lived monitor's full incident
-        # history isn't scanned on every render.
-        def today_down_seconds(window_start, now)
-          incidents
-            .where("started_at < ? AND (resolved_at IS NULL OR resolved_at >= ?)", now, window_start)
-            .find_each.sum do |incident|
-              overlap_start = [ incident.started_at, window_start ].max
-              overlap_end   = [ incident.resolved_at || now, now ].min
-              [ (overlap_end - overlap_start).to_i, 0 ].max
-            end
-        end
     end
   end
 end
