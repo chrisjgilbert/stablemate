@@ -4,6 +4,13 @@ require "application_system_test_case"
 # CLAUDE.md's system-test rule: it's a user-facing flow, so a request test alone
 # isn't enough — this exercises the rendered page and its CTAs in a real browser.
 class PricingPageTest < ApplicationSystemTestCase
+  # Selectors, not positions. `all(".plan")[1]` captured a node reference that a
+  # re-render invalidates (Capybara::Cuprite::ObsoleteNode), and it silently
+  # targets the wrong card if the plans are ever reordered. `within` re-finds
+  # these each time.
+  PRO_PLAN = ".plan--pro".freeze
+  FREE_PLAN = ".plan:not(.plan--pro)".freeze
+
   FREE = Stablemate::FREE_PLAN_MONITOR_LIMIT
   PRO  = Stablemate::PRO_PLAN_MONITOR_LIMIT
 
@@ -27,13 +34,13 @@ class PricingPageTest < ApplicationSystemTestCase
     assert_link "Coming soon", href: sign_up_path
 
     # Neither plan card can buy Pro without an account — both CTAs go to sign-up.
-    within all(".plan")[0] do
+    within FREE_PLAN do
       click_on "Start free"
     end
     assert_current_path sign_up_path
 
     visit pricing_path
-    within all(".plan")[1] do
+    within PRO_PLAN do
       click_on "Start free"
     end
     assert_current_path sign_up_path
@@ -46,7 +53,7 @@ class PricingPageTest < ApplicationSystemTestCase
       sign_in user
 
       visit pricing_path
-      within all(".plan")[1] do
+      within PRO_PLAN do
         click_on "Upgrade to Pro"
       end
 

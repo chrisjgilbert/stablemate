@@ -27,10 +27,10 @@ class ConfigGatedCapsTest < ApplicationSystemTestCase
       assert_no_selector "[data-testid='at-limit-note']"
       assert_link "New monitor"
 
-      first(:link, "New monitor").click
+      click_on "New monitor", match: :first
       fill_in "Name", with: "Seventh monitor"
-      find("select[aria-label='Expected interval preset']").select("Hourly")
-      find("select[aria-label='Grace period preset']").select("5 minutes")
+      select "Hourly", from: "Expected interval preset"
+      select "5 minutes", from: "Grace period preset"
       click_on "Create monitor"
 
       assert_text "Seventh monitor"

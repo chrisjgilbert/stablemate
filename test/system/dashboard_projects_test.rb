@@ -33,12 +33,12 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     target = @alice.projects.create!(name: "Target service")
 
     sign_in @alice
-    first(:link, "New monitor").click
+    click_on "New monitor", match: :first
 
     select "Target service", from: "Project"
     fill_in "Name", with: "Chosen job"
-    find("select[aria-label='Expected interval preset']").select("Hourly")
-    find("select[aria-label='Grace period preset']").select("5 minutes")
+    select "Hourly", from: "Expected interval preset"
+    select "5 minutes", from: "Grace period preset"
     click_on "Create monitor"
 
     assert_text "Chosen job"
