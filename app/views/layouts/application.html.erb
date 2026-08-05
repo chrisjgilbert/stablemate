@@ -6,8 +6,6 @@
 
   <body class="bg-app text-ink font-sans antialiased min-h-screen">
     <% if authenticated? %>
-      <%# Active-section underline: match on controller so the current nav item
-          gets a red underline (per the mockup). %>
       <% section = controller_path %>
       <% nav_link = ->(label, path, active) {
            link_to label, path,
@@ -23,8 +21,6 @@
           </div>
           <nav class="flex items-center gap-5">
             <%= nav_link.call("Monitors", monitors_path, section == "monitors") %>
-            <%# API keys live under each project now (Design B) — reach them from a
-                project's page, so the nav points at Projects, not a standalone screen. %>
             <%= nav_link.call("Projects", projects_path, section == "projects") %>
             <% if billing_enabled? %>
               <%= link_to "Billing", billing_subscription_path,
@@ -41,9 +37,6 @@
     <% end %>
 
     <main class="max-w-5xl mx-auto px-5 py-10">
-      <%# Account-wide involuntary-downgrade grace banner (§7/§12-J): monitors keep
-          running, but the user must pick which N to keep by the deadline. Gated on
-          the hosted tier being live, so a self-host instance never sees it. %>
       <% if authenticated? && billing_enabled? && current_user.must_choose_downgrade? %>
         <%= render "shared/downgrade_grace_banner" %>
       <% end %>

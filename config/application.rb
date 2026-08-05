@@ -1,12 +1,10 @@
 require_relative "boot"
 
-# Not `rails/all` — nothing here declares an attachment or rich text. This is what
-# `rails new --skip-active-storage --skip-action-mailbox --skip-action-text`
-# generates. Re-enabling one takes more than uncommenting: Active Storage also
-# needs a service in the environment files, a config/storage.yml, a volume, the
-# image_processing/ruby-vips pair (plus libvips back in the Dockerfile), and the
-# `/storage` ignore rules restored to .gitignore and .dockerignore — they went
-# with the directory, so uploads would otherwise be committed and shipped.
+# Not `rails/all` — nothing here declares an attachment or rich text. Re-enabling
+# one takes more than uncommenting: Active Storage also needs a service in the
+# environment files, a config/storage.yml, a volume, the image_processing/ruby-vips
+# pair (plus libvips back in the Dockerfile), and the `/storage` ignore rules
+# restored to .gitignore and .dockerignore.
 #
 # Run `bin/rails app:update` on a Rails upgrade — naming the frameworks means a
 # Rails that adds one leaves us without it until this list is regenerated.

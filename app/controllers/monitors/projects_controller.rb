@@ -1,9 +1,8 @@
 module Monitors
   # Sub-resource replacing a custom POST /:id/move verb (CLAUDE.md rule 4): moving a
-  # monitor *is* updating which project it belongs to. Manual monitors only — a gem
-  # monitor is rejected with guidance to re-point its API key (projects.md §6, §12-I).
-  # Both the monitor and the target project are resolved tenant-scoped, so a foreign
-  # id on either side is an opaque 404.
+  # monitor *is* updating which project it belongs to. Both the monitor and the
+  # target project are resolved tenant-scoped, so a foreign id on either side is an
+  # opaque 404.
   class ProjectsController < ApplicationController
     before_action :set_monitor
 

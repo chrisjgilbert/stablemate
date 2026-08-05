@@ -18,7 +18,6 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
       expected_interval_seconds: interval, grace_period_seconds: grace }
   end
 
-  # Scenario 6 — new keys create gem/pending monitors and return ping_url.
   test "new registration keys create gem/pending monitors and return ping_url" do
     sync([ entry("daily_digest") ])
     assert_response :success
@@ -33,7 +32,6 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "gem", monitor.source
   end
 
-  # Scenario 7 — idempotent upsert, no duplication.
   test "re-syncing updates and does not duplicate" do
     sync([ entry("daily_digest", name: "First", interval: 3600) ])
     assert_no_difference -> { @user.monitors.count } do
@@ -44,7 +42,6 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 7200, monitor.expected_interval_seconds
   end
 
-  # Scenario 8 — cap overflow: partial register + skipped, still 200.
   test "cap overflow registers up to the cap and skips the rest with 200" do
     sync(%w[a b c d e f].map { |k| entry(k) })
     assert_response :success
@@ -55,7 +52,6 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "limit_reached", body["skipped"].first["reason"]
   end
 
-  # Scenario 9 — updates succeed at the cap.
   test "updates to existing monitors succeed at the cap" do
     sync((1..4).map { |i| entry("k#{i}") }) # bob now at 5 (1 fixture + 4)
     sync([ entry("k1", name: "Updated") ])
@@ -64,7 +60,6 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "Updated", @user.monitors.find_by(registration_key: "k1").name
   end
 
-  # Scenario 10 — absent monitors untouched.
   test "monitors absent from the payload are left untouched" do
     sync([ entry("keep") ])
     before = @user.monitors.count
@@ -73,7 +68,6 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
     assert @user.monitors.exists?(registration_key: "keep")
   end
 
-  # Scenario 11 — the returned ping_url actually works.
   test "the returned ping_url records a PingEvent when hit" do
     sync([ entry("daily_digest") ])
     url = JSON.parse(response.body)["monitors"].first["ping_url"]

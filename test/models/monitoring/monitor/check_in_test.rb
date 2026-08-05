@@ -72,7 +72,6 @@ class Monitoring::Monitor::CheckInTest < ActiveSupport::TestCase
     end
   end
 
-  # Scenario 24 — down -> up: resolves the open incident, enqueues one recovered email.
   test "a down monitor recovering resolves its incident and enqueues one recovered email" do
     down = monitors(:up)
     down.update!(next_due_at: 10.minutes.ago) # overdue, so detection flags it
@@ -92,7 +91,6 @@ class Monitoring::Monitor::CheckInTest < ActiveSupport::TestCase
     end
   end
 
-  # Scenario 25 — an up monitor receiving a ping sends no notification.
   test "an up monitor receiving a ping enqueues no email" do
     up = monitors(:up)
     assert_enqueued_emails 0 do
@@ -101,7 +99,6 @@ class Monitoring::Monitor::CheckInTest < ActiveSupport::TestCase
     assert up.up?
   end
 
-  # Scenario 26 — a paused monitor records the event but stays paused, sends nothing.
   test "a paused monitor records the ping but stays paused and alerts nothing" do
     paused = monitors(:up)
     paused.pause!

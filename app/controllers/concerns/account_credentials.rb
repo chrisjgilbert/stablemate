@@ -1,22 +1,16 @@
-# The shared credential surface under /account: the delete confirmation
-# (AccountsController#destroy) and the nested password change
-# (Accounts::PasswordsController#update). Both re-verify the current password and
-# both answer a failure by re-rendering the same page, so both the attempt budget
-# and the re-render live here rather than one controller reaching across for the
-# other's constants.
+# The shared credential surface under /account: the delete confirmation and the
+# nested password change. Both re-verify the current password and both answer a
+# failure by re-rendering the same page.
 #
 # Why a bound at all on a SIGNED-IN surface: re-verifying the current password
-# makes each form an online password oracle for the one attacker the prompt
-# exists to stop — somebody who already holds a stolen session cookie. Unlimited
-# guesses hand them the account credential itself (and, since every guess costs a
-# bcrypt hash, a cheap CPU amplifier). The unauthenticated credential surfaces
-# are already bounded (SessionsController, PasswordsController,
-# RegistrationsController); holding a cookie must not buy an exemption.
+# makes each form an online password oracle for the one attacker the prompt exists
+# to stop — somebody who already holds a stolen session cookie. Unlimited guesses
+# hand them the account credential itself (and, since every guess costs a bcrypt
+# hash, a cheap CPU amplifier).
 #
 # ONE budget, keyed by user and shared across both controllers via `scope:`, so
-# alternating between the two forms can't double it. Dedicated in-process store
-# so the bound holds under the test env's null_store, mirroring
-# PingsController/RegistrationsController.
+# alternating between the two forms can't double it. Dedicated in-process store so
+# the bound holds under the test env's null_store.
 module AccountCredentials
   extend ActiveSupport::Concern
 
@@ -29,10 +23,9 @@ module AccountCredentials
   WRONG_PASSWORD_MESSAGE = "That password is incorrect.".freeze
 
   class_methods do
-    # Declare this controller's share of the one budget. Callers pass only the
-    # actions to guard (`only:`); everything that must match between the two
-    # controllers — limit, window, scope, store, and what a throttled request is
-    # shown — is fixed here, so the two can't drift apart into two budgets.
+    # Callers pass only the actions to guard (`only:`); everything that must match
+    # between the two controllers is fixed here, so they can't drift apart into two
+    # budgets.
     #
     # Runs after require_authentication (an inherited before_action, so it is
     # registered first), which is what makes Current.user safe to key on.
@@ -45,8 +38,6 @@ module AccountCredentials
   end
 
   private
-    # Re-render the account page in place with an explanation. Both controllers
-    # fail the same way, so they fail through the same helper.
     def render_account(alert, status: :unprocessable_entity)
       flash.now[:alert] = alert
       render template: "accounts/show", status: status

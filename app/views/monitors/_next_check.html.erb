@@ -1,12 +1,8 @@
 <%#
-  "Next check". Shown only while genuinely upcoming (HeartbeatStates
-  #next_check_upcoming?) — an up monitor can already be past next_due_at but
-  still inside its grace window, where the timestamp is stale.
-  variant: :row (dashboard row — a compact countdown, no grace clause; the
-  row is already tight, and the full picture is one click away) or :dl
-  (detail page — the exact timestamp, plus a grace-until note when a grace
-  period is actually configured).
-  Locals: monitor, variant (default :row).
+  Shown only while genuinely upcoming — an up monitor can already be past
+  next_due_at but still inside its grace window, where the timestamp is stale.
+  Locals: monitor, variant (:row for the compact dashboard countdown, :dl for the
+  detail page's exact timestamp; default :row).
 %>
 <% variant ||= :row %>
 <% if monitor.next_check_upcoming? %>

@@ -50,7 +50,6 @@ class ProjectsTest < ApplicationSystemTestCase
     assert_not Project.exists?(project.id)
   end
 
-  # (§7) the delete confirmation spells out the blast radius with counts.
   test "the delete confirmation states the blast radius with counts" do
     project = @alice.projects.sole
     ApiKey.issue(project: project, name: "CI")

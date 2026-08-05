@@ -3,8 +3,6 @@ require "test_helper"
 class ApiKeyTest < ActiveSupport::TestCase
   setup { @user = users(:alice); @project = @user.projects.sole }
 
-  # Scenario 1 — issuance stores a digest + last4, returns the raw key once,
-  # never persists plaintext.
   test "issue stores a SHA-256 digest and last4 and returns the raw key once" do
     api_key, raw = ApiKey.issue(project: @project, name: "CI")
 
@@ -23,7 +21,6 @@ class ApiKeyTest < ActiveSupport::TestCase
     assert_equal "sm_live_••••#{raw.last(4)}", api_key.masked
   end
 
-  # Scenario 2 — lookup by raw token matches via digest; a wrong token does not.
   test "authenticating resolves the right key and touches last_used_at" do
     api_key, raw = ApiKey.issue(project: @project, name: "CI")
     assert_nil api_key.last_used_at

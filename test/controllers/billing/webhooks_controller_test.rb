@@ -1,12 +1,7 @@
 require "test_helper"
 
-# Stripe webhook endpoint — the only writer of User.plan. Verifies signature
-# checking, idempotency, and the plan sync in both directions (issue #19).
-#
-# We post real, Stripe-signed payloads (using the test signing secret) so the
-# signature path is exercised end to end, and stub Pay's processing at the
-# boundary — we never hit Stripe's API. We drive the plan change directly through
-# the user's Pay subscription mirror so the controller's sync reflects it.
+# We post real, Stripe-signed payloads so the signature path is exercised end to
+# end, and stub Pay's processing at the boundary — we never hit Stripe's API.
 class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
   include StripeApiStubs
 
@@ -15,10 +10,8 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
     @project = @user.projects.sole
   end
 
-  # Build a Stripe-signed request body for an event whose object carries a
-  # customer id, then POST it to the webhook endpoint.
-  # Default livemode: false — the test secret key (sk_test_…) puts the app in test
-  # mode, so test-mode events are the ones it should act on.
+  # Default livemode: false — the test secret key puts the app in test mode, so
+  # test-mode events are the ones it should act on.
   def post_event(type:, customer:, id: "evt_#{SecureRandom.hex(8)}", livemode: false, object: {})
     payload = {
       id: id, type: type, livemode: livemode,
@@ -41,8 +34,6 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
       headers: { "Stripe-Signature" => header, "Content-Type" => "application/json" }
   end
 
-  # As every webhook payload below is addressed to a customer id, this returns
-  # that id rather than the subscription.
   def make_pro!(processor_id: "cus_#{SecureRandom.hex(6)}")
     give_pro_subscription!(customer_id: processor_id)
     processor_id
@@ -70,7 +61,6 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
         cus = make_pro!
         @user.update!(plan: "pro")
 
-        # Cancel the mirror so subscribed_to_pro? becomes false.
         @user.pay_subscriptions.update_all(status: "canceled", ends_at: 1.minute.ago)
 
         post_event(type: "customer.subscription.deleted", customer: cus)
@@ -84,7 +74,6 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
   test "re-upgrade reactivates plan-suspended monitors up to the Pro cap" do
     with_billing_enabled do
       without_pay_stripe_network do
-        # A user with two suspended monitors from an earlier downgrade.
         @user.update!(plan: "free")
         a = @project.monitors.create!(name: "A", **{ expected_interval_seconds: 3600, grace_period_seconds: 300 })
         b = @project.monitors.create!(name: "B", **{ expected_interval_seconds: 3600, grace_period_seconds: 300 })
@@ -118,12 +107,10 @@ class Billing::WebhooksControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # M5 / launch-readiness D9 — Pay's stock customer emails are off. Two reasons:
-  # the payment_failed one is `deliver_now` from inside the ProcessedEvent
-  # idempotency transaction (an SMTP failure would 500 the webhook, roll the claim
-  # back, and have Stripe retry the whole event — now that production raises
-  # delivery errors, that path is live), and the copy is Pay's unbranded default,
-  # never reviewed. Our own alerting is deliberate and queued.
+  # Pay's stock customer emails are off. The payment_failed one is `deliver_now`
+  # from inside the ProcessedEvent idempotency transaction, so an SMTP failure
+  # would 500 the webhook, roll the claim back, and have Stripe retry the whole
+  # event — and the copy is Pay's unbranded default, never reviewed.
   test "a payment_failed event sends no Pay email" do
     with_billing_enabled do
       without_pay_stripe_network do

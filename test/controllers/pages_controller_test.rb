@@ -1,7 +1,6 @@
 require "test_helper"
 
 class PagesControllerTest < ActionDispatch::IntegrationTest
-  # The marketing landing page is the public root for anonymous visitors.
   test "anonymous visitors see the marketing landing page at the root" do
     get root_path
     assert_response :success

@@ -10,7 +10,6 @@ class Api::V1::Monitors::PingTokensControllerTest < ActionDispatch::IntegrationT
 
   def auth = { "Authorization" => "Bearer #{@raw}" }
 
-  # Scenario 12 — rotate changes ping_token; old token -> 404 on ping.
   test "rotate changes the ping_token and returns the new ping_url" do
     old_token = @monitor.ping_token
     post rotate_api_v1_monitor_url(@monitor), headers: auth

@@ -1,9 +1,7 @@
 module Projects
-  # Per-project API-key management (Design B, projects.md §6/§12-E): a key belongs
-  # to one project and is that app's gem identity. Issuance shows the raw sm_live_…
-  # token exactly once (re-rendering the project page with the modal open); revoke
-  # deletes it. Both scope through current_user.projects, so a foreign project OR a
-  # key from another project is an opaque 404 — no cross-tenant, no cross-project.
+  # Per-project API-key management. Issuance shows the raw sm_live_… token exactly
+  # once. Both actions scope through current_user.projects, so a foreign project OR
+  # a key from another project is an opaque 404.
   class ApiKeysController < ApplicationController
     include ProjectShowData
 

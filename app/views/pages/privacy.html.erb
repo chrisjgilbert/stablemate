@@ -1,36 +1,18 @@
 <%#
-  Privacy Policy (launch-readiness §4 / WS-C). Static marketing-layout page, same
-  system as terms.html.erb.
-
   THE RULE FOR THIS FILE: every sentence is a claim about what the code does, and
-  each one was checked against the code before it was written — not against a
-  template. The inventory below maps to:
-    * users (email_address, password_digest, plan, verified_at, downgrade state)
-    * sessions (ip_address, user_agent) — Authentication#start_new_session_for
-    * ping_events (source_ip, duration_ms, error) — PingsController + PingEvent
-    * incidents (error) — Monitor#open_incident!, deliberately outliving pruning
-    * projects/monitors names, api_keys (digest + last4), waitlist_signups
-    * PING_RETENTION / ERROR_MESSAGE_LIMIT, rendered from the constants
-    * cookies: signed permanent :session_id + Rails' _stablemate_session
-    * subprocessors: Hetzner + Cloudflare (deploy.yml/production.rb), Cloudflare
-      Web Analytics (config/initializers/stablemate.rb, config-gated — only on
-      when CLOUDFLARE_ANALYTICS_TOKEN/credentials are set), Stripe (Pay),
-      Honeybadger (config/honeybadger.yml + config/initializers/
-      honeybadger.rb), Slack (User::SignupAlert + WaitlistSignup::SlackAlert, D4)
-  If any of those change, this page changes in the same PR. An unverifiable
-  sentence in a privacy policy is a liability, so don't add one.
+  each one was checked against the code before it was written. If any of what it
+  describes changes, this page changes in the same PR — an unverifiable sentence
+  in a privacy policy is a liability, so don't add one.
 
   ⚠️ OWNER ACTION before launch — ONE visible placeholder:
     §1's controller identity (same as the Terms) — fill in the registered
     name/address, and add an ICO registration number if one is required.
 
-  §6 names Postmark as the email subprocessor on the OWNER'S DECISION
-  (D2, settled 2026-08-02), not on anything derivable from this repo:
-  .env.example lists several providers as examples and production.rb takes
-  whatever SMTP_* supplies. That makes it the one entry here whose truth
-  depends on ops rather than code — so when SMTP is actually configured
-  (WS-F), confirm the credentials really are Postmark's, and if the provider
-  ever changes, change this line in the same breath.
+  §6 names Postmark as the email subprocessor on the OWNER'S DECISION, not on
+  anything derivable from this repo: production.rb takes whatever SMTP_* supplies.
+  That makes it the one entry here whose truth depends on ops rather than code —
+  so when SMTP is actually configured, confirm the credentials really are
+  Postmark's, and if the provider ever changes, change this line in the same breath.
 %>
 <% retention_days = ping_retention_days %>
 <% error_limit = number_with_delimiter(Stablemate::ERROR_MESSAGE_LIMIT) %>

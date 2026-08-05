@@ -1,8 +1,6 @@
 <%#
-  Generate-once modal (design-system.md / phase-3 §3.5): shows the full sm_live_…
-  key exactly once, with a Copy button (clipboard controller) and an amber
-  "you won't see this key again" warning. Dismissed via the dialog controller;
-  the key is never re-rendered after this. Locals: raw_token.
+  Shows the full sm_live_… key exactly once; it is never re-rendered after this.
+  Locals: raw_token.
 %>
 <div data-controller="dialog" data-dialog-open-value="true">
   <div data-dialog-target="backdrop" data-action="click->dialog#backdropClick"

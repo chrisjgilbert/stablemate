@@ -1,7 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
 
-// Copy-to-clipboard for the ping-URL / token / curl fields. Writes the source
-// value and briefly swaps the button label to "Copied". (design-system.md §2)
 export default class extends Controller {
   static targets = ["source", "button"]
 

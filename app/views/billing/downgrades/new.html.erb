@@ -61,9 +61,8 @@
 <% else %>
   <%= form_with url: billing_downgrade_path, method: :post,
         data: { controller: "choose-five", choose_five_limit_value: @keep_limit } do %>
-    <%# Group candidates by project (projects.md §7) so the user sees which app each
-        monitor belongs to. Controller preloads :project (no N+1). All checkboxes
-        stay inside the one form, so the choose-five Stimulus targets still resolve. %>
+    <%# Controller preloads :project (no N+1). All checkboxes stay inside the one
+        form, so the choose-five Stimulus targets still resolve. %>
     <div class="space-y-4">
       <% @monitors.group_by(&:project).each do |project, monitors| %>
         <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm" data-testid="downgrade-project-group">

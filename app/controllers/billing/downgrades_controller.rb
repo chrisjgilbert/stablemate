@@ -1,12 +1,9 @@
 module Billing
-  # Downgrade sub-resource. Two shapes share this controller:
-  #   * a VOLUNTARY downgrade from Pro — over the Free cap it's the "choose which N
-  #     to keep" picker (PRD §5.6), at/under the cap it's a plain confirm (WU-5);
-  #   * resolving an INVOLUNTARY choose-N lock (WU-6) — the account already dropped
-  #     to Free but nothing was suspended (the grace window, §12-J), so #create picks
-  #     which N stay active and suspends the rest (no Stripe).
-  # #new renders the picker or the confirm; #create commits. The plan flip itself
-  # lands via the verified webhook (the only writer of plan).
+  # Downgrade sub-resource. Two shapes share this controller: a VOLUNTARY
+  # downgrade from Pro, and resolving an INVOLUNTARY choose-N lock (where the
+  # account already dropped to Free but nothing was suspended yet, so #create only
+  # picks which N stay active — no Stripe). The plan flip itself lands via the
+  # verified webhook.
   class DowngradesController < BaseController
     def new
       load_downgrade
@@ -35,9 +32,7 @@ module Billing
     rescue ::Stripe::StripeError, Pay::Error => e
       # cancel_now! wraps Stripe failures in Pay::Error; a real cancel failure would
       # otherwise escape as a 500. Stripe is cancelled before any monitor is
-      # suspended (User::Downgrade#to_free!), so a failure here leaves nothing
-      # half-done. (The choose-N resolve path makes no Stripe call.) Log it so the
-      # swallowed failure isn't invisible to us.
+      # suspended, so a failure here leaves nothing half-done.
       Rails.logger.error("[billing] downgrade failed (user=#{current_user.id}): #{e.class}: #{e.message}")
       render_new(status: :service_unavailable, alert: "Couldn't complete the downgrade. Please try again.")
     end
@@ -50,17 +45,13 @@ module Billing
         @monitors = picker_monitors if @mode == :choose
       end
 
-      # Is there actually a Pro to leave? The involuntary path arrives here with
-      # the plan already on Free and the subscription already cancelled, so copy
-      # promising to cancel one is a lie (M4). The predicate moved onto the User
-      # because the billing page and the Upgrade CTAs need the same answer and were
-      # each getting it wrong differently — see User::Subscription#billed_for_pro?.
+      # Is there actually a Pro to leave? The involuntary path arrives here with the
+      # plan already on Free and the subscription already cancelled, so copy
+      # promising to cancel one is a lie.
       def leaving_pro?
         current_user.billed_for_pro?
       end
 
-      # Choose-N when the account owes an involuntary decision, or a voluntary
-      # downgrade while still over the Free cap; otherwise a plain confirm (WU-5).
       def downgrade_mode
         return :choose if current_user.must_choose_downgrade?
         return :choose if current_user.over_free_cap_by.positive?
@@ -73,8 +64,8 @@ module Billing
       # chooses among the currently-active ones.
       def picker_monitors
         scope = current_user.must_choose_downgrade? ? current_user.monitors : current_user.monitors.counting_toward_cap
-        # Preload :project — the picker groups by it (projects.md §7), so without
-        # this the group_by would fire one SELECT per monitor.
+        # Preload :project — the picker groups by it, so without this the group_by
+        # would fire one SELECT per monitor.
         scope.includes(:project).order(:created_at).to_a
       end
 

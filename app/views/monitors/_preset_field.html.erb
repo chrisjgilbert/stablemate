@@ -1,7 +1,4 @@
 <%#
-  A human-preset + Custom field backed by a hidden seconds value. The Stimulus
-  preset_field controller writes the chosen seconds into the hidden field and
-  reveals the custom input when "Custom" is picked.
   Locals: form, field (symbol), label, presets ([[label, seconds], ...]), current (int|nil).
 %>
 <% matches_preset = presets.any? { |_, secs| secs == current } %>

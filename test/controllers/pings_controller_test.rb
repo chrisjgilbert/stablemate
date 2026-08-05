@@ -5,7 +5,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
 
   setup { @monitor = monitors(:pending) }
 
-  # Scenario 24 (request) — a ping recovers a down monitor and sends recovery mail.
   test "a ping recovers a down monitor, resolves its incident, sends one recovery email" do
     down = monitors(:up)
     down.update!(next_due_at: 10.minutes.ago) # overdue, so detection flags it
@@ -21,7 +20,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     refute down.incidents.open.exists?
   end
 
-  # Scenario 1 — 200 {"ok":true} + a PingEvent is created.
   test "GET /ping/:token returns 200 ok and records a PingEvent" do
     assert_difference -> { @monitor.ping_events.count }, 1 do
       get ping_path(@monitor.ping_token)
@@ -31,7 +29,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     assert_equal({ "ok" => true }, response.parsed_body)
   end
 
-  # Scenario 2 — last_ping_at / next_due_at math.
   test "a ping sets last_ping_at to now and next_due_at to now + interval" do
     freeze_time do
       now = Time.current
@@ -43,7 +40,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # Scenario 3 — pending -> up.
   test "a ping transitions a pending monitor to up" do
     assert_equal "pending", @monitor.status
     get ping_path(@monitor.ping_token)
@@ -68,7 +64,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     assert suspended.reload.suspended?
   end
 
-  # Scenario 4 — duration_ms captured from the query string.
   test "duration_ms query param is captured on the PingEvent" do
     get ping_path(@monitor.ping_token, duration_ms: 1234)
 
@@ -132,7 +127,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 2_147_483_647, @monitor.ping_events.order(:received_at).last.duration_ms
   end
 
-  # Scenario 5 — unknown token -> opaque 404, no PingEvent.
   test "an unknown token returns 404 and creates no PingEvent" do
     assert_no_difference -> { PingEvent.count } do
       get ping_path("definitely-not-a-real-token")
@@ -141,7 +135,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
-  # Scenario 6 — POST behaves identically.
   test "POST /ping/:token behaves identically to GET" do
     assert_difference -> { @monitor.ping_events.count }, 1 do
       post ping_path(@monitor.ping_token)
@@ -152,7 +145,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "up", @monitor.reload.status
   end
 
-  # Scenario 7 — source_ip is set from the request.
   test "the ping records the request source_ip" do
     get ping_path(@monitor.ping_token)
 
@@ -160,8 +152,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     assert event.source_ip.present?
   end
 
-  # Scenario 7 — pinging a known token faster than the limit returns 429 after the
-  # threshold; the ping hot path is otherwise unchanged.
   test "pinging a token over the per-token limit returns 429" do
     with_rate_limiting do
       limit = PingsController::PER_TOKEN_LIMIT
@@ -186,9 +176,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # Scenario 8 — repeated unknown-token requests are rate-limited per IP and always
-  # return 404 (never a 429 that would distinguish a real token from a fake one,
-  # and never 200).
   test "repeated unknown-token requests are rate-limited per IP but still 404" do
     with_rate_limiting do
       limit = PingsController::PER_IP_LIMIT
@@ -230,7 +217,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "boom", up.ping_events.order(:received_at).last.error
   end
 
-  # status wins when both spellings are sent.
   test "status=0 beats s=1 when both are sent" do
     get ping_path(@monitor.ping_token, status: 0, s: 1)
 
@@ -249,7 +235,6 @@ class PingsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "up", @monitor.reload.status
   end
 
-  # A message on a success ping is simply ignored in V1 (§12-E).
   test "a message on a success ping is ignored" do
     get ping_path(@monitor.ping_token, message: "not an error")
 

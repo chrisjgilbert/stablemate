@@ -1,24 +1,15 @@
 module Monitoring
-  # The heartbeat/cron monitor — the centre of gravity of the domain.
-  #
   # DEVIATION (CLAUDE.md "Deviate, but say so"): architecture.md names this class
   # `Monitor` at the top level. That is impossible on Rails 8 + Ruby 3.3: Active
   # Record and concurrent-ruby both rely on the stdlib `::Monitor` class at
-  # runtime (e.g. `@load_schema_monitor = Monitor.new` in ActiveRecord, and a
-  # hard-coded `::Monitor.new` in concurrent-ruby), so a top-level `Monitor`
-  # Active Record model collides fatally. We therefore namespace the model under
-  # `Monitoring` (table stays `monitors`, association stays `:monitors`, the
-  # instance API — `monitor.check_in!` — is unchanged). Nested objects keep their
-  # normative names under this scope: `Monitoring::Monitor::CheckIn`,
-  # `Monitoring::Monitor::PingToken`.
+  # runtime, so a top-level `Monitor` Active Record model collides fatally. We
+  # therefore namespace the model under `Monitoring` (table stays `monitors`,
+  # association stays `:monitors`, the instance API is unchanged).
   class Monitor < ApplicationRecord
     self.table_name = "monitors"
 
-    # The class is namespaced under Monitoring (see the deviation note above), but
-    # the domain — routes, form helpers, dom_id, I18n — is plain "monitor". Pin
-    # the model name so `redirect_to @monitor`, `form_with model:`,
-    # `monitor_path`, and `dom_id(monitor)` all resolve to the un-namespaced
-    # "monitor" rather than "monitoring_monitor".
+    # The class is namespaced under Monitoring (see above), but the domain —
+    # routes, form helpers, dom_id, I18n — is plain "monitor".
     def self.model_name
       ActiveModel::Name.new(self, nil, "Monitor")
     end
@@ -29,32 +20,21 @@ module Monitoring
     include Uptime
 
     belongs_to :project
-    # Ownership flows monitor → project → user (docs/specs/projects.md §4.2).
-    # `monitor.user` is delegated so within_monitor_cap, mailers, and broadcasts
-    # keep working; allow_nil avoids a NoMethodError on a monitor built before its
-    # project is set.
     delegate :user, to: :project, allow_nil: true
-    # delete_all, not destroy, for the two high-volume leaf tables. A monitor
-    # accumulates one ping_event per check-in and keeps PING_RETENTION (90 days)
-    # of them, so a busy account holds hundreds of thousands: destroying them
-    # row-by-row loads every record and issues a DELETE each, which measured
-    # ~0.5ms/row — a minute or more inside one open transaction for a single Free
-    # account, and an out-of-memory for a Pro one. Both tables are leaves (no
-    # dependent associations, no destroy callbacks, nothing observes them), so a
-    # single bulk DELETE is equivalent and constant-time.
-    #
-    # incidents and notifications stay :destroy — they are low-volume (one per
-    # transition, not per ping) and incidents cascade to their own notifications.
+
+    # delete_all, not destroy, for the two high-volume leaf tables: a busy account
+    # holds hundreds of thousands of rows, and destroying them row-by-row measured
+    # ~0.5ms each — a minute or more inside one open transaction. Both tables are
+    # leaves (no dependent associations, no destroy callbacks, nothing observes
+    # them), so a single bulk DELETE is equivalent.
     has_many :ping_events, dependent: :delete_all, foreign_key: :monitor_id, inverse_of: :monitor
     has_many :incidents, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
     has_many :notifications, dependent: :destroy, foreign_key: :monitor_id, inverse_of: :monitor
     has_many :uptime_day_stats, dependent: :delete_all, foreign_key: :monitor_id, inverse_of: :monitor
 
-    # Deleting a monitor can be the act that settles an account: a user dropped to
-    # Free over the cap is locked into the choose-N picker (User::Subscription),
-    # and deleting monitors is one of the two ways out. On the record rather than
-    # MonitorsController#destroy so every deletion path gets it — a project cascade
-    # and a console destroy included. after_destroy_commit because the release
+    # Deleting a monitor can be the act that settles an account locked into the
+    # choose-N picker. On the record rather than MonitorsController#destroy so
+    # every deletion path gets it. after_destroy_commit because the release
     # rewrites the user row, so it must not run if the deletion rolls back.
     after_destroy_commit :release_owner_downgrade_lock
 
@@ -64,17 +44,11 @@ module Monitoring
     validates :grace_period_seconds, numericality: { greater_than_or_equal_to: 0 }
     validate :within_monitor_cap, on: :create
 
-    # Live status: each monitor row/badge lives in its own Turbo Stream channel so
-    # a ping or a detection sweep can replace just that fragment over Solid Cable,
-    # with no client polling. (Broadcasts are wired explicitly from the
-    # operations so they fire exactly on a real state change, not every save.)
-    #
-    # Deferred to after commit for the same reason Notifications::Dispatch is
-    # (F10): the webhook paths reach here inside ProcessedEvent.record_once's
-    # transaction, and Solid Queue is a SEPARATE database — a job enqueued
-    # pre-commit can be claimed by a worker that renders the monitor as it was
-    # before the change, and a rollback leaves an orphan job. With no transaction
-    # open this runs inline, unchanged.
+    # Deferred to after commit because the webhook paths reach here inside
+    # ProcessedEvent.record_once's transaction, and Solid Queue is a SEPARATE
+    # database — a job enqueued pre-commit can be claimed by a worker that renders
+    # the monitor as it was before the change, and a rollback leaves an orphan job.
+    # With no transaction open this runs inline, unchanged.
     def broadcast_status_update
       ActiveRecord.after_all_transactions_commit do
         %i[row badge].each do |fragment|
@@ -88,48 +62,32 @@ module Monitoring
       end
     end
 
-    # Registration source: created by hand in the UI vs synced from the gem.
-    # Plain predicates over the string column, mirroring HeartbeatStates' status
-    # vocabulary (an enum's raising setter and Kernel#gem-shadowing scope aren't
-    # worth it for a set-once column).
     def from_gem? = source == "gem"
     def manual?   = source == "manual"
 
-    # Is a hand-wired first ping still the user's next step? Only for a manual
-    # monitor that has never pinged and isn't plan-suspended: a gem monitor gets
-    # its ping URL from the API sync (never from the UI card), and a ping to a
-    # suspended monitor is recorded but swallowed by CheckIn — it can't
-    # reactivate it, so prompting "wire it into your job" would be a false
-    # promise. Drives which shape of the ping-setup card the detail page shows.
     def awaiting_setup? = manual? && !ever_pinged? && !suspended?
 
-    # The monitor's currently-open incident, if any. The open-incident invariant
-    # (the partial unique index on monitor_id WHERE resolved_at IS NULL) guarantees
-    # at most one, so callers rely on this single accessor rather than each
-    # re-expressing `incidents.open.first`.
+    # The open-incident invariant (the partial unique index on monitor_id WHERE
+    # resolved_at IS NULL) guarantees at most one.
     def open_incident
       incidents.open.first
     end
 
-    # Resolve the currently-open incident, if any, WITHOUT emitting a recovery
-    # alert — used when a monitor leaves the live (monitored) state via
-    # pause/suspend, so it never carries a stranded open incident into a
-    # not-measured window (which the rollup would otherwise count as downtime
-    # forever). Idempotent. Recovery-by-ping stays in CheckIn (it also alerts).
+    # Resolve the currently-open incident WITHOUT emitting a recovery alert — used
+    # when a monitor leaves the live (monitored) state via pause/suspend, so it
+    # never carries a stranded open incident into a not-measured window (which the
+    # rollup would otherwise count as downtime forever). Idempotent.
     def resolve_open_incident!(at: Time.current)
       open_incident&.resolve!(at:)
     end
 
-    # Open a fresh incident + its `down` Notification, only when none is open —
-    # the down-transition bookkeeping shared by MissedPing and FailureReport.
     # Returns the `down` Notification to dispatch, or nil when an incident was
     # already open (transition-only alerting: one email in, one out).
     #
-    # The calling operation's row lock serialises every incident-creating path,
-    # so the exists? guard is decisive; the partial unique index is the
-    # last-resort backstop, and requires_new confines a RecordNotUnique to its
-    # savepoint so rescuing it does NOT poison the caller's outer transaction
-    # (the status="down" flip still commits).
+    # The calling operation's row lock serialises every incident-creating path, so
+    # the exists? guard is decisive; the partial unique index is the last-resort
+    # backstop, and requires_new confines a RecordNotUnique to its savepoint so
+    # rescuing it does NOT poison the caller's outer transaction.
     def open_incident!(at:, cause:, error: nil)
       return nil if incidents.open.exists?
 
@@ -142,17 +100,11 @@ module Monitoring
       nil
     end
 
-    # Record a ping: persist a PingEvent, advance the timestamps, transition, and
-    # (on recovery) resolve the incident + enqueue a `recovered` alert. The facade
-    # routes by polarity — a failed ping is still a check-in, of bad news — with
-    # each outcome keeping its own operation, mirroring the CheckIn / MissedPing
-    # split (job-failure-details.md §5).
     def check_in!(received_at: Time.current, kind: "success", error: nil,
                   source_ip: nil, duration_ms: nil)
-      # An unknown kind raises rather than falling through to the success arm:
-      # a typo'd or symbol kind silently recorded as a success would transmute a
-      # reported failure into a recovery (CheckIn hardcodes kind: "success", so
-      # PingEvent's inclusion validation could never catch it).
+      # An unknown kind raises rather than falling through to the success arm: a
+      # typo'd kind silently recorded as a success would transmute a reported
+      # failure into a recovery.
       case kind.to_s
       when "failure"
         FailureReport.new(self).report_failure!(received_at:, error:, source_ip:, duration_ms:)
@@ -163,24 +115,19 @@ module Monitoring
       end
     end
 
-    # Flag this monitor down because its ping is overdue (called by the detection
-    # job for every monitor in the `overdue` scope).
     def flag_missed!
       MissedPing.new(self).flag_missed!
     end
 
-    # Aggregate one day's up/down seconds + ping count into a UptimeDayStat
-    # (idempotent upsert). Called by RollupUptimeJob for each day not yet rolled.
     def roll_up_uptime(day)
       UptimeRollup.new(self).roll_up_uptime(day)
     end
 
-    # Plan-downgrade (de)activation (hosted tier only — issue #19). A suspended
-    # monitor is retained but not monitored/alerted and excluded from the cap.
+    # A suspended monitor is retained but not monitored/alerted and excluded from
+    # the cap.
     def suspend!    = Suspension.new(self).suspend!
     def reactivate! = Suspension.new(self).reactivate!
 
-    # Move a manual monitor into another of the user's projects (projects.md §6).
     # Returns a Transfer::Result — a gem monitor or a target collision is a clean
     # `ok? == false`, not an exception.
     def transfer_to(project)
@@ -188,19 +135,16 @@ module Monitoring
     end
 
     private
-      # Skipped when the owner is going away too: closing an account (User::Closure)
-      # cascades through here, and there is no lock left to lift on a user row that
-      # is already deleted — and already frozen in memory, so writing to it would
-      # raise inside the commit callback and take the closure down with it.
+      # Skipped when the owner is going away too: closing an account cascades
+      # through here, and the user row is already deleted — and already frozen in
+      # memory, so writing to it would raise inside the commit callback and take
+      # the closure down with it.
       def release_owner_downgrade_lock
         return if user.nil? || user.destroyed?
 
         user.release_downgrade_lock_if_within_cap!
       end
 
-      # A user may own at most MAX_MONITORS_PER_USER monitors — paused ones still
-      # occupy a slot (locked decision #8). Only blocks creation; editing an
-      # existing monitor at the cap is always allowed.
       def within_monitor_cap
         return if user.blank?
         return unless user.at_monitor_cap?

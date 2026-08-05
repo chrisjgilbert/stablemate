@@ -56,7 +56,6 @@ class Monitoring::Monitor::FailureReportTest < ActiveSupport::TestCase
     assert_equal Stablemate::ERROR_MESSAGE_LIMIT, incident.error.length
   end
 
-  # Transition table row: up -> down, one reported_error incident, one down email.
   test "an up monitor goes down, opens a reported_error incident with the error, and enqueues one down email" do
     assert_difference -> { @monitor.incidents.count }, 1 do
       assert_enqueued_emails 1 do
@@ -193,8 +192,8 @@ class Monitoring::Monitor::FailureReportTest < ActiveSupport::TestCase
     assert @monitor.reload.down?
   end
 
-  # Recovery needs zero new code (§5): the next success resolves the
-  # reported_error incident and sends the one recovered email.
+  # Recovery needs zero new code: the next success resolves the reported_error
+  # incident and sends the one recovered email.
   test "a success after a reported error recovers the monitor with one recovered email" do
     @monitor.check_in!(kind: "failure", error: "boom")
     incident = @monitor.incidents.open.sole

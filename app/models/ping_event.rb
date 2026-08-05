@@ -1,32 +1,23 @@
 class PingEvent < ApplicationRecord
-  # Append-only audit rows: the table has created_at and no updated_at, so Rails'
-  # default timestamping sets created_at on create and ignores the missing
-  # updated_at — no manual plumbing needed.
+  # Append-only audit rows: the table has created_at and no updated_at.
   belongs_to :monitor, class_name: "Monitoring::Monitor", inverse_of: :ping_events
 
-  # "success" is a normal check-in; "failure" is a reported error ("I ran, but I
-  # failed" — job-failure-details.md), which carries `error` text.
   KINDS = %w[success failure].freeze
 
   validates :kind, inclusion: { in: KINDS }
 
-  # Raw pings older than the retention window are prunable (the rule lives here,
-  # on the record; PrunePingEventsJob is iteration only). Relative to the constant
-  # so changing PING_RETENTION changes the cutoff without touching the job/tests.
   scope :prunable, -> { where(received_at: ...Stablemate::PING_RETENTION.ago) }
 
   # Delete prunable pings, one (monitor, day) bucket at a time, in batches.
   #
   # Safety check (spec §3.3): a day's raw pings are only deleted once that day has
-  # a UptimeDayStat — pruning never destroys un-rolled data. A prunable day with
-  # no rollup is skipped and logged rather than deleted blind. This invariant
-  # lives on the record (callable/testable directly); the job just calls it.
+  # a UptimeDayStat — pruning never destroys un-rolled data.
   #
-  # …with one exception, or the check deadlocks against the rollup (M11): the
-  # backfill is clamped at Monitor.uptime_backfill_horizon, so a day older than
-  # that can never gain a stat row however often the rollup runs. Waiting for one
-  # there protects nothing and strands those pings for ever (skipped + warn-logged
-  # on every daily run), so a pre-horizon day is pruned on its own.
+  # …with one exception, or the check deadlocks against the rollup: the backfill is
+  # clamped at Monitor.uptime_backfill_horizon, so a day older than that can never
+  # gain a stat row however often the rollup runs. Waiting for one there protects
+  # nothing and strands those pings for ever, so a pre-horizon day is pruned on its
+  # own.
   def self.prune!
     horizon = Monitoring::Monitor.uptime_backfill_horizon
 

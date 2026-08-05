@@ -1,25 +1,18 @@
 # Stablemate cost-control & behaviour constants — the single source of truth.
+# Tests assert behaviour *relative to* these constants, never hard-coded numbers.
 #
-# Tests assert behaviour *relative to* these constants (never hard-coded
-# numbers), so changing a value here doesn't break the suite. See
-# docs/specs/README.md §"Money / cost-control constants".
-#
-# Reached via Rails.application.config.x.stablemate.<name> or the Stablemate
-# module constants below (whichever reads more naturally at the call site).
-#
-# CAPS ARE CONFIG-GATED AND DEFAULT TO OFF (issue #16). A self-hoster runs with
-# no per-user monitor cap and no global signup cap/waitlist; the managed instance
-# switches them on via env. Both caps follow the same rule:
+# CAPS ARE CONFIG-GATED AND DEFAULT TO OFF, so a self-hoster runs with no per-user
+# monitor cap and no global signup cap/waitlist:
 #
 #   unset or 0  ⇒  unlimited (the cap is OFF)
 #   a positive  ⇒  that integer is the cap (the cap is ON)
 #
-# Use the query helpers below (`monitor_cap_enabled?`, `signup_cap_enabled?`)
-# rather than re-deriving "is 0 ⇒ unlimited" at every call site.
+# Use the query helpers below rather than re-deriving "is 0 ⇒ unlimited" at every
+# call site.
+#
 # Loaded both in Rails' normal initializer pass and (earlier) via require_relative
 # from the initializers that need these readers before `s` comes round in filename
-# order — honeybadger.rb for the API key, pay.rb for the config-gate. Guard so the
-# constants are defined exactly once regardless of order.
+# order. Guard so the constants are defined exactly once regardless of order.
 return if defined?(Stablemate) && Stablemate.respond_to?(:billing_enabled?)
 
 module Stablemate
@@ -30,11 +23,9 @@ module Stablemate
 
   SIGNUP_ACCOUNT_CAP = ENV.fetch("STABLEMATE_SIGNUP_ACCOUNT_CAP", 0).to_i
 
-  # How long an involuntarily-downgraded (card failure / cancel) over-cap user has
-  # to pick which monitors to keep before the backstop job enforces the fallback.
-  # Nothing is suspended during the window — a payment blip must never silently
-  # stop monitoring. Sits inside Stripe's dunning window; tunable. (projects.md
-  # §7/§12-J.)
+  # How long an involuntarily-downgraded over-cap user has to pick which monitors
+  # to keep before the backstop job enforces the fallback. Nothing is suspended
+  # during the window. Sits inside Stripe's dunning window; tunable.
   DOWNGRADE_GRACE_PERIOD = 7.days
 
   DETECTION_INTERVAL = 30.seconds
@@ -43,12 +34,9 @@ module Stablemate
 
   DEFAULT_GRACE_FRACTION = 0.15
 
-  # A reported failure's error text is truncated server-side to this many
-  # characters (job-failure-details.md §10) — the model layer applies it
-  # unconditionally, so the ping endpoint and any future channel share the bound.
   # Deliberately duplicated in the companion gem as
-  # Stablemate::Client::ERROR_MESSAGE_LIMIT (gem/lib/stablemate/client.rb),
-  # which truncates client-side as defence in depth — keep the two in sync.
+  # Stablemate::Client::ERROR_MESSAGE_LIMIT, which truncates client-side as
+  # defence in depth — keep the two in sync.
   ERROR_MESSAGE_LIMIT = 1_000
 
   def self.monitor_cap_enabled?
@@ -82,7 +70,6 @@ module Stablemate
     stripe_secret_key.to_s.start_with?("sk_live_", "rk_live_")
   end
 
-  # The Stripe Price ID for an upgrade. Monthly today; annual is a future seam.
   def self.pro_price_id(annual: false)
     annual ? stripe_price_id_pro_annual : stripe_price_id_pro
   end
@@ -97,9 +84,7 @@ module Stablemate
       Rails.application.credentials.dig(:stripe, :price_id_pro_annual)
   end
 
-  # Slack incoming-webhook URL for team alerts (e.g. new sign-ups). Config-gated
-  # like the launch cap — unset by default, so self-hosters never see it; the
-  # managed instance turns it on via env or credentials.
+  # Config-gated like the caps — unset by default, so self-hosters never see it.
   def self.slack_webhook_url
     ENV["SLACK_WEBHOOK_URL"].presence ||
       Rails.application.credentials.dig(:slack, :webhook_url)
@@ -109,17 +94,14 @@ module Stablemate
     slack_webhook_url.present?
   end
 
-  # Honeybadger's project API key. Config-gated like the rest: unset ⇒ no error
-  # reporting at all, which is the self-host default (nobody else's crash reports
-  # should land in our project, and theirs are none of our business). Read by
-  # config/initializers/honeybadger.rb, which explains why the key is handed to
-  # the gem from there rather than left in config/honeybadger.yml.
+  # Config-gated like the rest: unset ⇒ no error reporting at all, which is the
+  # self-host default. config/initializers/honeybadger.rb explains why the key is
+  # handed to the gem from there rather than left in config/honeybadger.yml.
   def self.honeybadger_api_key
     ENV["HONEYBADGER_API_KEY"].presence ||
       Rails.application.credentials.dig(:honeybadger, :api_key)
   end
 
-  # Cloudflare Web Analytics beacon token. Config-gated like the rest: unset ⇒ off.
   def self.cloudflare_analytics_token
     ENV["CLOUDFLARE_ANALYTICS_TOKEN"].presence ||
       Rails.application.credentials.dig(:cloudflare, :analytics_token)

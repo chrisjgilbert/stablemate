@@ -1,29 +1,14 @@
 <% content_for :title, "Stablemate — super simple job monitoring for Rails" %>
 <%#
-  Marketing landing page — the approved "Omakase" design direction (warm oat
-  ground, Rails-red accent, Zilla Slab / Newsreader / IBM Plex Mono). All styling
-  lives in app/assets/stylesheets/landing.css, scoped under `.lp` (the layout
-  wraps the yield) so the authenticated app's Tailwind tokens are untouched.
-
-  Deviations from the design mockup (all deliberate):
-    * Pricing lives on its own page (GET /pricing, issue #45) rather than inline
-      here — this page keeps its general "let us host it" copy via
-      free_plan_monitors_phrase (reads for both the capped and uncapped self-host
-      plan); /pricing states the real hosted Free/Pro numbers from the plan
-      constants, since that's the one place a concrete figure belongs.
-    * Brand uses the typographic wordmark "Stablemate." (Zilla Slab, red period)
-      per the mockup, not shared/logo (that glyph stays for the authenticated app).
-    * The 90-day ledger bars are rendered SERVER-SIDE via an ERB loop over
-      ping_retention_days — no inline <script>; no client JS for a static viz.
-    * Every "90 days" reference goes through ping_retention_days so marketing can't
-      drift from the product's actual retention.
+  All styling lives in app/assets/stylesheets/landing.css, scoped under `.lp` so
+  the authenticated app's Tailwind tokens are untouched. Every "90 days" reference
+  goes through ping_retention_days so marketing can't drift from the product's
+  actual retention.
 %>
 <% repo_url = stablemate_repo_url %>
 
-<%# ===== NAV ===== %>
 <%= render "nav" %>
 
-<%# ===== HERO ===== %>
 <section class="hero">
   <div class="wrap hero__grid">
     <div>
@@ -64,7 +49,6 @@
   </div>
 </section>
 
-<%# ===== HOW IT WORKS ===== %>
 <section class="section" id="how">
   <div class="wrap">
     <div class="sec-intro">
@@ -99,7 +83,6 @@
   </div>
 </section>
 
-<%# ===== recurring.yml ===== %>
 <section class="soft" id="spec">
   <div class="wrap two">
     <div>
@@ -126,7 +109,6 @@
   </div>
 </section>
 
-<%# ===== THE EMAIL ===== %>
 <section class="section" id="mail">
   <div class="wrap">
     <div class="sec-intro">
@@ -151,13 +133,8 @@
       <div>
         <div class="ledger">
           <div class="ledger__head"><b>nightly_backup</b> · last <%= ping_retention_days %> days</div>
-          <%#
-            Server-rendered demo ledger (no client JS): a deterministic, ~2-incident
-            pattern over ping_retention_days. Two "down" days form the incidents, a
-            few "warn" days around them; the rest are healthy at a gently varying
-            height. Indices are clamped to the retention window so the pattern holds
-            for any retention value.
-          %>
+          <%# Indices are clamped to the retention window so the pattern holds for
+              any retention value. %>
           <% days = ping_retention_days %>
           <% down_days = [12, 13, 58].select { |i| i < days } %>
           <% warn_days = [11, 57, 72].select { |i| i < days } %>
@@ -187,7 +164,6 @@
   </div>
 </section>
 
-<%# ===== HONEST LINE ===== %>
 <section class="honest">
   <div class="wrap">
     <h2 class="flow h2">Free forever to self-host. Fair pricing if you'd rather we run it.</h2>
@@ -195,7 +171,6 @@
   </div>
 </section>
 
-<%# ===== FINALE ===== %>
 <section class="finale">
   <div class="wrap finale__in">
     <p class="kicker">Start free</p>
@@ -211,5 +186,4 @@
   </div>
 </section>
 
-<%# ===== COLOPHON ===== %>
 <%= render "colophon" %>

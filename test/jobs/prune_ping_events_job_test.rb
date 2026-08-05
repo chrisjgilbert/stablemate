@@ -16,8 +16,6 @@ class PrunePingEventsJobTest < ActiveJob::TestCase
     @monitor.update_column(:created_at, (Stablemate::PING_RETENTION.ago - 30.days))
   end
 
-  # Scenario 11 — old pings are deleted, recent ones retained. Old days are rolled
-  # up first so the safety check passes.
   test "deletes pings older than the retention window and keeps newer ones" do
     old_time   = Stablemate::PING_RETENTION.ago - 2.days
     fresh_time = 1.day.ago
@@ -33,11 +31,6 @@ class PrunePingEventsJobTest < ActiveJob::TestCase
     assert PingEvent.exists?(fresh.id)
   end
 
-  # Scenario 12 — an old ping whose day has NO UptimeDayStat is skipped + logged,
-  # never deleted blind. The day has to be one the rollup can still reach (the
-  # horizon day: prunable, because the retention cutoff falls at midday, but
-  # still inside the backfill window) — see the M11 case below for the days it
-  # can't.
   test "skips and logs pruning for a rollable day that has not been rolled up" do
     travel_to Date.current.to_time(:utc) + 12.hours do
       old_time = Monitoring::Monitor.uptime_backfill_horizon.to_time(:utc) + 3.hours
@@ -81,9 +74,6 @@ class PrunePingEventsJobTest < ActiveJob::TestCase
     end
   end
 
-  # Scenario 13 — pruning deletes in batches (does not load all rows at once).
-  # We assert the delete path goes through in_batches rather than a bare
-  # delete_all over the whole relation.
   test "deletes in batches rather than loading every row at once" do
     old_time = Stablemate::PING_RETENTION.ago - 2.days
     3.times { @monitor.ping_events.create!(received_at: old_time, kind: "success") }

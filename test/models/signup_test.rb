@@ -4,7 +4,6 @@ class SignupTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
   include ActionMailer::TestHelper
 
-  # Scenario 1 (model part) — creates a free, unverified user + verification email.
   test "run creates a free, unverified user and enqueues a verification email" do
     user = nil
     assert_enqueued_email_with UserMailer, :verification, args: ->(args) { args.first == user } do
@@ -16,10 +15,8 @@ class SignupTest < ActiveSupport::TestCase
     assert_nil user.verified_at
   end
 
-  # The Slack alert job is queued for every successful signup; whether it
-  # actually posts anywhere is gated inside User::SignupAlert (off by default
-  # in test, like self-host — see test/models/user/signup_alert_test.rb), not
-  # at enqueue time here.
+  # Whether the alert actually posts anywhere is gated inside User::SignupAlert,
+  # not at enqueue time here.
   test "run queues a Slack alert job for a successfully created user" do
     user = nil
     assert_enqueued_with(job: NotifySignupJob, args: ->(args) { args == [ user.id ] }) do
@@ -42,8 +39,6 @@ class SignupTest < ActiveSupport::TestCase
     end
   end
 
-  # Scenario 1/2 (model) — at the cap, run lands on the waitlist: a WaitlistSignup
-  # is created, NO User, no verification email.
   test "at the cap, run creates a WaitlistSignup and no User" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
       result = nil
@@ -61,9 +56,8 @@ class SignupTest < ActiveSupport::TestCase
     end
   end
 
-  # The Slack alert job is queued for every successful waitlist join, mirroring
-  # the User signup alert; whether it actually posts anywhere is gated inside
-  # WaitlistSignup::SlackAlert (see test/models/waitlist_signup/slack_alert_test.rb).
+  # As with the User signup alert, whether it actually posts anywhere is gated
+  # inside WaitlistSignup::SlackAlert.
   test "at the cap, run queues a Slack alert job for a new waitlist signup" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
       result = nil
@@ -73,8 +67,6 @@ class SignupTest < ActiveSupport::TestCase
     end
   end
 
-  # Scenario 3 (model) — a duplicate waitlist email is a friendly success, not an
-  # error, and creates no second row.
   test "at the cap, a duplicate waitlist email is a friendly no-op success" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
       WaitlistSignup.create!(email_address: "again@example.com")
@@ -101,7 +93,6 @@ class SignupTest < ActiveSupport::TestCase
     end
   end
 
-  # Scenario 4/5 (model) — below the cap (or after raising it), normal sign-up.
   test "below the cap, run creates a User as normal" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
       result = nil
@@ -133,19 +124,13 @@ class SignupTest < ActiveSupport::TestCase
   # --- M1: the cap check-and-create must not race ---------------------------
   #
   # A true two-request race can't be staged here: the suite runs inside
-  # transactional fixtures on a single pinned connection, so two committing
-  # signups aren't expressible. These three tests pin the property that makes the
-  # race impossible instead — (a) the capacity COUNT and the INSERT both happen
-  # *after* the lock is taken, so the window between them can't be entered twice;
-  # (b) the lock genuinely excludes a second database connection while that
-  # decision is being made (probed from a real second connection); and (c) with
-  # the cap off there is no window to guard, so no lock is taken at all.
+  # transactional fixtures on a single pinned connection. These tests pin the
+  # property that makes the race impossible instead — the capacity COUNT and the
+  # INSERT both happen after the lock is taken, the lock genuinely excludes a
+  # second connection, and with the cap off no lock is taken at all.
 
-  # There is also an unlocked capacity COUNT before the lock, which is why this
-  # asks for a count AFTER it rather than for the first one: that pre-check is
-  # deliberately not the decision (it only spares a waitlist join the cost of a
-  # password hash), and being stale either way is harmless. The decision — the
-  # count the INSERT is predicated on — has to be re-made under the lock.
+  # The unlocked pre-check before the lock is deliberately not the decision, which
+  # is why this asks for a count AFTER the lock rather than the first one.
   test "the create path takes the capacity lock before it counts accounts and inserts the user" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
       statements = capture_sql do
@@ -179,11 +164,9 @@ class SignupTest < ActiveSupport::TestCase
     end
   end
 
-  # …but ONLY the COUNT and the INSERT belong in there. bcrypt is deliberately
-  # slow (~250ms at the configured cost) and has nothing to do with capacity, so
-  # hashing the password under the global lock made every sign-up on a capped
-  # instance queue behind every other one's password hashing. Build the user —
-  # has_secure_password digests in the setter — before the lock is taken.
+  # …but ONLY the COUNT and the INSERT belong in there. bcrypt is deliberately slow
+  # and has nothing to do with capacity, so hashing under the global lock made every
+  # sign-up queue behind every other one's password.
   test "the password is hashed before the capacity lock is taken" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
       events = capture_hashing_and_locking do
@@ -195,11 +178,9 @@ class SignupTest < ActiveSupport::TestCase
     end
   end
 
-  # Every consult is recorded, not just the last. There are two now — the unlocked
-  # pre-check that spares a waitlist join the cost of a password hash, then the one
-  # the INSERT is predicated on — and only the second is a decision. Reading the
-  # final result alone would go on passing if the two ever swapped places, which is
-  # exactly the regression that would reopen M1.
+  # Every consult is recorded, not just the last: reading the final result alone
+  # would go on passing if the two ever swapped places, which is exactly the
+  # regression that would reopen M1.
   test "the capacity lock excludes a second connection while capacity is being decided" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
       taken_elsewhere = []
@@ -224,10 +205,9 @@ class SignupTest < ActiveSupport::TestCase
     end
   end
 
-  # The capacity lock must not swallow the sign-up's side effects: the queue
-  # lives in its own database, so a job enqueued while the app transaction is
-  # still open can be picked up before the user row is visible (F10). It also
-  # keeps the global signup lock off the enqueue path.
+  # The capacity lock must not swallow the sign-up's side effects: the queue lives
+  # in its own database, so a job enqueued while the app transaction is still open
+  # can be picked up before the user row is visible.
   test "the verification email and alert job are enqueued outside the capacity lock" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
       baseline = User.with_connection(&:open_transactions)

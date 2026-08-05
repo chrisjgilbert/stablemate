@@ -12,20 +12,17 @@ module Stablemate
 
     Error = Class.new(StandardError)
 
-    # Client-side bound on a reported error message (defence in depth — the
-    # server truncates authoritatively to the same limit). Deliberately
-    # duplicated from the server's Stablemate::ERROR_MESSAGE_LIMIT
-    # (config/initializers/stablemate.rb in the server repo) — the gem is
-    # standalone, so it can't share the constant; keep the two in sync.
+    # Defence in depth — the server truncates authoritatively to the same limit.
+    # Deliberately duplicated from the server's Stablemate::ERROR_MESSAGE_LIMIT:
+    # the gem is standalone, so it can't share the constant; keep the two in sync.
     ERROR_MESSAGE_LIMIT = 1_000
 
     def initialize(config = Stablemate.config)
       @config = config
     end
 
-    # POST /api/v1/monitors/sync with bearer auth. Returns the parsed response
-    # hash ({"monitors" => [...], "skipped" => [...]}). Raises on a non-2xx /
-    # transport error so Registration#sync! can log and continue.
+    # Raises on a non-2xx / transport error so Registration#sync! can log and
+    # continue.
     def sync_monitors(app:, monitors:)
       response = post_json(
         api_url("/api/v1/monitors/sync"),
@@ -39,10 +36,9 @@ module Stablemate
       JSON.parse(response.body)
     end
 
-    # GET /api/v1/monitors with bearer auth. Returns the parsed response hash
-    # ({"monitors" => [...]}). Used by the register_on_boot = false path to load
-    # existing monitors' ping URLs read-only, without upserting from recurring.yml.
-    # Raises on a non-2xx / transport error so Registration can log and continue.
+    # The register_on_boot = false path: load existing monitors' ping URLs
+    # read-only, without upserting from recurring.yml. Raises on a non-2xx /
+    # transport error so Registration can log and continue.
     def list_monitors
       response = get(api_url("/api/v1/monitors"), headers: bearer_headers)
       unless response.is_a?(Net::HTTPSuccess)
@@ -52,16 +48,13 @@ module Stablemate
       JSON.parse(response.body)
     end
 
-    # Fire-and-forget ping to a full ping URL. Best-effort and never raises (the
-    # hot path must not break the host app), but it INSPECTS the response instead
-    # of assuming success — a 404/429/5xx used to be reported as a delivered ping,
-    # so a rotated token or a throttled loop silently produced false DOWN alerts.
-    # Returns a status the caller can act on:
+    # Never raises — the hot path must not break the host app — but it INSPECTS the
+    # response rather than assuming success:
     #   :ok    — 2xx, the ping landed;
     #   :stale — 404/410, the URL was rejected (token rotated / monitor gone), so
     #            the cached URL is dead and the caller should re-sync;
-    #   :error — any other non-2xx, or a transport failure (transient — absorbed
-    #            by the monitor's grace period).
+    #   :error — any other non-2xx, or a transport failure (transient — absorbed by
+    #            the monitor's grace period).
     def ping(ping_url)
       uri = URI(ping_url)
       classify(http_for(uri).post(uri.request_uri, ""))
@@ -70,10 +63,8 @@ module Stablemate
       :error
     end
 
-    # Report a terminal job failure to the SAME ping URL (no /fail suffix):
-    # form-encoded status=1&message=…, message truncated to ERROR_MESSAGE_LIMIT.
-    # Same fire-and-forget contract and :ok/:stale/:error classification as
-    # #ping — never raises.
+    # Reports to the SAME ping URL (no /fail suffix). Same fire-and-forget contract
+    # and :ok/:stale/:error classification as #ping — never raises.
     def report_failure(ping_url, message:)
       uri = URI(ping_url)
       body = URI.encode_www_form(status: 1, message: message.to_s[0, ERROR_MESSAGE_LIMIT])

@@ -1,7 +1,6 @@
 <%#
-  MiniTicks (design-system.md §2): 16-bar sparkline of the most recent checks,
-  trailed by an uptime %. Server-rendered.
-  Locals: checks (array of "up"/"down"), shows the last 16 in order.
+  16-bar sparkline of the most recent checks, trailed by an uptime %.
+  Locals: checks (array of "up"/"down"), newest last.
 %>
 <% recent = checks.last(16) %>
 <% pct = checks.empty? ? nil : (100.0 * checks.count { |c| c == "up" } / checks.size).round %>

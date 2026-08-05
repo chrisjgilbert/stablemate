@@ -1,8 +1,5 @@
 require "test_helper"
 
-# [unit] Monitoring::Monitor::UptimeRollup — reached via monitor.roll_up_uptime(day).
-# Computes one day's up/down seconds + ping_count from incidents/pings and
-# idempotently upserts the UptimeDayStat. Time is frozen everywhere it matters.
 class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
   setup do
     @project = users(:alice).projects.sole
@@ -26,7 +23,6 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
 
   def seconds_in_day = 86_400
 
-  # Scenario 1 — up all day → 86400 up, 0 down, correct ping_count.
   test "a monitor up all day rolls up to a full up-day with the ping count" do
     3.times { |i| @monitor.ping_events.create!(received_at: @day.to_time(:utc) + (i * 3).hours, kind: "success") }
     # A ping the day before must not be counted.
@@ -40,7 +36,6 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
     assert_equal @day, stat.day
   end
 
-  # Scenario 2 — an incident 10:00–12:00 UTC → down_seconds == 7200, rest up.
   test "an incident from 10:00 to 12:00 yields 7200 down seconds, the rest up" do
     @monitor.incidents.create!(
       started_at: @day.to_time(:utc) + 10.hours,
@@ -64,7 +59,6 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
     assert_equal 0, stat.up_seconds
   end
 
-  # Scenario 3 — a day fully before the monitor existed is no-data (0/0), not down.
   test "a day before the monitor existed is no-data, not down" do
     before_creation = (@monitor.created_at.to_date - 5.days)
 
@@ -119,7 +113,6 @@ class Monitoring::Monitor::UptimeRollupTest < ActiveSupport::TestCase
     assert_nil pending.uptime_percent(days: 90)
   end
 
-  # Scenario 4 — re-running the same day overwrites, never duplicates.
   test "re-running a day overwrites the same row rather than duplicating" do
     @monitor.roll_up_uptime(@day)
     @monitor.incidents.create!(

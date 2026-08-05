@@ -1,18 +1,11 @@
 <%#
-  Terms of Service (launch-readiness §4 / WS-C). Static marketing-layout page,
-  same "Omakase" system as home/pricing — no new CSS system, no client JS; the
-  `.legal` block in app/assets/stylesheets/landing.css is the only addition.
+  Every commercial term MUST match the code — the cancellation paths, the grace
+  window and the plan caps were each read off app/models/user/downgrade.rb,
+  user/subscription.rb and the Stablemate constants. If billing behaviour changes,
+  this page changes in the same PR. Figures come from the constants, never
+  hardcoded.
 
-  Ground rules this document is written to:
-    * Every commercial term MUST match the code. The two cancellation paths, the
-      grace window and the plan caps below were each read off
-      app/models/user/downgrade.rb, user/subscription.rb and the Stablemate
-      constants — not off a template. If billing behaviour changes, this page
-      changes in the same PR.
-    * Figures come from the constants (FREE/PRO_PLAN_MONITOR_LIMIT,
-      DOWNGRADE_GRACE_PERIOD), never hardcoded, exactly like pricing.html.erb.
-    * It is a complete plain-language draft, NOT a solicitor's work. The owner
-      signs it off and a professional review before launch is recommended.
+  This is a complete plain-language draft, NOT a solicitor's work.
 
   ⚠️ OWNER ACTION before launch: the operating entity in §1 is a visible
   placeholder. A contract cannot name a party we guessed — fill in the trading

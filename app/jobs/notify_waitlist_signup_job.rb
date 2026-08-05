@@ -1,5 +1,5 @@
-# Async delivery for WaitlistSignup::SlackAlert (mirrors NotifySignupJob) so a
-# Slack hiccup never blocks joining the waitlist.
+# Async delivery for WaitlistSignup::SlackAlert so a Slack hiccup never blocks
+# joining the waitlist.
 class NotifyWaitlistSignupJob < ApplicationJob
   queue_as :default
 

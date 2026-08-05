@@ -1,7 +1,6 @@
-# Operation: post a Slack message to the team when someone joins the launch
-# waitlist. Mirrors User::SignupAlert — same config gate, same webhook, same
-# swallow-errors-never-raise contract (a Slack outage can never fail a
-# waitlist join).
+# Mirrors User::SignupAlert — same config gate, same webhook, same
+# swallow-errors-never-raise contract (a Slack outage can never fail a waitlist
+# join).
 class WaitlistSignup::SlackAlert
   TIMEOUT = 5 # seconds — keeps a hung Slack endpoint from tying up a job worker
 
@@ -28,9 +27,9 @@ class WaitlistSignup::SlackAlert
       { text: "New Stablemate waitlist signup: #{escape(@waitlist_signup.email_address)}" }
     end
 
-    # Slack mrkdwn treats &, <, > specially (e.g. <url|label> renders a
-    # link); escape them so an email address can never be interpreted as
-    # formatting. https://api.slack.com/reference/surfaces/formatting#escaping
+    # Slack mrkdwn treats &, <, > specially (e.g. <url|label> renders a link);
+    # escape them so an email address can never be interpreted as formatting.
+    # https://api.slack.com/reference/surfaces/formatting#escaping
     def escape(text)
       text.to_s.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;")
     end

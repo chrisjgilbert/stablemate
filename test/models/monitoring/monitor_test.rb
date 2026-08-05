@@ -9,7 +9,6 @@ class Monitoring::MonitorTest < ActiveSupport::TestCase
   # Valid interval/grace are required by the model — supply them everywhere.
   ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze
 
-  # Scenario 8 — ping_token is auto-generated on create.
   test "generates a ping_token on create when none is given" do
     monitor = @project.monitors.create!(name: "New monitor", **ATTRS)
 
@@ -30,7 +29,6 @@ class Monitoring::MonitorTest < ActiveSupport::TestCase
     assert_equal "my-explicit-token-1234567890abcd", monitor.ping_token
   end
 
-  # Scenario 9 — two monitors cannot share a ping_token (model + db).
   test "ping_token uniqueness is enforced at the model level" do
     existing = monitors(:up)
     dup = @project.monitors.build(name: "Dup", ping_token: existing.ping_token)
@@ -59,7 +57,6 @@ class Monitoring::MonitorTest < ActiveSupport::TestCase
     assert monitor.ping_token.present?
   end
 
-  # Scenario 7 — a new manual monitor stores seconds, gets a token, is pending/manual.
   test "a created monitor stores interval/grace in seconds, is manual and pending" do
     monitor = @project.monitors.create!(name: "Fresh", expected_interval_seconds: 3600, grace_period_seconds: 300, source: "manual")
 
@@ -86,7 +83,6 @@ class Monitoring::MonitorTest < ActiveSupport::TestCase
       "gem monitors get their URL from the API sync"
   end
 
-  # Scenario 8 — a user at the cap cannot create another monitor.
   test "a user at the monitor cap cannot create another monitor" do
     Stablemate::MAX_MONITORS_PER_USER.times { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
 
@@ -95,7 +91,6 @@ class Monitoring::MonitorTest < ActiveSupport::TestCase
     assert sixth.errors[:base].any? { |m| m.include?(@user.monitor_limit.to_s) }
   end
 
-  # Scenario 9 — paused monitors still count toward the cap.
   test "paused monitors count toward the cap" do
     Stablemate::MAX_MONITORS_PER_USER.times { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
     @user.monitors.first.pause!
@@ -116,7 +111,6 @@ class Monitoring::MonitorTest < ActiveSupport::TestCase
     end
   end
 
-  # Scenario 11 — editing an existing monitor at the cap is allowed.
   test "editing an existing monitor when at the cap succeeds" do
     Stablemate::MAX_MONITORS_PER_USER.times { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
     monitor = @user.monitors.first
@@ -167,7 +161,6 @@ class Monitoring::MonitorTest < ActiveSupport::TestCase
     end
   end
 
-  # Scenario 13 — deleting a monitor cascades to pings/incidents/notifications.
   test "deleting a monitor destroys dependent pings, incidents, and notifications" do
     monitor = @project.monitors.create!(name: "Doomed", **ATTRS)
     monitor.update!(status: "up", last_ping_at: 1.hour.ago, next_due_at: 1.hour.ago)

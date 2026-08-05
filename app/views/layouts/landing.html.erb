@@ -4,10 +4,6 @@
     <%= render "layouts/head" %>
     <%= render "layouts/analytics" %>
 
-    <%# Newsreader is the one typeface unique to marketing; Zilla Slab + IBM Plex
-        Mono now load once for the whole app via `layouts/_head`, and Newsreader
-        ships in that same self-hosted app/assets/stylesheets/fonts.css. %>
-
     <%# All marketing CSS is scoped under `.lp` (see the wrapper below) so the
         authenticated app's design tokens are untouched. %>
     <%= stylesheet_link_tag "landing", "data-turbo-track": "reload" %>

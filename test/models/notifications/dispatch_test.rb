@@ -1,6 +1,5 @@
 require "test_helper"
 
-# Scenario 29 — Dispatch routes to a channel; EmailChannel sets delivered_at.
 class Notifications::DispatchTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
   include ActionMailer::TestHelper

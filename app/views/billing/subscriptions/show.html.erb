@@ -17,14 +17,12 @@
       </div>
     </div>
 
-    <%# The checkout & portal buttons POST to us, then 303-redirect to Stripe's
-        cross-origin hosted pages. Turbo would follow that redirect via fetch() and
-        hit CORS ("Failed to fetch"), so we opt these forms out of Turbo and let the
-        browser do a real full-page navigation. (allow_other_host: is set server-side.) %>
+    <%# These POST to us, then 303-redirect to Stripe's cross-origin hosted pages.
+        Turbo would follow that redirect via fetch() and hit CORS, so the forms opt
+        out of Turbo and let the browser do a real full-page navigation. %>
     <%# billed_for_pro?, not pro?: a past_due account reads Free while Stripe is
-        still dunning it, and it is the one that most needs the portal (to fix the
-        card) and the downgrade (to stop the dunning). Asking the plan instead hid
-        both and offered an Upgrade that CheckoutsController refuses. %>
+        still dunning it, and it is the one that most needs the portal and the
+        downgrade. %>
     <div class="flex items-center gap-2">
       <% if @user.billed_for_pro? %>
         <%= button_to "Manage card & invoices", billing_portal_session_path,

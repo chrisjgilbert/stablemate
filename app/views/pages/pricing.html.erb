@@ -1,25 +1,12 @@
 <% content_for :title, "Pricing — Stablemate" %>
 <%#
-  Marketing pricing page (issue #45). Same "Omakase" system as home.html.erb —
-  no new CSS system, no client JS, styled entirely with app/assets/stylesheets/
-  landing.css (a few pricing-specific classes were added there: .plans/.plan,
-  .band, .faq — all built from the same tokens as everything else on .lp).
+  ⚠️ The Pro price is NOT decided yet — shown as a clearly-marked "TBC"
+  placeholder rather than a hardcoded figure.
 
-  Sense-checks (see the issue for the full list):
-    * The Pro price is NOT decided yet. It's shown as a clearly-marked "TBC"
-      placeholder rather than a hardcoded figure — flagged again in the PR.
-    * Only features that ship today are listed. Projects / per-project API keys
-      (docs/specs/projects.md) and Slack/webhook alerts are specced but not
-      built, so they're omitted rather than presented as available.
-    * Plan allowances come straight from Stablemate::FREE_PLAN_MONITOR_LIMIT /
-      PRO_PLAN_MONITOR_LIMIT — never a bare "5" or "100" in this file.
-    * Renders regardless of Stablemate.billing_enabled? — it's marketing, not a
-      billing surface. Both CTAs branch on signed-in-ness first (never fall
-      through to a sign-up link for someone already signed in): anonymous
-      visitors go to sign-up (you can't buy Pro without an account); a
-      signed-in Pro user gets "Manage plan"; a signed-in Free user gets a
-      direct Upgrade button when billing is enabled, or "Go to dashboard"
-      otherwise (self-host — there's nothing to buy).
+  Plan allowances come straight from Stablemate::FREE_PLAN_MONITOR_LIMIT /
+  PRO_PLAN_MONITOR_LIMIT — never a bare "5" or "100" in this file. Renders
+  regardless of Stablemate.billing_enabled? — it's marketing, not a billing
+  surface.
 %>
 <% repo_url = stablemate_repo_url %>
 <% install_guide_url = stablemate_docs_url("install.md") %>
@@ -27,10 +14,8 @@
 <% pro_limit = Stablemate::PRO_PLAN_MONITOR_LIMIT %>
 <% signed_in = authenticated? %>
 
-<%# ===== NAV ===== %>
 <%= render "nav" %>
 
-<%# ===== HEADER ===== %>
 <section class="section" id="pricing-header">
   <div class="wrap sec-intro">
     <p class="kicker">Pricing</p>
@@ -39,7 +24,6 @@
   </div>
 </section>
 
-<%# ===== PLANS ===== %>
 <section class="section" style="padding-top:0">
   <div class="wrap">
     <div class="plans">
@@ -90,7 +74,6 @@
   </div>
 </section>
 
-<%# ===== SELF-HOST BAND ===== %>
 <section class="band">
   <div class="wrap band__in">
     <div class="stamp stamp--inline"><span class="b">FREE</span><span class="s">to self-host</span></div>
@@ -104,7 +87,6 @@
   </div>
 </section>
 
-<%# ===== FAQ ===== %>
 <section class="section">
   <div class="wrap">
     <div class="sec-intro">
@@ -141,5 +123,4 @@
   </div>
 </section>
 
-<%# ===== COLOPHON ===== %>
 <%= render "colophon" %>

@@ -1,13 +1,9 @@
 require "test_helper"
 
-# The config-gate helpers (billing, Slack, the price id, the ENV-backed gates) are
-# the suite's own plumbing, and every one of them is a stub that must be put back
-# — including when the block raises, or a failing test leaks its gate into every
-# test that runs after it in the same worker.
-#
-# These pin that contract so the implementation underneath is free to change:
-# they were written against the hand-rolled define_singleton_method swaps and must
-# stay green once those become Object#stub (minitest-mock).
+# Every config-gate helper is a stub that must be put back — including when the
+# block raises, or a failing test leaks its gate into every test that runs after it
+# in the same worker. These pin that contract so the implementation underneath is
+# free to change.
 class ConfigGateStubsTest < ActiveSupport::TestCase
   test "Object#stub is available — minitest 6 extracted it to the minitest-mock gem" do
     assert_respond_to Stablemate, :stub,
@@ -108,10 +104,8 @@ class ConfigGateStubsTest < ActiveSupport::TestCase
   end
 
   private
-    # Every gate here can legitimately be nil beforehand (a key that is not
-    # configured, an env var that is not set), and assert_equal refuses nil — so
-    # name the verification once rather than scatter assert_nil branches through
-    # the tests. (xUnit Test Patterns: Custom Assertion.)
+    # Every gate here can legitimately be nil beforehand, and assert_equal refuses
+    # nil — so name the verification once rather than scatter assert_nil branches.
     def assert_restored(expected, actual, what)
       return assert_nil actual, "#{what} leaked — it was unset and must be unset again" if expected.nil?
 

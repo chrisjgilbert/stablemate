@@ -1,8 +1,6 @@
 <%#
-  GemChip (design-system.md §2): quiet indigo chip shown ONLY when the monitor
-  was registered from the gem (source == "gem"). variant: :compact (rows) or
-  :full (detail header).
-  Locals: monitor, variant (default :compact).
+  Shown ONLY when the monitor was registered from the gem.
+  Locals: monitor, variant (:compact for rows, :full for the detail header).
 %>
 <% variant ||= :compact %>
 <% if monitor.from_gem? %>

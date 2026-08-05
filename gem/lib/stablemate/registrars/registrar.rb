@@ -2,9 +2,8 @@
 
 module Stablemate
   module Registrars
-    # Command contract (architecture.md §9): a registrar produces registration
-    # tuples for POST /api/v1/monitors/sync. V1 ships only SolidQueueRecurring;
-    # the seam exists so V2 adapters (SidekiqCron, GoodJobCron, Whenever) are new
+    # A registrar produces registration tuples for POST /api/v1/monitors/sync. The
+    # seam exists so further adapters (SidekiqCron, GoodJobCron, Whenever) are new
     # classes, not refactors.
     #
     # A tuple is a Hash:

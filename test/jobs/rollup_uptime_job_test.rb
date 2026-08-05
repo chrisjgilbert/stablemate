@@ -24,8 +24,6 @@ class RollupUptimeJobTest < ActiveJob::TestCase
     end
   end
 
-  # Scenario 5 — a missed run day is backfilled on the next run (a range, not just
-  # yesterday). Here no prior stats exist, so the job fills the backfill window.
   test "backfills multiple un-rolled days in one run" do
     freeze_time do
       RollupUptimeJob.perform_now
