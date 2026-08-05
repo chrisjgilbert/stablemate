@@ -24,7 +24,7 @@ Section numbers in the left column are **`README.md`'s**; those in the right are
 | Decision #6, *"`registration_key` = the recurring.yml task key… the registrar writes it"* | **Amended.** It stops being an internal idempotency key and becomes the monitor's **public address**. A backfill becomes a second writer, and it becomes character-set sensitive. |
 | Decision #3, *"No gate on monitor creation"* | **Narrowed.** Survives only as a statement about `bin/rails stablemate:sync`. |
 | §2 Security defaults, the whole `ping_token` bullet | **Void.** Every clause — plaintext by design, the dashboard showing it, the API re-serving it, the uninformative 404, per-token rate limiting, rotation — describes surfaces this removes. |
-| §3 Data model, `Monitor` | `ping_token` and its unique index are deleted; `source` becomes constant (§3.3). |
+| §3 Data model, `Monitor` | `ping_token` and its unique index are deleted. **`source` stays**: new rows are always `"gem"` (sync is the only creator), §8's backfilled rows keep `"manual"` forever, and §6.1's orphan filter reads exactly that distinction (§3.3, §6.1). |
 | §3 Data model, table set | **Gains `PingKey`** — `project_id`, `name`, `token_digest` (unique), `token_last4`, `last_used_at`, timestamps. A project may hold more than one, so rotation can overlap (§4). |
 | §2 Security defaults, the `ApiKey` bullet | **Widened**, not replaced. The same handling — hashed, constant-time compared, shown once, uninformative `401` — now covers both credentials, with the addition that the API key is no longer the credential on the check-in path (§4). |
 
@@ -40,8 +40,10 @@ refereeing between two writers. The change your override protects lands in the
 same commit as the schedule it overrides.
 
 Two pre-existing errors in that data model are worth fixing while editing it: the
-`Monitor` block omits six shipped columns, and lists the status vocabulary without
-`suspended`.
+`Monitor` block omits five shipped columns — though only `first_ping_at` and
+`status_before_suspension` still need adding, since the other three are the
+`last_synced_*` settings columns §3.1 now deletes — and it lists the status
+vocabulary without `suspended`.
 
 ---
 
@@ -134,42 +136,64 @@ c.overrides = { "weekday_report" => { interval: 26.hours } }
 ```
 
 The rules, each of which has a wrong-looking-right alternative. Overrides accept
-`interval:` and `grace:`, integer seconds allowed for the same plain-Ruby-host
-reason `c.monitors` allows them (§6.3). They apply to *derived* tasks only — an
-override on a `c.monitors` key is a config error, because you would simply edit
-the declaration. And **an override key matching no derived task fails the whole
-run, exit non-zero, before any request is made.** A typo'd key silently ignored
-means the weekday job keeps its 72-hour window — the exact failure overrides
-exist to close — and half-applying the rest would make the failure ambiguous.
+`interval:` and `grace:` — **an unknown key inside the hash is the same config
+error as an unknown task key**, or `intervall:` gets the silent-typo treatment
+the outer rule exists to close. Integer seconds are allowed for the same
+plain-Ruby-host reason `c.monitors` allows them (§6.3). They apply to *derived*
+tasks only, and "derived" means **after the registrar's skips**: an override on a
+`c.monitors` key is a config error (you would simply edit the declaration), and
+so is one on a command task or an underivable schedule — the registrar never
+produces a tuple for those, so there is nothing to override. And **an override
+key matching no derived task fails the whole run, exit non-zero, before any
+request is made.** A typo'd key silently ignored means the weekday job keeps its
+72-hour window — the exact failure overrides exist to close — and half-applying
+the rest would make the failure ambiguous.
+
+Two mechanics that must be pinned or two implementers diverge. **Order:** the
+environment guard first (§6.1), then parse, then override validation, then the
+register-nothing exits, then the request — an override typo must be reported
+even on a run that would go on to register nothing, or the two errors mask each
+other. **Grace derivation:** the registrar computes grace *from* the interval
+(`grace_seconds(interval)`), so an interval-only override recomputes grace from
+the **overridden** interval; the schedule-derived grace is not kept. An explicit
+`grace:` wins over both. Anything else leaves a 26-hour override wearing a
+72-hour schedule's grace.
 
 **What this deletes — and an earlier revision of this section said the exact
 opposite, so the reversal needs spelling out.** The `last_synced_name` /
 `last_synced_expected_interval_seconds` / `last_synced_grace_period_seconds`
 columns and `gem_may_write?` existed to answer one question: *when the sync and a
 hand-edit disagree, whose value is it?* With no hand-edits the question has no
-second party. The sync writes the three settings unconditionally; the ~70 lines of
-arbitration (`GEM_SETTINGS`, `gem_settings`, `gem_may_write?`,
-`monitor_sync.rb:157-226`), the three columns, their migration, and the ten tests
-pinning the arbitration (`monitor_sync_test.rb:279-431`, "a re-sync preserves the
-settings the user changed in the UI" through "a preserved interval leaves
-next_due_at on the user's cadence") all go. So does the "KNOWN LIMIT" coin-flip
-documented in `gem_may_write?` — a real bug class deleted, not resolved.
+second party. The sync writes every setting the payload carries — absent fields
+stay untouched, as today: old gems send partial payloads, and "unconditionally"
+read literally would write an absent name as `nil` and fail validation. The
+arbitration goes: `GEM_SETTINGS`, `gem_settings` and `gem_may_write?`
+(`monitor_sync.rb:157-218` — the span stops *before* `diverging_app?` at
+`:223-226`, which stays), the three columns and their migration. Of the ten tests
+pinning the old behaviour (`monitor_sync_test.rb:279-431`), most assert a refusal
+or the remembered columns and die with them; "an untouched monitor still tracks
+recurring.yml" (`:345`) asserts exactly what always-write does and survives; and
+the column drop reaches one test *outside* that range — the `RecordNotUnique`
+upsert test whose setup writes `last_synced_*` (`:154-160`). So does the "KNOWN
+LIMIT" coin-flip documented in `gem_may_write?` — a real bug class deleted, not
+resolved.
 
 Two things that look like part of this deletion and are not. **`last_synced_app`
-stays** — it feeds cross-app conflict detection (`monitor_sync.rb:140-147`,
-`diverging_app?`), which has nothing to do with settings arbitration; "delete the
+stays** — it feeds cross-app conflict detection (the merge at
+`monitor_sync.rb:147`, `diverging_app?` at `:223-226`), which has nothing to do
+with settings arbitration; "delete the
 `last_synced_*` columns" over-deletes by one. And the
 `before_update :recompute_next_due_at` callback stays — sync and console still
 edit intervals; only its comment's mention of the form needs updating.
 
 One property this buys: **recovery from config poisoning becomes unconditional.**
 §4's headline attack writes a 68-year interval via the sync endpoint. Under
-arbitration, re-running `stablemate:sync` *usually* fixed it — the attacker's
+arbitration, re-running `stablemate:sync` fixed *that* attack — the attacker's
 request updates the remembered column too, so the correction passes
-`gem_may_write?` — but the KNOWN-LIMIT branch could refuse it forever: a monitor
-whose stored value and memory already disagreed (nil-remembered history, exactly
-the coin-flip case the comment documents) rejects an unchanged payload on every
-sync, and the documented escape hatch was the UI edit this spec deletes.
+`gem_may_write?`. Where the refusing branch actually bites is values changed
+*outside* the sync path — a console edit, or the pre-migration divergence the
+KNOWN-LIMIT comment documents — which reject an unchanged payload on every sync,
+forever, and whose documented escape hatch was the UI edit this spec deletes.
 Always-write has no refusing branch: `bin/rails stablemate:sync` restores
 whatever the repo says, every time. The repo is the source of truth, so the repo
 is also the recovery path.
@@ -220,17 +244,21 @@ links plus `ProjectsController#after_create_path`. The edit path goes with it:
 renders them once edit is gone — and the Edit link at `show.html.erb:36`. The
 route narrows to `resources :monitors, only: %i[index show destroy]` plus the
 pause sub-resource. What the show page renders in the form's place is read-only
-config with its source named — "Defined in your repo · registered by
-`stablemate:sync`" — so a user looking for the vanished Edit button is told where
-the knob went (§11 bounds what that provenance note may claim).
+config with its source named, **and the copy branches on `source`** — because the
+§8 backfill leaves a permanent `"manual"` population that is *not* defined in any
+repo. A gem row says "Defined in your repo · registered by `stablemate:sync`"; a
+manual row says the truth instead — registered before CLI-only registration, its
+settings frozen (§11 states the remedy). Either way a user looking for the
+vanished Edit button is told where the knob went (§11 bounds what the note may
+claim).
 
-With one creator, these become unreachable rather than merely unused:
+With one creator, these become dead or nearly so:
 
 | Dead | Why |
 |---|---|
-| `Monitor::Transfer`, `Monitors::ProjectsController`, the manual branch of `_move.html.erb` (§11) | Its first line is `return … unless @monitor.manual?` |
+| `Monitor::Transfer`, `Monitors::ProjectsController`, the manual branch of `_move.html.erb` (§11) | Manual-only (`return … unless @monitor.manual?`). **Not unreachable** — §8's backfilled rows still satisfy the guard — but deleted anyway: an accepted capability loss for that frozen population, stated in §11. |
 | `awaiting_setup?` and the branch it drives | `manual? && !ever_pinged? && !suspended?` |
-| The provenance chip, `from_gem?`, `manual?`, `source` | Every monitor has one provenance |
+| The provenance chip (`shared/_gem_chip.html.erb`, 20 lines + 2 render sites) | Noise once nearly every monitor is gem-synced. **`source`, `from_gem?` and `manual?` all stay** — §6.1's orphan filter and the panel branch above read them. |
 
 Keep the rest of `_move.html.erb`, described by structure rather than by line
 range. The heading and the "In &lt;project&gt;" link *above* the branch are the only
@@ -240,10 +268,15 @@ place the detail page shows which project a monitor belongs to, and the closing
 non-manual arm's markup in place, unwrapped. Taking a literal line range instead
 strands the `else` or drops the closing tag.
 
-**`source` is a breaking API change, not a cleanup.** It is served by
-`GET /api/v1/monitors/:id` via `monitor_detail_json` and documented at
-`api.md:127`, and the column is `null: false` with a default — so dropping it
-needs a migration and an API note.
+**The `source` column is kept — an earlier revision of this section dropped it,
+and the config-as-code amendment reversed that.** §6.1's orphan computation reads
+`source: "gem"` to keep the backfilled `manual-<id>` rows out of orphan reports
+permanently, and no substitute discriminator exists: the `last_synced_app` match
+fails on a manual row the gem has adopted (adoption writes the app but never
+`source` — `persist_update`), and §8.1 explicitly refuses to trust the
+`manual-` key prefix, which a human can type into `recurring.yml`. So: no drop,
+no migration, no API deprecation — `monitor_detail_json` keeps serving it, and
+`api.md:127` stays true.
 
 ## 4 · Two credentials
 
@@ -267,10 +300,12 @@ key is the top rung.**
 /api/v1/monitors/sync` may rewrite `expected_interval_seconds` on an existing
 monitor — `sync_params` permits it, `valid_shape?` checks only `positive?`, and
 the model validates only `greater_than: 0`. Observed: `3600 → 2_147_483_647`,
-HTTP 200. (Measured through `gem_may_write?`, which allowed any value differing
-from what the gem last sent; §3.1 deletes that guard and writes unconditionally,
-which changes nothing about this attack — the attacker's value passed the guard
-anyway — but see §3.1 for what it changes about *recovery*.)
+HTTP 200. (Measured through `gem_may_write?`. On any gem-synced monitor the
+stored value equals the memory, so the guard passed in one request; only a
+nil-remembered monitor resisted, taking two requests with two distinct values —
+the first write lands in the memory column alone. §3.1 deletes the guard, making
+it one request everywhere; see §3.1 for what always-write changes about
+*recovery*.)
 And `before_update :recompute_next_due_at` fires on the sync itself, so the
 monitor's next due date moves to 2094 **immediately** — no follow-up check-in
 needed, nothing visible, one request.
@@ -681,7 +716,12 @@ the overrides people need become obvious the moment they see this line:
 ✓ pg_backup          every 24h  (declared in c.monitors)
 ✗ db_backup          skipped: command task, no class: to observe
 !  2 monitors on the server match no task here: old_report, legacy_sync
-   (kept and still monitored — delete them in the dashboard, or restore the task)
+   (kept, state untouched — delete them in the dashboard, or restore the task)
+
+check in pg_backup from its own cron:
+  curl -X POST -H "Authorization: Bearer sm_ping_…" \
+    https://stablemate.example/api/v1/monitors/pg_backup/pings
+
 synced 3 for environment 'production'.
 ```
 
@@ -689,27 +729,47 @@ The shape is binding, the glyphs are not. Success lines carry the derivation,
 skips carry the server's or registrar's reason, and the run ends with the §12
 count. A run applying overrides names them inline rather than in a separate
 block, so the line a user scans for a task is the whole story for that task.
+The `curl` block prints for every `c.monitors` entry — those are the monitors
+checked in from outside the gem, and this is where §4's "the command prints
+ready-to-paste `curl` lines" promise is kept; without a slot in the binding
+shape, that promise would be silently unimplementable. It prints the real key
+(the command already holds it — §4's shown-once argument depends on this being
+where reconstruction happens), so the output is sensitive and says so when any
+`c.monitors` entry exists.
 
 **It must report orphans, and must not delete them.** An orphan is a monitor the
 sync's own project holds that matches no task in this run — the task was renamed
 or removed from `recurring.yml`. The server computes the list (it is the only
-party that sees both sides) and returns it in the sync response envelope,
-alongside `monitors` and `skipped`; the CLI prints it as above. Three boundaries,
+party that sees both sides) and returns it as **`orphaned:` — an array of
+`registration_key` strings — in the sync response envelope**, beside `monitors`,
+`skipped` and `ping_key_last4`; the CLI prints it as above. Four boundaries,
 each load-bearing:
 
 - **Orphan candidates are `source: "gem"` rows whose `last_synced_app` matches
   this run's `app` and whose `registration_key` is not in the payload.** The app
   match is what stops two apps syncing distinct task sets into one project from
   orphaning each other's monitors on every run; the source check keeps the §8
-  `manual-<id>` backfill rows out permanently.
-- **Reported, never pruned.** An orphaned monitor keeps monitoring — its pings
-  stopping and it going down is *correct*, the job stopped existing. Removal is
+  `manual-<id>` backfill rows out permanently (which is why §3.3 keeps the
+  column).
+- **Both sides of the app match must be present.** A row with `NULL`
+  `last_synced_app` (old gems didn't always send `app` — the server merges it
+  with `.compact`) is never a candidate: it cannot be attributed to any app, so
+  no run may claim it. And a payload arriving with no `app` reports no orphans
+  at all — nil-matches-nil would hand every unattributed row to whichever app
+  syncs first.
+- **Reported, never pruned.** An orphaned monitor is kept, its state untouched —
+  one that was live keeps monitoring, and its pings stopping and it going down
+  is *correct*: the job stopped existing. (One that was still `pending` will
+  instead meet §9.1's never-checked-in alert, whose copy must therefore allow
+  "or the task was removed", not just "check your setup".) Removal is
   the UI's delete button (an operational act, §3.3). No `--prune` in V1: it
   would need a delete route the API deliberately lacks, and auto-prune's failure
   mode — a broken `recurring.yml` parses to zero tasks and deletes every
-  monitor — is the incident this document exists to end. (The four
-  register-nothing paths already exit non-zero before any request, so an empty
-  parse can't even *report* orphans, let alone act on them.)
+  monitor — is the incident this document exists to end. (The two parse-empty
+  register-nothing paths — `recurring.yml` missing, no registerable tasks —
+  exit non-zero before any request, so an empty parse can't even *report*
+  orphans, let alone act on them; the other two register-nothing paths fail at
+  or after the request and return no orphan data either.)
 - **Renames look like an add plus an orphan**, because the key is the identity.
   The output above makes that legible without special-casing it.
 
@@ -790,10 +850,12 @@ monitor by hand whose registration key equals a job class name — describes
 something the interface can no longer do anyway (§3.3). Remove both.
 `test_unmapped_perform_does_not_ping` is the invariant that must stay green.
 
-**Two shipped tests die with it** and must be deleted rather than repaired:
-`subscriber_test.rb:147` (`test_manual_fallback_pings_by_job_class_name`) and
-`:163` (`test_subscribes_to_real_active_job_notifications`, which uses the manual
-fallback as its vehicle and needs a different one).
+**Three shipped tests die with it**: `subscriber_test.rb:147`
+(`test_manual_fallback_pings_by_job_class_name`) and `:313`
+(`test_handle_discard_manual_fallback_by_job_class_name` — the discard path has
+its own copy of the fallback, `resolve_keys` from `handle_discard`) are deleted
+outright, and `:163` (`test_subscribes_to_real_active_job_notifications`) uses
+the fallback as its vehicle and needs a different one rather than deletion.
 
 **Say where the union happens.** "May-register" is `recurring.yml` tasks plus
 `c.monitors`, but the intersection snippet reads `registrar.tuples`. If
@@ -976,7 +1038,9 @@ rewritten in the same change:
 - **`projects/show.html.erb:20-27`** — *"No monitors in this project yet. Add one
   manually, or connect the gem…"* with an **Add a monitor** button. This is the
   page a brand-new user lands on immediately after creating their first project.
-- **`monitors/index.html.erb:75-82`** — *"No monitors yet — connect the gem or add
+- **`monitors/index.html.erb`, the `data-testid="project-empty-hint"` block** —
+  cited by its testid because the line range has already moved once — *"No
+  monitors yet — connect the gem or add
   one."*
 - **`projects/_first_run.html.erb:36`** — links to the gem guide with a
   placeholder `"#"`. Worse, this card renders only when the user has **no
@@ -1014,20 +1078,20 @@ Measured, not estimated.
 |---|---|
 | Create path (controller, view, six references, form selector) | ~110 lines |
 | Edit path (`#edit`/`#update`, `monitor_params`, `edit.html.erb` 7 + `_form` 42 + `_preset_field` 26, show-page link, route narrowing) | ~90 |
-| Sync arbitration deletion (`gem_may_write?`, `GEM_SETTINGS`, `gem_settings` — `monitor_sync.rb:157-226` — three columns + drop migration) | ~80 removed |
+| Sync arbitration deletion (`gem_may_write?`, `GEM_SETTINGS`, `gem_settings` — `monitor_sync.rb:157-218` — three columns + drop migration) | ~70 removed |
 | Read-only config panel replacing the form on `show` | ~15 |
 | Transfer cascade | ~92 |
-| Provenance chip + `source` + migration | ~43 |
+| Provenance chip removal (`_gem_chip` 20 lines + 2 render sites; `source` and its predicates stay — §3.3) | ~22 |
 | Ping-token surface (`_ping_setup`, both rotation controllers, the concern, `PingsController`, helpers, routes, serializers) | ~250 |
 | `registration_key` backfill migration | ~40 |
 | `PingKey` model, issuance, controller, views, migration, project-page wiring | ~200 |
 | Never-checked-in alert: scope, job, mailer, notification cause, copy (§9.1) | ~120 |
 | Orphan computation in the sync response (§6.1) | ~25 |
-| **Server subtotal** | **~1,065** |
+| **Server subtotal** | **~1,034** |
 | Gem deletions (§3.2) | ~100 |
 | Gem additions: `c.overrides` (validation, application to tuples) + derivation/orphan output (§6.1) | ~70 |
 | **Tests broken by UI removal** | ~393 across 15 files, 4 deleted whole |
-| **Tests broken by the edit/arbitration removal** | 5 of 27 in `monitors_controller_test.rb`, the edit half of `monitor_edit_delete_test.rb`, 10 arbitration tests in `monitor_sync_test.rb:279-431` |
+| **Tests broken by the edit/arbitration removal** | 2 of 30 in `monitors_controller_test.rb` (both cross-tenant guards at `:60`/`:66` — the protection they pin moves to the routes not existing), the edit half of `monitor_edit_delete_test.rb`, the arbitration tests in `monitor_sync_test.rb:279-431` less the one survivor, plus the upsert test at `:154-160` (§3.1) |
 | **Tests broken by the check-in move** | ~647 across 9 files, 3 deleted whole |
 | **Gem suite** | 48 of 94 tests error under the deletions |
 
@@ -1314,11 +1378,13 @@ scope; if it stays, it should be because the price is about to be set.
 A build-through of this document produced 45 open questions. Most are safely the
 implementer's; these are the ones where guessing wrong causes a defect.
 
-**The API surface after the ping token goes.** Three payloads carry `ping_url` but
-there are only **two** literal keys to delete: `monitor_json` has one, the sync
-response has its own, and `monitor_detail_json` inherits it by `merge`-ing
-`monitor_json` rather than declaring it. `ping_url_for` then has no callers and
-goes too. There is no URL to serve once the address is derived from the task key.
+**The API surface after the ping token goes.** Four payloads carry `ping_url`;
+**two** literal keys need deleting by hand: `monitor_json` has one, the sync
+response has its own, `monitor_detail_json` inherits it by `merge`-ing
+`monitor_json` rather than declaring it, and the rotate response's literal
+(`ping_tokens_controller.rb:10`) vanishes with its controller — so a `grep` for
+`ping_url:` finds three literals, of which one dies with its file.
+`ping_url_for` then has no callers and goes too. There is no URL to serve once the address is derived from the task key.
 Keep `registration_key` in those payloads, since it is now the address. `POST /api/v1/monitors/:id/rotate` goes with the token; answer
 it **410 Gone**, not 404, so an old client can tell "removed" from "wrong id".
 
@@ -1349,8 +1415,30 @@ meaning.
 
 **`_move.html.erb` keeps its non-manual branch**, described that way rather than
 as line numbers — the literal ranges an earlier draft gave would strand an `else`
-and drop a closing tag. Note the retained copy ("Managed by the gem…") becomes the
-text *every* monitor shows once every monitor is gem-sourced, so it needs a reread.
+and drop a closing tag. The retained copy ("Managed by the gem — re-point its API
+key…") needs a reread with the §8 backfill in mind: it becomes the text every
+monitor shows, and for a backfilled `manual-<id>` row both halves are false — no
+gem manages it and no API key syncs it. Branch it on `source` like §3.3's panel,
+or reword to something true of both populations.
+
+**The backfilled `manual-<id>` population is frozen config, and that is
+accepted.** After §3.3 those rows have no config writer at all: no edit form, no
+sync entry (their keys are deliberately outside the gem's namespace), and
+`Monitor::Transfer` — the one capability that was theirs alone — is deleted with
+the rest of the manual path. The remedy for a frozen row whose settings need to
+change is delete-and-redeclare: remove it in the dashboard and declare the same
+work in `c.monitors`, which also moves it onto a repo-owned key. State this in
+the panel copy (§3.3) rather than leaving the owner of a pre-CLI monitor to
+discover it. Accepted because the population is small, bounded, and shrinks to
+zero — nothing can ever create another row in it.
+
+**Registration requires the Rails host — the plain-Ruby support is narrower than
+it sounds, and V1 accepts that too.** The spec leans on plain-Ruby hosts for
+`require "erb"`, `require "set"` and integer seconds; all of that concerns the
+*check-in client*. `stablemate:sync` is a rake task on `:environment` — a
+non-Rails system has no registration path of its own and is monitored by
+declaring it in the Rails app's `c.monitors` (§3.1). A standalone registration
+CLI for gem-only hosts is V2 scope at the earliest.
 
 **The `PingKey` mirror is exact unless stated otherwise.** Token length and
 alphabet, `masked` format, default key name, revoke-by-destroy, indexes and
@@ -1362,12 +1450,20 @@ requires.
 **§9.4's wire field** is `ping_key_last4`, an array of strings, in the sync
 response envelope alongside `monitors` and `skipped`.
 
-**The docs that describe the removed endpoint** are not optional follow-up:
-`docs/api.md` (the ping endpoint, `ping_url` in two payloads, rotate),
-`docs/install.md`'s "Create a monitor and send a ping", `docs/integrating.md`'s
-manual-path section and its manual-fallback note, and
-`docs/deploy-hetzner-cloudflare.md`'s verification `curl`. Each describes something
-that will 404.
+**The docs that describe removed surfaces** are not optional follow-up. The ones
+that will 404: `docs/api.md` (the ping endpoint, `ping_url` in two payloads,
+rotate), `docs/install.md`'s "Create a monitor and send a ping",
+`docs/integrating.md`'s manual-path section and its manual-fallback note, and
+`docs/deploy-hetzner-cloudflare.md`'s verification `curl`. And the ones that
+describe deleted *behaviour*, which an earlier revision of this list missed
+entirely: `docs/integrating.md`'s "Who wins when you edit a synced monitor" box
+(it documents `gem_may_write?`, deleted by §3.1), its "tighten it later in the
+monitor's settings" advice (the edit form, deleted by §3.3 — the replacement is
+`c.overrides`), and its "Registration happens automatically on boot" section
+(§3.1); plus **`gem/README.md`**, which documents the manual fallback (§6.3
+deletes it), boot registration, and a functional `register_on_boot` — the very
+options-table row §11 cites as the reason the accessor survives as a no-op must
+itself be rewritten to say so.
 
 **What the show page's provenance note may claim.** §3.3's read-only panel says
 "defined in your repo" — it must not try to say *where* in the repo. The server
@@ -1404,8 +1500,8 @@ design dependency. Decide §10 when convenient; do not stop for it.
   shows interval and grace read-only with their source named (§3.3).
 - **Config round-trips through sync alone.** Change an interval in the payload,
   sync, the monitor has it — then send the original, sync, it's back. This is
-  the always-write behaviour that replaces the ten arbitration tests
-  (`monitor_sync_test.rb:279-431`), and it is also the §3.1 recovery property:
+  the always-write behaviour that replaces the arbitration tests
+  (`monitor_sync_test.rb:279-431`, less the §3.1 survivor), and it is also the §3.1 recovery property:
   removing an override must restore the derived value on the next sync, with no
   refusing branch.
 - **An unknown override key aborts the run** — exit non-zero, nothing synced, the
@@ -1481,7 +1577,8 @@ design dependency. Decide §10 when convenient; do not stop for it.
   `recurring.yml` job class. (A hand-authored literal `manual-7` is still
   possible, which is the separate collision bullet above.)
 - **Command.** Exits non-zero on all four register-nothing paths, prints the
-  server's reasons, and refuses to run outside its configured environment.
+  per-run synced count (not a cache size — §6.1's trap) and the server's
+  reasons, and refuses to run outside its configured environment.
 - **Gem: unlisted job classes never report**, and a task with an underivable
   schedule never reports.
 - **Gem: a `c.monitors` key matching a host job class name never binds to it.**
