@@ -32,7 +32,7 @@ Actions is green → tick the boxes here → next chunk.
 | 5 | Two owners: fixture-free tests get a fixture-free user | #1 | **MERGED** | #89 |
 | 6 | `rubocop-minitest` to stop the regressions | #7 | **MERGED** | #90 |
 | 7 | The system suite's load sensitivity — an Erratic Test | #8 | **IN REVIEW** | #91 |
-| 8 | Stop testing config; test behaviour | #9 | **IN REVIEW** | TBD |
+| 8 | Stop testing config; test behaviour | #9 | **IN REVIEW** | #93 |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
 
