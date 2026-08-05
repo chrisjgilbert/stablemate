@@ -343,8 +343,11 @@ name was user-authored:
 (§6.1's prune adds one API-key verb to this table: retiring orphaned monitors.
 It is deliberately reversible and history-keeping, so it is not a material new
 rung — a leaked key can already silence everything invisibly via the interval
-rewrite above; retiring is the louder, recoverable version of the same harm,
-and the server's own orphan rule bounds what a forged prune list can reach.)
+rewrite above; retiring is the louder, recoverable version of the same harm.
+Note there is no prune *list* to forge — the server computes the retire set
+itself; the attack shape is a `prune: true` request with a minimal payload,
+and the server's own orphan rule plus the `declared_keys` requirement bound
+what that can reach.)
 
 The ping key's exclusives are narrower, but **not transient, and an earlier draft
 of this section was wrong to say so.** A forged success on a monitor that is down
@@ -732,9 +735,10 @@ synced 3 for environment 'production'.
 ```
 
 The shape is binding, the glyphs are not. Success lines carry the derivation,
-skips carry the server's or registrar's reason, and the run ends with the §12
-count. A run applying overrides names them inline rather than in a separate
-block, so the line a user scans for a task is the whole story for that task.
+skips carry the server's or registrar's reason, **orphan and retirement lines
+name each monitor and its remedy**, and the run ends with the §12 count. A run
+applying overrides names them inline rather than in a separate block, so the
+line a user scans for a task is the whole story for that task.
 The `curl` block prints for every `c.monitors` entry — those are the monitors
 checked in from outside the gem, and this is where §4's "the command prints
 ready-to-paste `curl` lines" promise is kept; without a slot in the binding
@@ -775,23 +779,60 @@ each load-bearing:
   task was removed", not just "check your setup".)
 
   **What retiring means.** `retired` joins the status vocabulary beside
-  `suspended`, with the same not-monitored semantics: history, incidents and
-  uptime stats all kept; excluded from detection and from the cap
-  (`counting_toward_cap` excludes both); listed apart on the dashboard the way
-  suspended monitors already are; a ping to a retired monitor is recorded but
-  never transitions or alerts (the same `CheckIn` arm as paused/suspended — a
-  stray ping must not resurrect it). **Sync revives it**: when a retired
-  monitor's key reappears in a run, the upsert un-retires it through
-  `reactivate_heartbeat!` — the existing single home for the
-  pending/up/overdue re-entry rule, shared with pause-resume and
-  plan-reactivation. **A revive re-enters the cap**, and must not ride the
-  "updates are always allowed at the cap" rule — retiring frees a slot, so
-  restoring the task re-occupies one, and at the cap the revive is refused and
-  reported as `skipped: limit_reached` exactly as a create would be (the
-  monitor stays retired; nothing is silently over cap). So a wrong prune costs
-  one deploy of not-monitoring and is fully reversed, with history intact, by
-  the next sync that includes the task. Hard delete remains the UI's delete
-  button only (§3.3).
+  `suspended`. Retiring is a transition out of the monitored world, and it
+  follows the two precedents that already exist for that, plus one rule of its
+  own:
+
+  - **It resolves the open incident first, without an alert** — exactly what
+    `pause!` and `Suspension#suspend!` both do, for the reason their comments
+    give (WU-2): a stranded open incident on a not-monitored monitor corrupts
+    the rollup. Measured: retired mid-outage with the incident left open, the
+    outage day scores 100% up; resolved at retire, the real downtime survives.
+  - **It remembers, like suspension does.** `status_before_retirement` mirrors
+    `status_before_suspension`, so pruning a user-paused monitor whose task
+    was removed does not destroy the pause — the revive restores it.
+  - **Not-monitored must be enumerated, not assumed.** The rollup side is
+    automatic (it keys off `monitored?`), but `compute_live_today_stat`
+    (`uptime.rb:210`) lists `paused?/suspended?/pending?` explicitly and would
+    score a retired monitor's today as phantom-100%; the choose-N downgrade
+    picker lists all monitors and would offer retired ones as keepers a pick
+    cannot revive. Both sites gain `retired`. Excluded from detection and the
+    cap (`counting_toward_cap`), listed apart on the dashboard like suspended.
+  - **A stray ping must not resurrect it — and there are two ping arms, not
+    one.** `CheckIn` guards paused/suspended in its transition case, and
+    `FailureReport` has its *own copy* of that case: a retired monitor must be
+    added to both, or a failure ping (`kind: "failure"` — a still-running cron
+    with status reporting) falls into `FailureReport`'s else-branch, flips the
+    monitor to `down`, opens an incident, emails a false outage and re-occupies
+    a cap slot. Measured. Both arms: record the event, never transition, never
+    alert.
+
+  **Sync revives it — and revive is not `reactivate_heartbeat!`.** An earlier
+  version of this bullet routed revive through it, and that ships a false
+  alert: the retirement window has no pings *by construction* (the task was
+  declared absent), so `next_due_at` is stale on virtually every revive, and
+  `reactivate_heartbeat!`'s overdue arm would call `flag_missed!` — down
+  status, an incident, and a down email fired *during the deploy that restores
+  the task*, before the restored job could possibly have run. Measured.
+  Pause-resume's overdue genuinely means missed runs of a live job; retire's
+  overdue is an artifact of the declared-absent window. So revive is its own
+  small operation: restore `status_before_retirement` when it was `paused`;
+  otherwise set `up` and **re-arm the clock** — `next_due_at` = revive time +
+  the effective interval, a fresh window, no alert. If the restored job then
+  fails to run, detection fires after interval + grace with a *true* down
+  alert.
+
+  **A revive re-enters the cap**, and the mechanism must be named because no
+  existing check can fire: `within_monitor_cap` validates `on: :create` only,
+  and the sync's find-then-update path is deliberately "always allowed at the
+  cap" — so the revive needs its own explicit branch in `Project::MonitorSync`,
+  *before* `persist_update`, that at the cap refuses with
+  `skipped: limit_reached` and leaves the monitor retired. (Otherwise: retire
+  one, fill the freed slot, restore the first — silently over cap.)
+
+  So a wrong prune costs one deploy of not-monitoring and is fully reversed,
+  with history intact, by the next sync that includes the task. Hard delete
+  remains the UI's delete button only (§3.3).
 
   **The absent-versus-skipped guard, which only the CLI can supply.** An
   orphan is not always a removed task: a task still *in* `recurring.yml`
@@ -799,15 +840,24 @@ each load-bearing:
   *skipped* by the registrar, stops matching its monitor, and would read as an
   orphan — auto-retiring it turns a YAML typo into monitoring-off for a live
   job. Only the CLI sees the raw file, so the sync payload gains
-  **`declared_keys`** — every task key present in `recurring.yml` and
-  `c.monitors`, registerable or not. On a `PRUNE=1` run the server retires
-  only orphan candidates **absent from `declared_keys`**; a candidate present
-  in it is reported as *present but not registerable* and never retired.
-  The server still applies its own orphan rule (`source: "gem"`, the two-sided
-  app match) to every retire, so a buggy or forged prune request cannot reach
-  a `manual-<id>` backfill or another app's monitors. The response envelope
-  gains **`retired:`** beside `orphaned:`, and the CLI prints each retirement
-  with its remedy. Retiring is a successful outcome — exit 0.
+  **`declared_keys`** — every task key *this run's registrar can see* before
+  its skips: the current environment's `recurring.yml` section under Solid
+  Queue's own resolution rule (the section when present, the whole file
+  otherwise), plus every `c.monitors` key. The environment scoping must be
+  spelled out — "every key in `recurring.yml`" read literally would also
+  protect a key that exists only under another environment's section, and the
+  two readings retire different monitors. On a `PRUNE=1` run the server
+  retires only orphan candidates **absent from `declared_keys`**; a candidate
+  present in it is reported as *present but not registerable* and never
+  retired. **There is no client-supplied list of keys to retire** — the
+  server computes the retire set itself and applies its own orphan rule
+  (`source: "gem"`, the two-sided app match) to every retirement, so even a
+  malicious `prune: true` request with a minimal payload cannot reach a
+  `manual-<id>` backfill or another app's monitors, and what it can reach is
+  reversible (§4). **Prune requires `declared_keys`:** a request carrying the
+  flag but no key list — every pre-0.2.0 gem — retires nothing. The response
+  envelope gains **`retired:`** beside `orphaned:`, and the CLI prints each
+  retirement with its remedy. Retiring is a successful outcome — exit 0.
 
   **Full convergence is a policy you declare, not a mood.** A team that wants
   every run to provision exactly the declared set bakes `PRUNE=1` into
@@ -818,9 +868,13 @@ each load-bearing:
 
   (The two parse-empty register-nothing paths — `recurring.yml` missing, no
   registerable tasks — exit non-zero before any request, so an empty parse
-  can't even *report* orphans, let alone retire them; the other two
-  register-nothing paths fail at or after the request and return no orphan
-  data either.)
+  can't even *report* orphans, let alone retire them. Of the other two, a
+  transport failure returns nothing, but a run the server refuses wholesale —
+  every entry `limit_reached` or `invalid` — completes and its envelope does
+  carry `orphaned:`. That is safe by construction rather than by absence:
+  refused entries were still *sent*, so their monitors match this run and are
+  not candidates, and the retire set is bounded by `declared_keys` either
+  way.)
 - **Renames look like an add plus an orphan**, because the key is the identity.
   The output above makes that legible without special-casing it.
 
@@ -1138,9 +1192,9 @@ Measured, not estimated.
 | `PingKey` model, issuance, controller, views, migration, project-page wiring | ~200 |
 | Never-checked-in alert: scope, job, mailer, notification cause, copy (§9.1) | ~120 |
 | Orphan computation in the sync response (§6.1) | ~25 |
-| `retired` status: vocabulary + cap scope + `CheckIn` arm + revive-on-sync via `reactivate_heartbeat!` + dashboard partition (§6.1) | ~45 |
+| `retired` status: vocabulary + cap scope + **both** ping arms (`CheckIn` and `FailureReport`) + resolve-incident-at-retire + `status_before_retirement` + the revive operation (re-arm, restore-paused, explicit cap branch in `MonitorSync`) + live-today stat + dashboard partition + choose-N picker exclusion (§6.1) | ~85 |
 | Prune: `declared_keys` + `prune` in the sync payload, retire/refuse split, `retired:` envelope (§6.1) | ~50 |
-| **Server subtotal** | **~1,129** |
+| **Server subtotal** | **~1,169** |
 | Gem deletions (§3.2) | ~100 |
 | Gem additions: `c.overrides` (validation, application to tuples) + derivation/orphan output + `PRUNE=1`/`declared_keys` (§6.1) | ~90 |
 | **Tests broken by UI removal** | ~393 across 15 files, 4 deleted whole |
@@ -1205,9 +1259,16 @@ key from the UI, edit host credentials, redeploy the host. That does not fit.
 still exists:
 
 - **Phase 1 — additive, server only.** Add `PingKey`, the new endpoint, the route,
-  the rate limiters, the `registration_key` backfill. Change nothing else. The old
-  ping endpoint, `ping_token`, the rotation controllers and `ping_url` in the sync
-  response all keep working.
+  the rate limiters, the `registration_key` backfill — and the server half of
+  prune (§6.1): the `retired` status with its sites, and the
+  `declared_keys`/`prune` handling in the sync path. All of it is inert until a
+  0.2.0 gem sends the new fields, which is what makes it phase-1-safe: a
+  pre-0.2.0 gem sends neither, and prune without `declared_keys` retires
+  nothing. Change nothing else. The old ping endpoint, `ping_token`, the
+  rotation controllers and `ping_url` in the sync response all keep working.
+  (The gem half of prune — `PRUNE=1`, sending `declared_keys` — ships with gem
+  0.2.0 in phase 2; baking `PRUNE=1` into the deploy hook is a phase-2-or-later
+  act.)
 
   **The backfill is the one part of phase 1 that is not inert, and it needs a
   namespace.** `registration_key` is not just an address — it is the upsert
@@ -1257,7 +1318,10 @@ cheapest first:
   §7 for why, §8 for its budget and §12 for its test. It sits here because it
   belongs with its siblings, not because it is deferred. The threshold must be
   relative to the monitor's own interval, it must fire once, and it needs its own
-  wording pointing at setup docs.
+  wording pointing at setup docs — wording that must also allow "or the task was
+  removed from your config", because a still-`pending` monitor whose task is
+  deleted but not pruned stays in this state deliberately (§6.1), and "check
+  your setup" is the wrong instruction for it.
 
   **Two things it must specify that an implementer cannot read off the model,
   because on this monitor every obvious answer is `nil`.**
@@ -1567,15 +1631,24 @@ design dependency. Decide §10 when convenient; do not stop for it.
   monitored. Two apps syncing disjoint task sets into one project must not
   orphan each other (the `last_synced_app` match), and a backfilled
   `manual-<id>` monitor never appears (the `source` check).
-- **Prune, six ways (§6.1).** `PRUNE=1` retires a truly-absent task's monitor;
-  a revive at the cap is refused as `limit_reached` and the monitor stays
-  retired — it must not ride the updates-allowed-at-cap rule;
-  a present-but-skipped task (delete its `class:` line) is reported and **not**
-  retired; a forged prune list naming a `manual-<id>` or another app's key
-  retires nothing (the server re-checks its own orphan rule); a retired monitor
-  frees a cap slot, is invisible to detection, and records-but-ignores pings;
-  and restoring the task revives it — same status rules as pause-resume, full
-  history intact. Plus the rename case: rename + `PRUNE=1` leaves the old
+- **Prune, ten ways (§6.1).** `PRUNE=1` retires a truly-absent task's monitor,
+  and a present-but-skipped task (delete its `class:` line) is reported and
+  **not** retired. A malicious `prune: true` with a minimal payload retires
+  neither a `manual-<id>` backfill nor another app's monitors (the server
+  re-checks its own orphan rule), and a prune request with no `declared_keys`
+  — a pre-0.2.0 gem — retires nothing at all. **Retiring a monitor that is
+  down resolves its incident without an alert**, and the outage day's rollup
+  keeps the real pre-retire downtime. **Reviving fires no alert**: restore the
+  task after longer than interval + grace, and the revive sets a fresh window
+  rather than routing through `flag_missed!` — assert no down email and no
+  incident at revive, then that detection *does* fire one honest interval +
+  grace later if the restored job never runs. A paused monitor round-trips:
+  paused → retired → revived-as-paused, no alert anywhere. A **failure** ping
+  (`kind: "failure"`) to a retired monitor is recorded and resurrects nothing —
+  this is the `FailureReport` arm, and a success-ping-only test passes a broken
+  implementation. A revive at the cap is refused as `limit_reached` and the
+  monitor stays retired. A retired monitor's live today stat reads no-data,
+  not phantom-100%. And the rename case: rename + `PRUNE=1` leaves the old
   monitor retired with its history and the new key fresh.
 - **The detection sweep survives one bad record (§9.3).** A monitor that fails
   validation must not stop `DetectMissedPingsJob` flagging the monitors after it.
