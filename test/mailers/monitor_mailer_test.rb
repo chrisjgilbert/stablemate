@@ -6,6 +6,23 @@ class MonitorMailerTest < ActionMailer::TestCase
 
   setup { @monitor = monitors(:up) }
 
+  # The from-address is what a recipient's mail server checks against SPF/DKIM, so
+  # a wrong one lands the alert in spam or gets it rejected outright — silently,
+  # from the sender's point of view. Asserted on a real alert rather than on
+  # ApplicationMailer's defaults hash, which would only restate the ENV.fetch that
+  # set it. The expected values are the ones config/environments/test.rb pins, and
+  # they are deliberately not the in-code fallbacks: an ApplicationMailer that
+  # stopped reading STABLEMATE_MAIL_FROM would fail here.
+  test "every alert is sent from the configured address" do
+    @monitor.update!(next_due_at: 1.hour.ago)
+
+    [ MonitorMailer.down(@monitor), MonitorMailer.recovered(@monitor) ].each do |mail|
+      assert_equal [ "alerts@test.example" ], mail.from,
+        "alerts must come from the address STABLEMATE_MAIL_FROM configures"
+      assert_equal [ "support@test.example" ], mail.reply_to
+    end
+  end
+
   test "down renders with the monitor name, expected-by time, and detail link" do
     @monitor.update!(next_due_at: 1.hour.ago)
     mail = MonitorMailer.down(@monitor)
@@ -130,22 +147,16 @@ class MonitorMailerTest < ActionMailer::TestCase
     assert_match monitor_url(@monitor), mail.body.encoded
   end
 
-  test "down and recovered set a configured From address" do
-    configured_from = ApplicationMailer.default[:from]
-    assert configured_from.present?
-
-    assert_equal configured_from, MonitorMailer.down(@monitor)[:from].value
-    assert_equal configured_from, MonitorMailer.recovered(@monitor)[:from].value
-  end
-
+  # The host is the one config/environments/test.rb sets, written out rather than
+  # read back from the config it is checking — restating
+  # `default_url_options[:host]` would pass whatever that became, including a host
+  # taken from the request.
   test "detail link host comes from config, not the request" do
-    config_host = Rails.application.config.action_mailer.default_url_options[:host]
-
     [ MonitorMailer.down(@monitor), MonitorMailer.recovered(@monitor) ].each do |mail|
       link = mail.body.encoded[/https?:\/\/[^\s"'<]+/]
       assert link, "expected a detail link in the email body"
       assert link.start_with?("https://"), "detail link must be https, got #{link}"
-      assert_equal config_host, URI.parse(link).host
+      assert_equal "example.com", URI.parse(link).host
     end
   end
 end

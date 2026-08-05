@@ -12,6 +12,16 @@
 ENV["STABLEMATE_MAX_MONITORS_PER_USER"] ||= "5"
 ENV["STABLEMATE_SIGNUP_ACCOUNT_CAP"] ||= "100"
 
+# The addresses ApplicationMailer sends from, asserted on a delivered alert in
+# monitor_mailer_test. Pinned, and NOT `||=` like the caps above: whatever the
+# developer's shell happens to export would otherwise decide them, and a shell
+# with STABLEMATE_MAIL_FROM set for a hand-run `kamal deploy` turns the mailer
+# tests red on a change that has nothing to do with them. Deliberately unlike the
+# in-code fallbacks, so the assertion proves the mailer READS these variables
+# rather than restating a literal that happens to match.
+ENV["STABLEMATE_MAIL_FROM"] = %("Stablemate" <alerts@test.example>)
+ENV["STABLEMATE_MAIL_REPLY_TO"] = "support@test.example"
+
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
 

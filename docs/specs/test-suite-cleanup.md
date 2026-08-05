@@ -31,7 +31,8 @@ Actions is green → tick the boxes here → next chunk.
 | 4 | Humble-Object the production env config; retire 8 boots | #2 | **MERGED** | #88 |
 | 5 | Two owners: fixture-free tests get a fixture-free user | #1 | **MERGED** | #89 |
 | 6 | `rubocop-minitest` to stop the regressions | #7 | **MERGED** | #90 |
-| 7 | The system suite's load sensitivity — an Erratic Test | #8 | **IN REVIEW** | #91 |
+| 7 | The system suite's load sensitivity — an Erratic Test | #8 | **MERGED** | #91 |
+| 8 | Stop testing config and booting; test behaviour | #9 | **IN REVIEW** | #93 |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
 
@@ -321,3 +322,96 @@ spanned a Turbo re-render.
 Still open, and deliberately so: `monitors_controller_test` and
 `projects_controller_test` both use the fixture monitors *and* demolish them per
 test, which needs a per-test judgement rather than a setup swap.
+
+
+## Chunk 8 — Stop testing config; test behaviour (finding #9)
+
+Chunk 4 moved the env→config *derivation* into a plain object, and left two boot
+tests behind on the reasoning that a boot still proves production "wires it in".
+Pressed on why we test config at all, that reasoning does not survive.
+
+**What production.rb does with the object is nine straight assignments** —
+`config.force_ssl = deployment.ssl_enabled?`, and so on. Asserting `force_ssl ==
+true` afterwards tests Rails' attribute writer. It was not a tautology before
+chunk 4, because the assertions reached real branching; chunk 4 is what made it
+one, by moving that branching somewhere it can be tested in 1.4s.
+
+The deeper objection is that the survivors were **implementation, not
+behaviour**: `::Stripe.api_key.present?` reads an SDK attribute, and
+`pay_paths.empty?` reads the routing table. Nobody's experience changes because
+a variable is set. Where a behaviour existed underneath, it is now asserted
+directly; where none did, the assertion is gone.
+
+- [x] `production_env_config_test.rb` — nine assignment tautologies, plus a
+      "production boots" check the Dockerfile already performs at image build
+      (`RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile`) — though only
+      on a `kamal deploy`, which CI does not run, so a production.rb that can't
+      boot now fails after merge rather than on the PR.
+      **Not everything there was an assignment:** production.rb still branches on
+      `deployment.host_authorization?` and `deployment.trusted_proxies`, and
+      "unconfigured production authorises every host" was the assertion covering
+      the first. `DeploymentConfigTest` proves the predicate, not the wiring, so
+      inverting that `if` — turning host authorization ON for the managed deploy,
+      which sets no `STABLEMATE_HOST` and would then 403 every request — is the
+      one regression here nothing catches. Recorded as a gap, not a tautology.
+- [x] `billing_boot_test.rb` — one non-tautological assertion
+      (`::Stripe.api_key.present?`), and it reads an SDK internal
+- [x] `pay_automount_routes_test.rb` → `test/controllers/pay_engine_routes_test.rb`,
+      which **requests the paths and asserts 404** instead of asking
+      `routes.recognize_path`. Mutation-checked: deleting
+      `Pay.automount_routes = false` turns `/pay/payments/1` from 404 into 302.
+      This is the half that mattered — Pay draws it unconditionally, and the page
+      embeds a PaymentIntent's `client_secret`.
+- [x] `honeybadger_api_key_test.rb` → `honeybadger_secret_test.rb`, keeping only
+      the assertion that needed no boot (no key committed to the repo — a plain
+      YAML read). Reporting *with* the env key is Honeybadger's own resolution
+      rule. The other half of that pair was ours, though: the initializer assigns
+      `config.api_key` only `if` we have one, precisely so a self-hoster's key in
+      their own `honeybadger.yml` isn't shadowed by `nil` — and a `configure`
+      assignment outranks every other source, so making it unconditional switches
+      their error reporting off silently. That `if` is now a comment nothing
+      enforces; the gap is the price of not booting, and if it wants cover it
+      should be a predicate like `NonProdMailGuard.guards?`, not a boot.
+
+**Then all of them went, boot helper included.** The standing preference is
+against config and boot tests, and the last holdout did not need to be either.
+
+`mail_from_test.rb` — deleted. `app_from` restated the `ENV.fetch` that set it,
+and the other two protected Pay's from-address on emails Pay never sends
+(`config.send_emails = false`) — the chunk 6 ledger entry claiming `MailFromTest`
+pins the `Pay.support_email` deletion is annotated accordingly. The live
+behaviour — an alert arriving from an address the recipient's SPF/DKIM accepts —
+is now asserted on a **real alert** in `monitor_mailer_test.rb`, in-process. The
+two variables are pinned in `config/environments/test.rb` to values unlike the
+in-code fallbacks, so the assertion still fails if the mailer stops reading them,
+and a shell that exports `STABLEMATE_MAIL_FROM` for a hand-run `kamal deploy`
+can't turn the suite red.
+
+`development_boot_test.rb` — deleted, and the thing it protected kept, by the
+same move as chunk 4. Registering `NonProdMailGuard` outside production and test
+is a **decision**; `NonProdMailGuard.guards?(env)` is now that decision as a
+predicate, asked in-process, while the initializer is a one-line `if` nobody
+tests. Mutation-checked: dropping development from the guarded set fails with
+*"a dev box must not mail real people"*.
+
+That is the shape the whole ledger converged on:
+
+| | test it? |
+|---|---|
+| a **decision** with edge cases | yes — as a plain object, in-process |
+| an **assignment** or a registration | no — a reader checks it in less time than a boot takes |
+
+`boot_test_helper.rb` is gone with them.
+
+| | before chunk 8 | after |
+|---|---|---|
+| `test/config` wall time | ~16s | **1.6s** |
+| boots in the suite | 7 | **0** |
+
+**What is deliberately not covered any more.** A Pay upgrade silently changing
+how it resolves `STRIPE_PRIVATE_KEY` would no longer fail CI — the test
+environment has no Stripe keys, so nothing else notices, and the first customer
+to click Upgrade would find out. That belongs in a post-deploy smoke check
+against the running instance (real keys, real config, real behaviour), not in a
+suite that has to fake all three. Recorded here so the gap is a decision rather
+than an oversight.
