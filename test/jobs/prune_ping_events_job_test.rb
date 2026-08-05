@@ -46,17 +46,10 @@ class PrunePingEventsJobTest < ActiveJob::TestCase
       old = @monitor.ping_events.create!(received_at: old_time, kind: "success")
       # Deliberately no UptimeDayStat for old_time.to_date.
 
-      out = StringIO.new
-      old_logger = Rails.logger
-      Rails.logger = ActiveSupport::Logger.new(out)
-      begin
-        PrunePingEventsJob.perform_now
-      ensure
-        Rails.logger = old_logger
-      end
+      logs = capturing_logs { PrunePingEventsJob.perform_now }
 
       assert PingEvent.exists?(old.id), "un-rolled day's pings must not be deleted"
-      assert_match(/skipping un-rolled day/, out.string)
+      assert_match(/skipping un-rolled day/, logs)
     end
   end
 
