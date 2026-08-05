@@ -531,8 +531,8 @@ S1, S2, S7): they existed only to protect a live, populated table.
   `current_project.sync_monitors(entries:)`. Request/response envelope unchanged
   (`api.md:99-136`) so old gems keep working.
 - **Read** (`GET /api/v1/monitors`, `:id`): unchanged shape, now project-scoped by
-  the key. Optionally add `"project": {id, name}` to `monitor_json`
-  (`base_controller.rb:74-88`) for API consumers — the gem ignores it.
+  the key. Optionally add `"project": {id, name}` to `Api::V1::MonitorPresenter`
+  for API consumers — the gem ignores it.
 - **Rotate** (`POST /api/v1/monitors/:id/rotate`): unchanged, now project-scoped.
 - **Key management**: `ApiKey.issue(project:, name:)` replaces `issue(user:, name:)`
   (`api_key/issuance.rb`); web routes move under the project (§6, §12-E).
@@ -743,9 +743,9 @@ off with "document it." Ranked.
   every monitor + child; for `ping_events`/`uptime_day_stats` use DB-level
   `ON DELETE CASCADE` or a batched purge. [migration, perf]
 - **S11 · uptime-monitor.md composition is not "trivial."** Both specs rewrite
-  `SyncsController#create`/`sync_params` and `monitor_json`; uptime needs URL/type
-  validation inside the *moved* `Project::MonitorSync`. Reconcile explicitly whichever
-  lands second. [architecture]
+  `SyncsController#create`/`sync_params` and `Api::V1::MonitorPresenter`; uptime
+  needs URL/type validation inside the *moved* `Project::MonitorSync`. Reconcile
+  explicitly whichever lands second. [architecture]
 
 ### Minor
 

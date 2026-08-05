@@ -74,25 +74,10 @@ module Api
           ping_url(monitor.ping_token)
         end
 
-        def monitor_json(monitor)
-          {
-            id: monitor.id,
-            name: monitor.name,
-            status: monitor.status,
-            registration_key: monitor.registration_key,
-            ping_url: ping_url_for(monitor),
-            last_ping_at: monitor.last_ping_at,
-            next_due_at: monitor.next_due_at
-          }
-        end
-
-        def monitor_detail_json(monitor)
-          monitor_json(monitor).merge(
-            source: monitor.source,
-            expected_interval_seconds: monitor.expected_interval_seconds,
-            grace_period_seconds: monitor.grace_period_seconds,
-            uptime_percent: monitor.uptime_percent
-          )
+        # The shape lives on the presenter; this controller only supplies the
+        # request-dependent ping URL.
+        def present(monitor)
+          MonitorPresenter.new(monitor, ping_url: ping_url_for(monitor))
         end
     end
   end
