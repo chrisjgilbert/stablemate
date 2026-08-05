@@ -8,17 +8,19 @@ class MonitorMailerTest < ActionMailer::TestCase
 
   # The from-address is what a recipient's mail server checks against SPF/DKIM, so
   # a wrong one lands the alert in spam or gets it rejected outright — silently,
-  # from the sender's point of view. Asserted on a real delivered alert rather
-  # than on ApplicationMailer's defaults hash, which would only restate the
-  # ENV.fetch that set it.
+  # from the sender's point of view. Asserted on a real alert rather than on
+  # ApplicationMailer's defaults hash, which would only restate the ENV.fetch that
+  # set it. The expected values are the ones config/environments/test.rb pins, and
+  # they are deliberately not the in-code fallbacks: an ApplicationMailer that
+  # stopped reading STABLEMATE_MAIL_FROM would fail here.
   test "an alert is sent from the configured address" do
     @monitor.update!(next_due_at: 1.hour.ago)
 
     mail = MonitorMailer.down(@monitor)
 
-    assert_equal [ "chris@chrisgilbert.dev" ], mail.from,
+    assert_equal [ "alerts@test.example" ], mail.from,
       "alerts must come from the address STABLEMATE_MAIL_FROM configures"
-    assert_equal [ "chris@chrisgilbert.dev" ], mail.reply_to
+    assert_equal [ "support@test.example" ], mail.reply_to
   end
 
   test "down renders with the monitor name, expected-by time, and detail link" do

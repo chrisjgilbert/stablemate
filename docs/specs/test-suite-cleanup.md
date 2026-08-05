@@ -344,7 +344,16 @@ directly; where none did, the assertion is gone.
 
 - [x] `production_env_config_test.rb` — nine assignment tautologies, plus a
       "production boots" check the Dockerfile already performs at image build
-      (`RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile`)
+      (`RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile`) — though only
+      on a `kamal deploy`, which CI does not run, so a production.rb that can't
+      boot now fails after merge rather than on the PR.
+      **Not everything there was an assignment:** production.rb still branches on
+      `deployment.host_authorization?` and `deployment.trusted_proxies`, and
+      "unconfigured production authorises every host" was the assertion covering
+      the first. `DeploymentConfigTest` proves the predicate, not the wiring, so
+      inverting that `if` — turning host authorization ON for the managed deploy,
+      which sets no `STABLEMATE_HOST` and would then 403 every request — is the
+      one regression here nothing catches. Recorded as a gap, not a tautology.
 - [x] `billing_boot_test.rb` — one non-tautological assertion
       (`::Stripe.api_key.present?`), and it reads an SDK internal
 - [x] `pay_automount_routes_test.rb` → `test/controllers/pay_engine_routes_test.rb`,
@@ -355,22 +364,28 @@ directly; where none did, the assertion is gone.
       embeds a PaymentIntent's `client_secret`.
 - [x] `honeybadger_api_key_test.rb` → `honeybadger_secret_test.rb`, keeping only
       the assertion that needed no boot (no key committed to the repo — a plain
-      YAML read). The env-vs-YAML precedence pair was testing Honeybadger's own
-      resolution rules.
-
-| | before | after |
-|---|---|---|
-| `test/config` wall time | ~16s | **1.6s** |
-| boots in the suite | 7 | **0** |
+      YAML read). Reporting *with* the env key is Honeybadger's own resolution
+      rule. The other half of that pair was ours, though: the initializer assigns
+      `config.api_key` only `if` we have one, precisely so a self-hoster's key in
+      their own `honeybadger.yml` isn't shadowed by `nil` — and a `configure`
+      assignment outranks every other source, so making it unconditional switches
+      their error reporting off silently. That `if` is now a comment nothing
+      enforces; the gap is the price of not booting, and if it wants cover it
+      should be a predicate like `NonProdMailGuard.guards?`, not a boot.
 
 **Then all of them went, boot helper included.** The standing preference is
 against config and boot tests, and the last holdout did not need to be either.
 
 `mail_from_test.rb` — deleted. `app_from` restated the `ENV.fetch` that set it,
 and the other two protected Pay's from-address on emails Pay never sends
-(`config.send_emails = false`). The live behaviour — an alert arriving from an
-address the recipient's SPF/DKIM accepts — is now asserted on a **real delivered
-alert** in `monitor_mailer_test.rb`, in-process.
+(`config.send_emails = false`) — the chunk 6 ledger entry claiming `MailFromTest`
+pins the `Pay.support_email` deletion is annotated accordingly. The live
+behaviour — an alert arriving from an address the recipient's SPF/DKIM accepts —
+is now asserted on a **real alert** in `monitor_mailer_test.rb`, in-process. The
+two variables are pinned in `config/environments/test.rb` to values unlike the
+in-code fallbacks, so the assertion still fails if the mailer stops reading them,
+and a shell that exports `STABLEMATE_MAIL_FROM` for a hand-run `kamal deploy`
+can't turn the suite red.
 
 `development_boot_test.rb` — deleted, and the thing it protected kept, by the
 same move as chunk 4. Registering `NonProdMailGuard` outside production and test

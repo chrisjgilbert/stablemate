@@ -233,15 +233,22 @@ against the merged diff. What they found:
       unreachable today (`send_emails = false`; nothing calls `Pay::Receipts`),
       so it was dormant — but the initializer documents how to switch those
       emails on in one line. Deleting it also removed the `require "mail"` chunk 5
-      added, at its source. `MailFromTest` pins it.
+      added, at its source. ~~`MailFromTest` pins it.~~ **NO LONGER PINNED — see
+      test-suite-cleanup chunk 8:** `MailFromTest` was a boot test and went with
+      the rest of them. Nothing fails today if `support_email` comes back, so if
+      those emails are ever switched on, re-pin it first (`assert_nil
+      Pay.support_email` needs no boot).
 - [x] **Boot-order coupling removed.** `mail_interceptor.rb` referenced
       `ActionMailer::Base` at initializer-load time, which runs
       `require "mail"` as a side effect — the accident that masked the pay.rb bug
       in development. Now `ActiveSupport.on_load(:action_mailer)`, matching its
       sibling `mail_delivery_retries.rb`.
-- [x] **Development is boot-tested.** Test boots on every run and
-      `ProductionEnvConfigTest` boots production, but development — the only
-      environment where `NonProdMailGuard` actually registers — had no cover.
+- [x] ~~**Development is boot-tested.**~~ **SUPERSEDED — see test-suite-cleanup
+      chunk 8.** Test boots on every run and `ProductionEnvConfigTest` booted
+      production, but development — the only environment where `NonProdMailGuard`
+      actually registers — had no cover. Both boot tests are now gone: the
+      *decision* they protected is `NonProdMailGuard.guards?(env)`, asked
+      in-process; the `register_interceptor` call itself is read, not tested.
 - [x] ~~**The SHA pins have a guard, not just a comment.**~~ **REVERTED — see the
       cleanup pass.** `WorkflowPinsTest`
       asserts every third-party `uses:` is a 40-hex commit pin carrying a
