@@ -24,7 +24,7 @@ Section numbers in the left column are **`README.md`'s**; those in the right are
 | Decision #6, *"`registration_key` = the recurring.yml task key… the registrar writes it"* | **Amended.** It stops being an internal idempotency key and becomes the monitor's **public address**. A backfill becomes a second writer, and it becomes character-set sensitive. |
 | Decision #3, *"No gate on monitor creation"* | **Narrowed.** Survives only as a statement about `bin/rails stablemate:sync`. |
 | §2 Security defaults, the whole `ping_token` bullet | **Void.** Every clause — plaintext by design, the dashboard showing it, the API re-serving it, the uninformative 404, per-token rate limiting, rotation — describes surfaces this removes. |
-| §3 Data model, `Monitor` | `ping_token` and its unique index are deleted. **`source` stays**: new rows are always `"gem"` (sync is the only creator), §8's backfilled rows keep `"manual"` forever, and §6.1's orphan filter reads exactly that distinction (§3.3, §6.1). |
+| §3 Data model, `Monitor` | `ping_token` and its unique index are deleted. **`source` stays**: new rows are always `"gem"` (sync is the only creator), §8's backfilled rows keep `"manual"` forever, and §6.1's orphan filter reads exactly that distinction (§3.3, §6.1). The status vocabulary gains **`retired`** — the prune state (§6.1): history kept, not monitored, no cap slot, revived by sync. |
 | §3 Data model, table set | **Gains `PingKey`** — `project_id`, `name`, `token_digest` (unique), `token_last4`, `last_used_at`, timestamps. A project may hold more than one, so rotation can overlap (§4). |
 | §2 Security defaults, the `ApiKey` bullet | **Widened**, not replaced. The same handling — hashed, constant-time compared, shown once, uninformative `401` — now covers both credentials, with the addition that the API key is no longer the credential on the check-in path (§4). |
 
@@ -43,7 +43,7 @@ Two pre-existing errors in that data model are worth fixing while editing it: th
 `Monitor` block omits five shipped columns — though only `first_ping_at` and
 `status_before_suspension` still need adding, since the other three are the
 `last_synced_*` settings columns §3.1 now deletes — and it lists the status
-vocabulary without `suspended`.
+vocabulary without `suspended` (nor `retired`, which §6.1 adds).
 
 ---
 
@@ -339,6 +339,12 @@ name was user-authored:
 | rewrite name / interval / grace everywhere | no | **yes** |
 | emit a "recovered" email | yes | no |
 | write ping-event rows | yes | no |
+
+(§6.1's prune adds one API-key verb to this table: retiring orphaned monitors.
+It is deliberately reversible and history-keeping, so it is not a material new
+rung — a leaked key can already silence everything invisibly via the interval
+rewrite above; retiring is the louder, recoverable version of the same harm,
+and the server's own orphan rule bounds what a forged prune list can reach.)
 
 The ping key's exclusives are narrower, but **not transient, and an earlier draft
 of this section was wrong to say so.** A forged success on a monitor that is down
@@ -716,7 +722,7 @@ the overrides people need become obvious the moment they see this line:
 ✓ pg_backup          every 24h  (declared in c.monitors)
 ✗ db_backup          skipped: command task, no class: to observe
 !  2 monitors on the server match no task here: old_report, legacy_sync
-   (kept, state untouched — delete them in the dashboard, or restore the task)
+   (kept, state untouched — retire them with PRUNE=1, or restore the task)
 
 check in pg_backup from its own cron:
   curl -X POST -H "Authorization: Bearer sm_ping_…" \
@@ -757,19 +763,59 @@ each load-bearing:
   no run may claim it. And a payload arriving with no `app` reports no orphans
   at all — nil-matches-nil would hand every unattributed row to whichever app
   syncs first.
-- **Reported, never pruned.** An orphaned monitor is kept, its state untouched —
+- **Reported by default; retired on `PRUNE=1`; destroyed never.** An earlier
+  revision said no pruning in V1, on two objections — it would need a delete
+  route, and auto-prune's failure mode (a broken parse deletes everything) is
+  the incident again. Both dissolve once the verb changes: **prune retires, it
+  does not delete**, and the guard below makes the broken-parse case
+  unreachable. A run without the flag reports orphans and touches nothing —
   one that was live keeps monitoring, and its pings stopping and it going down
-  is *correct*: the job stopped existing. (One that was still `pending` will
-  instead meet §9.1's never-checked-in alert, whose copy must therefore allow
-  "or the task was removed", not just "check your setup".) Removal is
-  the UI's delete button (an operational act, §3.3). No `--prune` in V1: it
-  would need a delete route the API deliberately lacks, and auto-prune's failure
-  mode — a broken `recurring.yml` parses to zero tasks and deletes every
-  monitor — is the incident this document exists to end. (The two parse-empty
-  register-nothing paths — `recurring.yml` missing, no registerable tasks —
-  exit non-zero before any request, so an empty parse can't even *report*
-  orphans, let alone act on them; the other two register-nothing paths fail at
-  or after the request and return no orphan data either.)
+  is *correct*: the job stopped existing. (One still `pending` will instead
+  meet §9.1's never-checked-in alert, whose copy must therefore allow "or the
+  task was removed", not just "check your setup".)
+
+  **What retiring means.** `retired` joins the status vocabulary beside
+  `suspended`, with the same not-monitored semantics: history, incidents and
+  uptime stats all kept; excluded from detection and from the cap
+  (`counting_toward_cap` excludes both); listed apart on the dashboard the way
+  suspended monitors already are; a ping to a retired monitor is recorded but
+  never transitions or alerts (the same `CheckIn` arm as paused/suspended — a
+  stray ping must not resurrect it). **Sync revives it**: when a retired
+  monitor's key reappears in a run, the upsert un-retires it through
+  `reactivate_heartbeat!` — the existing single home for the
+  pending/up/overdue re-entry rule, shared with pause-resume and
+  plan-reactivation. So a wrong prune costs one deploy of not-monitoring and
+  is fully reversed, with history intact, by the next sync that includes the
+  task. Hard delete remains the UI's delete button only (§3.3).
+
+  **The absent-versus-skipped guard, which only the CLI can supply.** An
+  orphan is not always a removed task: a task still *in* `recurring.yml`
+  whose `class:` line was deleted or whose schedule no longer parses is
+  *skipped* by the registrar, stops matching its monitor, and would read as an
+  orphan — auto-retiring it turns a YAML typo into monitoring-off for a live
+  job. Only the CLI sees the raw file, so the sync payload gains
+  **`declared_keys`** — every task key present in `recurring.yml` and
+  `c.monitors`, registerable or not. On a `PRUNE=1` run the server retires
+  only orphan candidates **absent from `declared_keys`**; a candidate present
+  in it is reported as *present but not registerable* and never retired.
+  The server still applies its own orphan rule (`source: "gem"`, the two-sided
+  app match) to every retire, so a buggy or forged prune request cannot reach
+  a `manual-<id>` backfill or another app's monitors. The response envelope
+  gains **`retired:`** beside `orphaned:`, and the CLI prints each retirement
+  with its remedy. Retiring is a successful outcome — exit 0.
+
+  **Full convergence is a policy you declare, not a mood.** A team that wants
+  every run to provision exactly the declared set bakes `PRUNE=1` into
+  `.kamal/hooks/post-deploy` — itself a repo-owned file, so the convergence
+  policy is config-as-code too. One honest limit: a rename plus prune retires
+  the old monitor *with* its history and starts the new key fresh — history
+  does not follow a rename.
+
+  (The two parse-empty register-nothing paths — `recurring.yml` missing, no
+  registerable tasks — exit non-zero before any request, so an empty parse
+  can't even *report* orphans, let alone retire them; the other two
+  register-nothing paths fail at or after the request and return no orphan
+  data either.)
 - **Renames look like an add plus an orphan**, because the key is the identity.
   The output above makes that legible without special-casing it.
 
@@ -1087,9 +1133,11 @@ Measured, not estimated.
 | `PingKey` model, issuance, controller, views, migration, project-page wiring | ~200 |
 | Never-checked-in alert: scope, job, mailer, notification cause, copy (§9.1) | ~120 |
 | Orphan computation in the sync response (§6.1) | ~25 |
-| **Server subtotal** | **~1,034** |
+| `retired` status: vocabulary + cap scope + `CheckIn` arm + revive-on-sync via `reactivate_heartbeat!` + dashboard partition (§6.1) | ~45 |
+| Prune: `declared_keys` + `prune` in the sync payload, retire/refuse split, `retired:` envelope (§6.1) | ~50 |
+| **Server subtotal** | **~1,129** |
 | Gem deletions (§3.2) | ~100 |
-| Gem additions: `c.overrides` (validation, application to tuples) + derivation/orphan output (§6.1) | ~70 |
+| Gem additions: `c.overrides` (validation, application to tuples) + derivation/orphan output + `PRUNE=1`/`declared_keys` (§6.1) | ~90 |
 | **Tests broken by UI removal** | ~393 across 15 files, 4 deleted whole |
 | **Tests broken by the edit/arbitration removal** | 2 of 30 in `monitors_controller_test.rb` (both cross-tenant guards at `:60`/`:66` — the protection they pin moves to the routes not existing), the edit half of `monitor_edit_delete_test.rb`, the arbitration tests in `monitor_sync_test.rb:279-431` less the one survivor, plus the upsert test at `:154-160` (§3.1) |
 | **Tests broken by the check-in move** | ~647 across 9 files, 3 deleted whole |
@@ -1448,7 +1496,9 @@ five-minute coarsening, and **more than one live key per project**, which rotati
 requires.
 
 **§9.4's wire field** is `ping_key_last4`, an array of strings, in the sync
-response envelope alongside `monitors` and `skipped`.
+response envelope alongside `monitors`, `skipped`, `orphaned` and — on a prune
+run — `retired` (§6.1). The request side gains `declared_keys` and the `prune`
+flag; nothing else in the envelope changes.
 
 **The docs that describe removed surfaces** are not optional follow-up. The ones
 that will 404: `docs/api.md` (the ping endpoint, `ping_url` in two payloads,
@@ -1507,11 +1557,19 @@ design dependency. Decide §10 when convenient; do not stop for it.
 - **An unknown override key aborts the run** — exit non-zero, nothing synced, the
   key named — and an override on a `c.monitors` key is the same config error
   (§3.1).
-- **Orphans are reported, never deleted (§6.1).** Remove a task, sync: the
-  monitor is named in the output and still monitored. Two apps syncing disjoint
-  task sets into one project must not orphan each other (the `last_synced_app`
-  match), and a backfilled `manual-<id>` monitor never appears (the `source`
-  check).
+- **Orphans are reported by default, retired only on `PRUNE=1`, destroyed never
+  (§6.1).** Remove a task, sync: the monitor is named in the output and still
+  monitored. Two apps syncing disjoint task sets into one project must not
+  orphan each other (the `last_synced_app` match), and a backfilled
+  `manual-<id>` monitor never appears (the `source` check).
+- **Prune, five ways (§6.1).** `PRUNE=1` retires a truly-absent task's monitor;
+  a present-but-skipped task (delete its `class:` line) is reported and **not**
+  retired; a forged prune list naming a `manual-<id>` or another app's key
+  retires nothing (the server re-checks its own orphan rule); a retired monitor
+  frees a cap slot, is invisible to detection, and records-but-ignores pings;
+  and restoring the task revives it — same status rules as pause-resume, full
+  history intact. Plus the rename case: rename + `PRUNE=1` leaves the old
+  monitor retired with its history and the new key fresh.
 - **The detection sweep survives one bad record (§9.3).** A monitor that fails
   validation must not stop `DetectMissedPingsJob` flagging the monitors after it.
 - **Backfilled keys cannot be adopted by the gem (§8.1).** A hand-created monitor
