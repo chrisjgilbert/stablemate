@@ -29,8 +29,8 @@ Actions is green → tick the boxes here → next chunk.
 | 2 | Finish the half-done extractions; kill `User.take` | #5, #6 | **MERGED** | #78 |
 | 3 | Stop monkey-patching globals in the job tests | #4 | **MERGED** | #87 |
 | 4 | Humble-Object the production env config; retire 8 boots | #2 | **MERGED** | #88 |
-| 5 | Two owners: fixture-free tests get a fixture-free user | #1 | **IN REVIEW** | #89 |
-| 6 | `rubocop-minitest` to stop the regressions | #7 | **TODO** | — |
+| 5 | Two owners: fixture-free tests get a fixture-free user | #1 | **MERGED** | #89 |
+| 6 | `rubocop-minitest` to stop the regressions | #7 | **IN REVIEW** | #90 |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
 
@@ -212,5 +212,57 @@ per test. Converting those needs a per-test judgement rather than a setup swap.
 
 ## Chunk 6 — Stop the regressions (finding #7)
 
-- [ ] `rubocop-minitest` in the lint toolchain
-- [ ] `uptime_test.rb:291` `assert(ticks.all? { … })` — bare and near-tautological
+Every chunk above removed a shape rubocop could have refused. Nothing stopped
+them coming back, because `rubocop-minitest` is not in omakase.
+
+- [x] `rubocop-minitest` in the lint toolchain, with `NewCops: enable`
+- [x] `uptime_test.rb` `assert(ticks.all? { … })` — held however the ticks were
+      ordered, so it would have passed with the sparkline drawn backwards. Now
+      asserts the sequence, and the two events outside the window are both
+      failures so it also catches the wrong 16 being picked. Both mutations
+      verified to fail.
+
+`Minitest/UselessAssertion` catches the exact defect the review passes found
+**twice** in tests written for this ledger. Verified by probe, not assumed:
+
+| probe | result |
+|---|---|
+| a test with no assertions | `Minitest/NoAssertions` ✓ |
+| `def tets_the_cap_is_enforced` (never runs) | `Minitest/TestMethodName` ✓ |
+| `assert_equal x, x` | `Minitest/UselessAssertion` ✓ |
+| `private def assert_something_custom` | left alone ✓ |
+
+**`Minitest/NoAssertions` ships `Enabled: false` upstream**, not `pending`, so
+`NewCops: enable` never reaches it — it has to be named. The config claimed to
+catch assertion-free tests before that was actually true.
+
+**Four cops are off**, each a style opinion fighting a convention chosen on
+purpose rather than a cop that found something awkward: `MultipleAssertions`
+(150 sites — system tests here are one robust test per flow),
+`Assert/RefutePredicate` (228), `EmptyLineBeforeAssertionMethods` (381), and
+`AssertTruthy`/`RefuteFalse` (where `assert_equal true, x` is deliberately
+stricter — the boot tests read booleans back out of parsed JSON, and these are
+the SSL and mail-delivery switches).
+
+`TestMethodName` stays **on**: it autocorrected a custom assertion into a test
+method that minitest then ran with no request behind it, but `private def` is
+the cop's own answer and the pattern this suite already uses. The fix was the
+helper, not the cop.
+
+---
+
+## Where this leaves the suite
+
+| | before | after |
+|---|---|---|
+| whole non-system suite | 15.9s | **9.0s** |
+| the 4 boot-based files | 41.6s | **16.4s** |
+| `define_singleton_method` in test helpers | 12 | **0** |
+| `class_eval` / `alias_method` / `singleton_class` in `test/` | 6 | **0** |
+| duplicate SQL-capture helpers | 4 | **1** |
+| `delete_all` / `destroy_all` | 44 in 24 files | **30 in 12** |
+| minitest lint cops | none | **on, with probes** |
+
+Still open, and deliberately so: `monitors_controller_test` and
+`projects_controller_test` both use the fixture monitors *and* demolish them per
+test, which needs a per-test judgement rather than a setup swap.

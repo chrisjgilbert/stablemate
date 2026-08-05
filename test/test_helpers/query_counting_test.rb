@@ -54,7 +54,7 @@ class QueryCountingTest < ActiveSupport::TestCase
 
     assert monitors_at, "the monitors query should be recorded"
     assert projects_at, "the projects query should be recorded"
-    assert monitors_at < projects_at, "the statements must keep their real order"
+    assert_operator monitors_at, :<, projects_at, "the statements must keep their real order"
   end
 
   test "assert_sql_order passes when the first pattern is issued before the second" do

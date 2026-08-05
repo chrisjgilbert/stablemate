@@ -113,8 +113,8 @@ class DeploymentConfigTest < ActiveSupport::TestCase
     assert_includes proxies, IPAddr.new("2400:cb00::/32"), "the IPv6 ranges must come too"
     # Assigning trusted_proxies REPLACES Rails' defaults, so the built-in private
     # ranges have to be carried along or the kamal-proxy hop stops being stripped.
-    assert (ActionDispatch::RemoteIp::TRUSTED_PROXIES - proxies).empty?,
-      "Rails' private ranges must be preserved, not replaced"
+    assert_empty(ActionDispatch::RemoteIp::TRUSTED_PROXIES - proxies,
+      "Rails' private ranges must be preserved, not replaced")
   end
 
   test "arbitrary proxy CIDRs can be trusted" do

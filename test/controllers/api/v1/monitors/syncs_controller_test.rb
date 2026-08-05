@@ -26,7 +26,7 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
     entry = body["monitors"].first
     assert_equal "daily_digest", entry["registration_key"]
     assert_equal "pending", entry["status"]
-    assert entry["ping_url"].include?("/ping/")
+    assert_includes entry["ping_url"], "/ping/"
 
     monitor = @user.monitors.find_by(registration_key: "daily_digest")
     assert_equal "gem", monitor.source

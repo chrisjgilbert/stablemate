@@ -33,7 +33,6 @@ module QueryCountingTestHelper
 
     assert before_at, "expected a statement matching #{before.inspect}, and none was issued"
     assert after_at, "expected a statement matching #{after.inspect}, and none was issued"
-    assert before_at < after_at,
-      "expected #{before.inspect} to be issued before #{after.inspect}, but it came after"
+    assert_operator before_at, :<, after_at, "expected #{before.inspect} to be issued before #{after.inspect}, but it came after"
   end
 end

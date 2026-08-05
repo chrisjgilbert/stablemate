@@ -63,7 +63,7 @@ class MonitorsTest < ApplicationSystemTestCase
     within "##{ActionView::RecordIdentifier.dom_id(monitor, :row)}" do
       # The row's link covers the whole row (before:inset-0), so a click anywhere
       # on it — over the sparkline, not just the name — resolves to this link.
-      assert find("a[href='#{monitor_path(monitor)}']")[:class].include?("before:inset-0")
+      assert_includes find("a[href='#{monitor_path(monitor)}']")[:class], "before:inset-0"
       click_on monitor.name
     end
 

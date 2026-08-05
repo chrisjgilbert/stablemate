@@ -74,6 +74,10 @@ group :development, :test do
 
   # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
   gem "rubocop-rails-omakase", require: false
+  # Minitest-specific cops. Omakase doesn't include them, so the smells this
+  # ledger has been removing by hand — vacuous assertions, assert(x == y),
+  # a test with no assertion at all — had nothing stopping them coming back.
+  gem "rubocop-minitest", require: false
 end
 
 group :development do

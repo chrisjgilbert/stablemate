@@ -78,7 +78,7 @@ class SignupTest < ActiveSupport::TestCase
 
       assert_kind_of WaitlistSignup, result
       assert result.persisted?
-      assert result.errors.empty?, "duplicate waitlist signup must not surface errors"
+      assert_empty result.errors, "duplicate waitlist signup must not surface errors"
     end
   end
 
@@ -146,7 +146,7 @@ class SignupTest < ActiveSupport::TestCase
       assert insert, "expected the signup to insert the user"
       assert counts.any? { |i| i > lock && i < insert },
         "the cap decision must be re-made under the lock, BEFORE the INSERT it gates"
-      assert lock < insert, "the INSERT must run under the lock, not before it"
+      assert_operator lock, :<, insert, "the INSERT must run under the lock, not before it"
     end
   end
 

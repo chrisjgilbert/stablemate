@@ -255,12 +255,23 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
 
   test "mini_ticks maps the last 16 ping events to up and down ticks" do
     18.times do |i|
-      @monitor.ping_events.create!(received_at: i.minutes.ago, kind: i.even? ? "success" : "failure")
+      # Alternating, EXCEPT the two that fall outside the window (17 and 16
+      # minutes ago), which are both failures. Strict alternation on its own
+      # can't tell the newest 16 from the oldest 16 — both windows read
+      # down,up,…,up — so the odd pair out is what pins which 16 were picked.
+      kind = i >= 16 ? "failure" : (i.even? ? "success" : "failure")
+      @monitor.ping_events.create!(received_at: i.minutes.ago, kind:)
     end
 
     ticks = @monitor.mini_ticks
 
-    assert_equal 16, ticks.size
-    assert(ticks.all? { |t| %w[up down].include?(t) })
+    # The 16 most recent events, oldest→newest (the direction the sparkline is
+    # drawn in), so the two oldest of the 18 are dropped off the front. Asserting
+    # the actual sequence rather than "every entry is up or down": the latter
+    # holds however the ticks are ordered, so it would pass with the sparkline
+    # drawn backwards or with the wrong 16 events picked.
+    expected = 15.downto(0).map { |i| i.even? ? "up" : "down" }
+
+    assert_equal expected, ticks
   end
 end
