@@ -76,6 +76,13 @@ class DeploymentConfigTest < ActiveSupport::TestCase
     assert_equal %w[a.test b.test c.test], config.allowed_hosts
   end
 
+  test "a degenerate host entry never becomes a nil rule in config.hosts" do
+    config = config_for("STABLEMATE_HOSTS" => ":,  :  ,real.test")
+
+    assert_equal %w[real.test], config.allowed_hosts
+    assert_not_includes config.allowed_hosts, nil
+  end
+
   # --- trusted proxies -----------------------------------------------------
 
   test "no proxies are trusted beyond Rails' own private ranges by default" do

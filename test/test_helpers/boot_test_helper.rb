@@ -21,7 +21,21 @@ module BootTestHelper
     )
     assert status.success?, "app failed to boot with env #{env.keys.inspect}: #{err}"
 
-    # The last line only — anything the boot itself logged to stdout comes first.
-    JSON.parse(out.lines.last)
+    # The script's JSON shares stdout with whatever the boot itself logged, and a
+    # log line can land AFTER it as easily as before (production logs to STDOUT).
+    # So take the last line that is actually the payload, not the last line — and
+    # when there isn't one, say so with the output attached. A bare
+    # JSON::ParserError on a tagged log line reads like the app failed to boot,
+    # which is exactly the wrong place to start looking.
+    payload = out.lines.reverse_each.find { |line| line.start_with?("{") }
+    assert payload, <<~MESSAGE
+      no JSON payload in the boot output for env #{env.keys.inspect}
+      --- stdout ---
+      #{out}
+      --- stderr ---
+      #{err}
+    MESSAGE
+
+    JSON.parse(payload)
   end
 end

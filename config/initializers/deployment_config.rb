@@ -61,7 +61,9 @@ module Stablemate
       hosts = []
       hosts << host if fetch("STABLEMATE_HOST")
       hosts.concat(list("STABLEMATE_HOSTS"))
-      hosts.map { |entry| entry.split(":").first }
+      # compact because a degenerate entry (":") strips to nil, and a nil in
+      # config.hosts is a Host-header rule that can never match anything.
+      hosts.filter_map { |entry| entry.split(":").first }
     end
 
     def host_authorization? = allowed_hosts.any?

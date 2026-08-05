@@ -104,7 +104,9 @@ Rails.application.configure do
   #                                        without a redeploy)
   # Whatever is listed is ADDED to Rails' private ranges (which already cover the
   # kamal-proxy hop). Cloudflare ranges: https://www.cloudflare.com/ips/
-  config.action_dispatch.trusted_proxies = deployment.trusted_proxies if deployment.trusted_proxies
+  if (trusted_proxies = deployment.trusted_proxies)
+    config.action_dispatch.trusted_proxies = trusted_proxies
+  end
 
   # Outgoing SMTP. A self-hoster wires this entirely from the environment (no
   # in-repo credentials needed). The managed Kamal instance keeps storing SMTP in
