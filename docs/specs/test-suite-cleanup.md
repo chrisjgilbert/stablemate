@@ -25,7 +25,7 @@ Actions is green → tick the boxes here → next chunk.
 
 | # | Chunk | Finding | Status | PR |
 |---|-------|---------|--------|-----|
-| 1 | Adopt `minitest-mock`; retire the hand-rolled method/ENV stubs | #3 | **TODO** | — |
+| 1 | Adopt `minitest-mock`; retire the hand-rolled method/ENV stubs | #3 | **IN REVIEW** | #74 |
 | 2 | Finish the half-done extractions; kill `User.take` | #5, #6 | **TODO** | — |
 | 3 | Stop monkey-patching globals in the job tests | #4 | **TODO** | — |
 | 4 | Humble-Object the production env config; retire 8 boots | #2 | **TODO** | — |
@@ -58,11 +58,30 @@ The pattern is also spreading: chunk 5 of launch-readiness added a third family
 (`with_cloudflare_analytics_token`, an ENV save/restore) before this review
 landed, and `non_prod_mail_guard_test.rb` already had its own copy.
 
-- [ ] `gem "minitest-mock"` in the test group
-- [ ] `Stablemate.stub_billing` / `stub_slack` / `stub_price_id_pro` → `Object#stub`
-- [ ] stop reopening the production `Stablemate` module to add test-only methods
-- [ ] `without_pay_stripe_network` → `Object#stub`
-- [ ] one shared `with_env` for the ENV gates (Cloudflare token, mail allowlist)
+- [x] `gem "minitest-mock"` in the test group
+- [x] `Stablemate.stub_billing` / `stub_slack` / `stub_price_id_pro` → `Object#stub`
+- [x] stop reopening the production `Stablemate` module to add test-only methods
+      (the fake credentials moved to `TestCredentials` too)
+- [x] `without_pay_stripe_network` → `Object#stub`
+- [x] one shared `with_env` for the ENV gates (Cloudflare token, mail allowlist)
+- [x] `stablemate_livemode_test` still hand-rolled the same pattern — caught by
+      the review pass, now stubbed like the rest
+
+**`test_helper.rb`: -105/+4 lines; `define_singleton_method` count 12 → 0.**
+
+**What the gem brings with it.** `Object#stub` saves the original under a fixed
+`__minitest_stub__<name>` alias, so stubbing the same method on the same object
+twice corrupts the saved copy: the unwind raises `NameError` and leaves the
+method UNDEFINED for the rest of that worker. The hand-rolled version nested
+fine, so this constraint is new. Nothing nests today, and `#stub_gate` now
+refuses it up front rather than leaving a `NameError` to be decoded later.
+
+**A note on the system-suite flakiness seen while shipping this.** Two system
+tests failed mid-chunk and briefly looked like a regression. They were not: the
+runs had been executed concurrently with another full suite, and wall time had
+doubled (30s → 60-70s) from CPU contention. Run sequentially, both `main` and
+this branch are 5/5 green. The suite is somewhat load-sensitive — worth knowing
+before blaming a diff for it.
 
 **Keep, do not touch:** `stub_const` (36 sites) is Rails' own
 `ActiveSupport::Testing::ConstantStubbing`, and the WebMock + `StripeApiStubs`
