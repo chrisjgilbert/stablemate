@@ -28,7 +28,7 @@ Actions is green → tick the boxes here → next chunk.
 | 1 | Adopt `minitest-mock`; retire the hand-rolled method/ENV stubs | #3 | **IN REVIEW** | #77 |
 | 2 | Finish the half-done extractions; kill `User.take` | #5, #6 | **IN REVIEW** | #78 |
 | 3 | Stop monkey-patching globals in the job tests | #4 | **IN REVIEW** | #79 |
-| 4 | Humble-Object the production env config; retire 8 boots | #2 | **TODO** | — |
+| 4 | Humble-Object the production env config; retire 8 boots | #2 | **IN REVIEW** | #80 |
 | 5 | Shrink the monitors General Fixture | #1 | **TODO** | — |
 | 6 | `rubocop-minitest` to stop the regressions | #7 | **TODO** | — |
 
@@ -148,11 +148,31 @@ coercion and no seam, so proving "blank `SMTP_PORT` falls back to 587" costs a
 full production boot. Dropping `rails/all` in chunk 5 shaved only ~0.4s/boot —
 you cannot optimise your way out from the boot side.
 
-- [ ] extract the env→config mapping to a PORO taking an env hash
-- [ ] the 8 production boots become in-process unit tests
-- [ ] keep **one** boot smoke test proving production boots and wires it in
-- [ ] `boot_test_helper.rb:29` `JSON.parse(out.lines.last)` — fail with a useful
-      message when an initializer logs to stdout
+- [x] extract the env→config mapping to a PORO taking an env hash
+      (`Stablemate::DeploymentConfig`)
+- [x] the 8 production boots become in-process unit tests
+- [x] keep **one** boot smoke test proving production boots and wires it in
+      (two, in fact: configured to the hilt, and nothing set at all — the shape
+      a self-hoster meets first)
+- [x] `boot_test_helper.rb` `JSON.parse(out.lines.last)` — now takes the last
+      line that IS the payload, and fails with the output attached when there
+      is none
+
+| | before | after |
+|---|---|---|
+| the 4 boot-based files | 41.6s | **16.4s** |
+| `production_env_config_test.rb` | 34.4s (8 boots) | **9.4s** (2 boots) |
+| the rules themselves | — | **1.4s** (19 in-process cases) |
+| whole non-system suite | 15.9s | **9.0s** |
+
+Coverage went **up** while the clock came down: 21 cases against 9.
+
+`/security-review` was run on this chunk (it touches `force_ssl`, host
+authorization and `trusted_proxies`, which feeds `remote_ip` → the ping rate
+limiter and the session audit log). No findings at or above its bar; the
+extraction was confirmed behaviour-preserving rule by rule. Verified
+independently against real production boots: a blank `STABLEMATE_FORCE_SSL`
+still forces SSL, and Rails' private proxy ranges are still prepended.
 
 ## Chunk 5 — Shrink the monitors General Fixture (finding #1)
 
