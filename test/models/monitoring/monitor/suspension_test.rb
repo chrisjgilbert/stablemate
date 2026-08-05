@@ -105,6 +105,37 @@ class Monitoring::Monitor::SuspensionTest < ActiveSupport::TestCase
     assert_includes monitor.project.user.monitors.counting_toward_cap, monitor
   end
 
+  # The predicate naming the branch reactivate! takes: was this monitor paused by
+  # its user before the downgrade suspended it? Only true while suspended — the
+  # memory is cleared on restore, and an unsuspended monitor has none.
+  test "suspended_from_paused? is true only for a monitor suspended while paused" do
+    monitor = monitors(:up)
+    monitor.pause!
+    monitor.suspend!
+
+    assert monitor.suspended_from_paused?
+
+    monitor.reactivate!
+    refute monitor.suspended_from_paused?
+  end
+
+  test "suspended_from_paused? is false for a monitor suspended while live" do
+    monitor = monitors(:up)
+    monitor.suspend!
+
+    refute monitor.suspended_from_paused?
+  end
+
+  # Monitors suspended before the memory column existed read nil, and must take
+  # the re-evaluating branch rather than be guessed into a pause.
+  test "suspended_from_paused? is false when nothing was remembered" do
+    monitor = monitors(:up)
+    monitor.suspend!
+    monitor.update_column(:status_before_suspension, nil)
+
+    refute monitor.suspended_from_paused?
+  end
+
   # Re-suspending an already-suspended monitor must not overwrite the memory with
   # "suspended" — that would lose the pause on the next re-upgrade.
   test "suspend! is idempotent about the status it remembers" do

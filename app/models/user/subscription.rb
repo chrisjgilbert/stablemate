@@ -174,7 +174,7 @@ class User
       slots = remaining_monitor_slots
       return if slots <= 0
 
-      scope = monitors.where(status: "suspended").order(:created_at)
+      scope = monitors.suspended.order(:created_at)
       scope = scope.limit(slots) unless slots == Float::INFINITY
       scope.find_each(&:reactivate!)
     end

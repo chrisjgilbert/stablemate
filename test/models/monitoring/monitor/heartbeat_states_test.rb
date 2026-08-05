@@ -22,6 +22,17 @@ class Monitoring::Monitor::HeartbeatStatesTest < ActiveSupport::TestCase
     end
   end
 
+  # The complement of counting_toward_cap: the downgrade paths ask for exactly
+  # this set, and were each spelling it out as a raw status literal.
+  test "suspended selects the suspended monitors and is the complement of counting_toward_cap" do
+    suspended = monitors(:pending)
+    suspended.update!(status: "suspended")
+
+    assert_includes Monitoring::Monitor.suspended, suspended
+    refute_includes Monitoring::Monitor.suspended, @up
+    refute_includes Monitoring::Monitor.counting_toward_cap, suspended
+  end
+
   test "overdue excludes pending monitors regardless of next_due_at" do
     pending = monitors(:pending)
     pending.update_columns(next_due_at: 1.year.ago)
