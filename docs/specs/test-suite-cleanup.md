@@ -26,7 +26,7 @@ Actions is green → tick the boxes here → next chunk.
 | # | Chunk | Finding | Status | PR |
 |---|-------|---------|--------|-----|
 | 1 | Adopt `minitest-mock`; retire the hand-rolled method/ENV stubs | #3 | **IN REVIEW** | #77 |
-| 2 | Finish the half-done extractions; kill `User.take` | #5, #6 | **TODO** | — |
+| 2 | Finish the half-done extractions; kill `User.take` | #5, #6 | **IN REVIEW** | #78 |
 | 3 | Stop monkey-patching globals in the job tests | #4 | **TODO** | — |
 | 4 | Humble-Object the production env config; retire 8 boots | #2 | **TODO** | — |
 | 5 | Shrink the monitors General Fixture | #1 | **TODO** | — |
@@ -89,14 +89,28 @@ layer is the correct "stub at the real boundary" pattern.
 
 ## Chunk 2 — Finish the half-done extractions (findings #5, #6)
 
-- [ ] `sql_executed_during` — byte-identical in `pausing_test.rb:124` and
-      `suspension_test.rb:204` → `QueryCountingTestHelper`
-- [ ] `monitors_controller_test.rb:41` hand-rolls the counter that
+- [x] `sql_executed_during` — byte-identical in `pausing_test.rb` and
+      `suspension_test.rb` → `QueryCountingTestHelper`
+- [x] `monitors_controller_test.rb` hand-rolled the counter that
       `count_queries_matching` already provides (commit `a3eb26e` consolidated
       the others and missed this one)
-- [ ] `give_active_pro_subscription!` — 3 aliases of the shared
-      `give_pro_subscription!`, two of which add no meaning
-- [ ] `User.take` (3 sites) → `users(:alice)`; no `ORDER BY` means Postgres picks
+- [x] a **fourth** copy, in `signup_test.rb`, found by the review pass — it also
+      shadowed Rails' own `capture_sql` with different semantics
+- [x] the two lock-ordering tests duplicated the *assertion* as well as the
+      helper → `assert_sql_order`, a Custom Assertion that names the failure
+- [x] `give_active_pro_subscription!` — 3 aliases of the shared
+      `give_pro_subscription!`; two are gone, the third renamed after what it
+      returns
+- [x] `User.take` (3 sites) → `users(:alice)`; no `ORDER BY` means Postgres picks
+      (the remaining `User.take` is in a mailer *preview*, where any user will do)
+
+**All four SQL-capture copies now go through one helper.**
+
+The rewired dashboard N+1 guard was mutation-checked: reintroducing a genuine
+per-monitor query in `mini_ticks_for` fails it with its own message; the tree is
+clean afterwards. The first mutation attempt (blanking `@mini_ticks`) did *not*
+fail it — `_list.html.erb` passes `|| []`, and `[]` is truthy, so `kinds ||=`
+never falls back. Worth knowing before trusting that guard's shape.
 
 ## Chunk 3 — Stop monkey-patching globals (finding #4)
 

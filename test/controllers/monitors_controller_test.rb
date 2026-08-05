@@ -36,12 +36,7 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
       @alices_project.monitors.create!(name: "extra-#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
     end
 
-    counts = lambda do
-      n = 0
-      callback = ->(*, payload) { n += 1 if payload[:sql] =~ /ping_events/i && payload[:name] != "SCHEMA" }
-      ActiveSupport::Notifications.subscribed(callback, "sql.active_record") { get monitors_path }
-      n
-    end
+    counts = -> { count_queries_matching(/ping_events/i) { get monitors_path } }
 
     baseline = counts.call
     @alices_project.monitors.create!(name: "another", expected_interval_seconds: 3600, grace_period_seconds: 300)
