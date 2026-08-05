@@ -1,9 +1,6 @@
 <%#
-  Detail "Uptime — last N days" panel (design-system.md §3): the UptimeBar fed
-  real data from the rollups (Monitoring::Monitor::Uptime), trailed by the
-  overall uptime %. The window is ping_retention_days (Stablemate::PING_RETENTION)
-  so this panel, the landing page, and pruning can't drift apart.
-  Locals: monitor.
+  The window is ping_retention_days so this panel, the landing page, and pruning
+  can't drift apart. Locals: monitor.
 %>
 <% series = monitor.uptime_series(days: ping_retention_days) %>
 <div class="rounded-xl border border-border bg-surface p-6 shadow-sm" data-testid="uptime-panel">

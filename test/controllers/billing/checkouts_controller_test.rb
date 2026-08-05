@@ -1,16 +1,14 @@
 require "test_helper"
 
-# Upgrade checkout sub-resource (issue #19). End-to-end through the real Stripe
-# SDK + Pay: we stub api.stripe.com at the HTTP boundary (WebMock) and assert we
-# redirect the user to the hosted Checkout URL. No live network (test_helper locks
-# it down); the genuine request/response code runs.
+# End-to-end through the real Stripe SDK + Pay: we stub api.stripe.com at the HTTP
+# boundary, so the genuine request/response code runs with no live network.
 class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
   include StripeApiStubs
 
   setup { @user = users(:bob) }
 
   # Fixed ids so the Stripe stubs and assert_requested matchers below can name the
-  # same subscription; otherwise the shared helper (PaySubscriptionMirror).
+  # same subscription.
   def give_pro_subscription!(status: "active")
     super(status: status, customer_id: "cus_test_123", subscription_id: "sub_test_123")
   end
@@ -53,13 +51,9 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # …but `incomplete` is NOT that case. It is a subscription whose very first
-  # payment never completed (typically an abandoned or failed SCA challenge): it
-  # has never billed, and Stripe expires it to incomplete_expired within ~24h. A
-  # user in that state is someone actively trying to pay us — blocking their
-  # retry with "You're already on Pro." is a certain lost upgrade, traded against
-  # a double-billing risk that cannot occur (nothing has been charged, and the
-  # stale attempt expires on its own).
+  # …but `incomplete` is NOT that case: the first payment never completed, so it
+  # has never billed and Stripe expires it within ~24h. Blocking that user's retry
+  # trades a certain lost upgrade against a double-billing risk that cannot occur.
   test "an incomplete Pro subscription does not block the user retrying checkout" do
     with_billing_enabled do
       Stablemate.stub(:stripe_price_id_pro, "price_pro_123") do
@@ -75,12 +69,10 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # …but letting them retry must not leave the abandoned attempt alive behind them.
-  # Stripe gives the customer ~23h to authenticate that first invoice and emails
-  # them a link straight to it, so "retry checkout, then complete the OLD invoice
-  # from the email" would end in two active Pro subscriptions — the double billing
-  # the guard exists to stop. Tear the dangling attempt down first; it has never
-  # been charged, so cancelling it costs the user nothing.
+  # …but letting them retry must not leave the abandoned attempt alive behind them:
+  # Stripe emails the customer a link straight back to that first invoice, so
+  # "retry checkout, then complete the OLD invoice" would end in two active Pro
+  # subscriptions.
   test "retrying checkout cancels the abandoned incomplete subscription first" do
     with_billing_enabled do
       Stablemate.stub(:stripe_price_id_pro, "price_pro_123") do
@@ -115,8 +107,7 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
   test "creating a checkout redirects to the Stripe hosted session" do
     with_billing_enabled do
       Stablemate.stub(:stripe_price_id_pro, "price_pro_123") do
-        # Pre-seed a Stripe customer id so Pay skips customer creation; the session
-        # create is the HTTP call we stub and assert the redirect from.
+        # Pre-seed a Stripe customer id so Pay skips customer creation.
         @user.set_payment_processor(:stripe).update!(processor_id: "cus_test_123")
         sign_in @user
 

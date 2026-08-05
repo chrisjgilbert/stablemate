@@ -1,21 +1,6 @@
 module Monitoring
   class Monitor
-    # Operation object: record a single ping for a monitor.
-    #
-    # Reached via `monitor.check_in!(...)`. Full Phase 1 form:
-    #   1. create a success PingEvent, advance last_ping_at / next_due_at;
-    #   2. transition by current status:
-    #      - pending -> up;
-    #      - down    -> up: resolve the open incident, create + dispatch a
-    #                       `recovered` Notification;
-    #      - up      -> up: timestamps only, no alert (no per-ping noise);
-    #      - paused/
-    #        suspended     : record the event + timestamps but DO NOT change
-    #                       status or alert — both mean "don't monitor" (user-paused
-    #                       or plan-suspended), so a stray ping must not silently
-    #                       resume it. For `suspended` this also guards the billing
-    #                       cap. (Pinned by tests.)
-    #   3. broadcast a Turbo Stream badge/row update over Solid Cable.
+    # Record a single successful ping, reached via `monitor.check_in!(...)`.
     class CheckIn
       def initialize(monitor)
         @monitor = monitor
@@ -51,11 +36,11 @@ module Monitoring
         def apply_transition(received_at)
           case @monitor.status
           when "paused", "suspended"
-            # paused/suspended record the event but never transition or alert: the
-            # monitor is deliberately not monitored (user-paused or plan-suspended),
-            # so a stray ping must not silently resume it. For `suspended` this also
-            # guards the billing cap — reactivating here would let a downgraded
-            # over-cap user monitor for free just by continuing to ping.
+            # Record the event but never transition or alert: the monitor is
+            # deliberately not monitored, so a stray ping must not silently resume
+            # it. For `suspended` this also guards the billing cap — reactivating
+            # here would let a downgraded over-cap user monitor for free just by
+            # continuing to ping.
             nil
           when "down"
             recover(received_at)
@@ -67,19 +52,14 @@ module Monitoring
 
         def recover(received_at)
           @monitor.status = "up"
-          # Resolve the open incident (the open-incident invariant means there is
-          # at most one) and attach the recovered Notification to *that* incident.
           # If somehow there is no open incident, still flip to up but emit NO
           # recovery alert — "exactly one recovered email on resolution" means no
-          # incident-less recovery emails (spec §3.7). Returns the notification to
-          # dispatch, or nil.
+          # incident-less recovery emails (spec §3.7).
           resolved = @monitor.open_incident
           return nil unless resolved
 
           resolved.resolve!(at: received_at)
-          # Concurrent recoveries are already serialised by with_lock (the second
-          # caller finds no open incident and returns above). This guard is the
-          # backstop for an anomalous state — an open incident that somehow already
+          # Backstop for an anomalous state — an open incident that somehow already
           # carries a recovered notification — so the public ping path returns 200
           # rather than a 500 from the partial unique index on (incident_id, event).
           return nil if @monitor.notifications.exists?(incident: resolved, event: "recovered")

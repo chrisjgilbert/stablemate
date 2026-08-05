@@ -62,7 +62,6 @@ class UptimeHistoryTest < ApplicationSystemTestCase
     end
   end
 
-  # S9 — Dashboard sparkline: a row renders MiniTicks (16 ticks) + uptime %.
   test "S9: dashboard row renders the mini-ticks sparkline and an uptime percent" do
     monitor = @project.monitors.create!(
       name: "Sparkline job",

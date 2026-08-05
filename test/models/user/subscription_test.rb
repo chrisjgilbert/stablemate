@@ -1,7 +1,6 @@
 require "test_helper"
 
-# User::Subscription concern (issue #19) — plan sync and the suspend/reactivate
-# side effects. Pay is wrapped; we drive the mirror directly (no Stripe API).
+# Pay is wrapped; we drive the mirror directly (no Stripe API).
 class User::SubscriptionTest < ActiveSupport::TestCase
   ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze
 
@@ -37,11 +36,9 @@ class User::SubscriptionTest < ActiveSupport::TestCase
     end
   end
 
-  # The single "is there a Pro here?" question, promoted off
-  # Billing::DowngradesController so the downgrade copy, the billing page's
-  # affordances and every Upgrade CTA cannot drift apart. It has to answer YES for
-  # past_due — plan Free, Stripe still dunning — which is the case each of those
-  # surfaces got wrong on its own.
+  # The single "is there a Pro here?" question, so the downgrade copy, the billing
+  # page's affordances and every Upgrade CTA cannot drift apart. It has to answer
+  # YES for past_due — plan Free, Stripe still dunning.
   test "billed_for_pro? is true whenever Stripe could still charge for Pro" do
     with_billing_enabled do
       refute @user.billed_for_pro?, "a Free account with no subscription owes nothing"
@@ -69,10 +66,9 @@ class User::SubscriptionTest < ActiveSupport::TestCase
     end
   end
 
-  # can_upgrade_to_pro? is the eligibility rule EVERY upgrade CTA reads (billing
-  # page, pricing page, the at-cap dashboard nudge, the cap-skip banner). It was
-  # plan-only, so all four offered a past_due user a button that bounced off
-  # CheckoutsController with "You're already on Pro."
+  # The eligibility rule EVERY upgrade CTA reads. It was plan-only, so all four
+  # offered a past_due user a button that bounced off CheckoutsController with
+  # "You're already on Pro."
   test "can_upgrade_to_pro? refuses an account Stripe is still billing" do
     with_billing_enabled do
       give_pro_subscription!(status: "past_due")
@@ -102,7 +98,6 @@ class User::SubscriptionTest < ActiveSupport::TestCase
         @user.update!(plan: "pro")
         monitors = (Stablemate::FREE_PLAN_MONITOR_LIMIT + 2).times.map { |i| @project.monitors.create!(name: "M#{i}", **ATTRS) }
 
-        # No active Pro subscription ⇒ sync lands on free.
         @user.sync_plan_from_subscription!
         @user.reload
 
@@ -112,7 +107,6 @@ class User::SubscriptionTest < ActiveSupport::TestCase
         assert_equal Stablemate::FREE_PLAN_MONITOR_LIMIT + 2, @user.monitors.counting_toward_cap.count
         monitors.each { |m| refute m.reload.suspended? }
 
-        # A choose-N decision is owed by the deadline.
         assert @user.awaiting_downgrade_choice?
         assert_in_delta Stablemate::DOWNGRADE_GRACE_PERIOD.from_now, @user.downgrade_choice_deadline_at, 1.second
       end
@@ -213,7 +207,6 @@ class User::SubscriptionTest < ActiveSupport::TestCase
       @user.sync_plan_from_subscription! # locked, grace (nothing suspended)
       assert @user.reload.must_choose_downgrade?
 
-      # Delete active monitors until the total fits under the Free cap.
       @user.monitors.counting_toward_cap.order(:created_at).limit(3).each(&:destroy)
 
       @user.release_downgrade_lock_if_within_cap!
@@ -225,13 +218,10 @@ class User::SubscriptionTest < ActiveSupport::TestCase
     end
   end
 
-  # M3 — a voluntary choose-N downgrade can race its own cancel webhook: the
-  # webhook lands between User::Downgrade#to_free!'s Stripe cancel and its
-  # suspends, still sees every monitor active, and opens an involuntary lock the
-  # user has in fact already answered. The release must then let them out —
-  # counting only monitors that occupy a cap slot, as everywhere else (locked
-  # decision #8). Counting suspended ones too kept the account "over cap" forever
-  # and left the user re-picking a choice they'd already made.
+  # M3 — a voluntary choose-N downgrade can race its own cancel webhook: the webhook
+  # lands between the Stripe cancel and the suspends, still sees every monitor
+  # active, and opens an involuntary lock the user has in fact already answered.
+  # Counting suspended monitors toward the cap kept the account "over cap" forever.
   test "the choose-N lock releases once suspensions put the account within the cap" do
     with_billing_enabled do
       @user.update!(plan: "pro")
@@ -257,7 +247,6 @@ class User::SubscriptionTest < ActiveSupport::TestCase
   test "restore_suspended_monitors! reactivates only up to the available Pro slots" do
     with_billing_enabled do
       @user.update!(plan: "pro")
-      # 3 active + suspend 2 more than the Pro cap allows back.
       stub_const(Stablemate, :PRO_PLAN_MONITOR_LIMIT, 4) do
         active = 3.times.map { |i| @project.monitors.create!(name: "A#{i}", **ATTRS) }
         suspended = 3.times.map { |i| m = @project.monitors.create!(name: "S#{i}", **ATTRS); m.suspend!; m }

@@ -1,14 +1,11 @@
 <% content_for :title, "Monitors" %>
 <% count = @monitors.size # relation already loaded; no extra COUNT query %>
 <% at_cap = current_user.at_monitor_cap? %>
-<%# Asked once for the whole page. can_upgrade_to_pro? consults Pay's subscription
-    mirror (a past_due account reads Free while Stripe still bills it), so it costs
-    a query — and the cap-skip banner below reads it once per project. Same reason
-    @mini_ticks is preloaded: nothing on this page may scale with the row count. %>
+<%# Asked once for the whole page: can_upgrade_to_pro? costs a query, and the
+    cap-skip banner below reads it once per project. %>
 <% can_upgrade = at_cap && current_user.can_upgrade_to_pro? %>
 
 <% if @projects.empty? %>
-  <%# First run: no project yet, so onboard through project creation (§6, §13-S6). %>
   <%= render "projects/first_run" %>
 <% else %>
   <div class="flex items-center justify-between mb-6">
@@ -29,10 +26,8 @@
     <% end %>
   </div>
 
-  <%# User-level cap note (unchanged — the cap stays per-user, §7). %>
   <% if at_cap %>
     <% if can_upgrade %>
-      <%# Hosted tier: the at-limit prompt is an upgrade nudge (PRD §5.6). %>
       <div class="mb-6 flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 shadow-sm" data-testid="at-limit-note">
         <p class="text-[13px] text-muted">
           You're at the <%= current_user.monitor_limit %>-monitor limit for the Free plan.
@@ -43,19 +38,16 @@
               data: { testid: "upgrade-button" } %>
       </div>
     <% else %>
-      <%# Self-host, Pro at the 100 cap, or an account Stripe is still billing (a
-          past_due one reads Free): matter-of-fact, because there is no upgrade
-          this account can actually buy right now. The past_due case has its own
-          route out — the nav's Billing link, where the portal is. %>
+      <%# No upgrade this account can actually buy right now. The past_due case
+          has its own route out — the nav's Billing link, where the portal is. %>
       <p class="mb-6 text-[13px] text-muted" data-testid="at-limit-note">
         <%= monitor_limit_note(current_user) %> Delete a monitor to add another.
       </p>
     <% end %>
   <% end %>
 
-  <%# One headed section per project — every project renders, even with zero active
-      rows, so a project never silently vanishes (§2). Keyed on the project_id
-      column (no association load), looked up against @projects (§6). %>
+  <%# Every project renders, even with zero active rows, so a project never
+      silently vanishes. %>
   <% active_by_project = @monitors.group_by(&:project_id) %>
   <% @projects.each do |project| %>
     <% rows = active_by_project[project.id] || [] %>
@@ -68,7 +60,6 @@
           <span class="font-mono text-[12px] text-muted"><%= rows.size %></span>
         </div>
         <% unless at_cap %>
-          <%# Per-project add — pre-fills the create form's project selector (§2). %>
           <%= link_to "New monitor →", new_monitor_path(monitor: { project_id: project.id }),
                 class: "font-mono text-[12px] text-brand hover:text-brand-hover" %>
         <% end %>

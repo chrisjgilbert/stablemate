@@ -3,10 +3,10 @@
 require_relative "registrars/solid_queue_recurring"
 
 module Stablemate
-  # Operation (architecture.md §9): build registration tuples from the registrar,
-  # POST them to /api/v1/monitors/sync, and cache the returned ping URLs so Layer
-  # 1 can map job -> URL locally. Idempotent. Runs on boot + via `rails
-  # stablemate:sync`. A sync failure logs a warning and never crashes boot.
+  # Build registration tuples from the registrar, POST them to
+  # /api/v1/monitors/sync, and cache the returned ping URLs so the subscriber can
+  # map job -> URL locally. Idempotent; a sync failure logs a warning and never
+  # crashes boot.
   class Registration
     include Logging
 
@@ -32,10 +32,8 @@ module Stablemate
       nil
     end
 
-    # Read-only: load the caller's existing monitors' ping URLs (GET /monitors)
-    # into the cache WITHOUT registering anything from recurring.yml. This is the
-    # register_on_boot = false path — Layer 1 can still map job -> URL for monitors
-    # the user manages themselves. Returns the cache on success, or nil on failure
+    # The register_on_boot = false path: load existing monitors' ping URLs into the
+    # cache WITHOUT registering anything from recurring.yml. Returns nil on failure
     # (logged, swallowed — boot continues).
     def refresh_ping_urls!
       cache_ping_urls(@client.list_monitors)
@@ -58,13 +56,10 @@ module Stablemate
         Stablemate.merge_ping_urls(pairs)
       end
 
-      # The server registers what it can and returns the rest under `skipped`
-      # (over the account's monitor cap, or a tuple it judged malformed). Those
-      # jobs are NOT monitored — the same silent hole the registrar refuses to
-      # leave when it can't size a schedule — so name each one and say why,
-      # rather than dropping the list on the floor. Logged after the URL cache
-      # is folded in, and defensively (a junk entry can't cost the caller its
-      # ping URLs).
+      # The server registers what it can and returns the rest under `skipped`.
+      # Those jobs are NOT monitored, so name each one and say why rather than
+      # dropping the list on the floor. Logged after the URL cache is folded in, so
+      # a junk entry can't cost the caller its ping URLs.
       def log_skipped(response)
         Array(response["skipped"]).each do |entry|
           next unless entry.is_a?(Hash)

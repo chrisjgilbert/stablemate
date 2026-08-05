@@ -1,15 +1,11 @@
 class User
-  # Operation: post a Slack message to the team when this user has just signed
-  # up. Config-gated like the launch cap (config/initializers/stablemate.rb) —
-  # a no-op unless SLACK_WEBHOOK_URL is configured, so self-hosters never see
-  # it. Delivery errors (including a non-2xx response) are logged, never
-  # raised, so a Slack outage can never fail a sign-up.
+  # Post a Slack message to the team when this user has just signed up. Delivery
+  # errors (including a non-2xx response) are logged, never raised, so a Slack
+  # outage can never fail a sign-up.
   #
-  # Deliberately a plain HTTP POST rather than the Notifications::Channel
-  # Command pattern (app/models/notifications/): that system dispatches off a
-  # persisted Notification row with a required belongs_to :monitor, scoped to
-  # monitor incident alerts (architecture.md §5) — a sign-up isn't a monitor
-  # event, so it doesn't fit that contract.
+  # Deliberately a plain HTTP POST rather than the Notifications::Channel Command
+  # pattern: that system dispatches off a persisted Notification row with a
+  # required belongs_to :monitor, and a sign-up isn't a monitor event.
   class SignupAlert
     TIMEOUT = 5 # seconds — keeps a hung Slack endpoint from tying up a job worker
 
@@ -36,9 +32,9 @@ class User
         { text: "New Stablemate signup: #{escape(@user.email_address)}" }
       end
 
-      # Slack mrkdwn treats &, <, > specially (e.g. <url|label> renders a
-      # link); escape them so an email address can never be interpreted as
-      # formatting. https://api.slack.com/reference/surfaces/formatting#escaping
+      # Slack mrkdwn treats &, <, > specially (e.g. <url|label> renders a link);
+      # escape them so an email address can never be interpreted as formatting.
+      # https://api.slack.com/reference/surfaces/formatting#escaping
       def escape(text)
         text.to_s.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;")
       end

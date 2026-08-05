@@ -19,12 +19,11 @@ class PasswordsController < ApplicationController
 
   def update
     # Guard the PERMITTED password, not the raw param. A blank one is a no-op in
-    # has_secure_password (it neither clears nor sets the digest), so `update`
-    # would return true, log the user out everywhere, and claim "Password has been
-    # reset" while the old password still works. A non-scalar one (`password[]=…`)
-    # does exactly the same: it passes `.blank?` but strong parameters drop it, so
-    # `update` is handed an empty hash. Reading the guard off the attributes we
-    # actually write closes both. (WU-11)
+    # has_secure_password, so `update` would return true, log the user out
+    # everywhere, and claim "Password has been reset" while the old password still
+    # works. A non-scalar one (`password[]=…`) does the same: it passes `.blank?`
+    # but strong parameters drop it. Reading the guard off the attributes we
+    # actually write closes both.
     attributes = params.permit(:password, :password_confirmation)
 
     if attributes[:password].blank?

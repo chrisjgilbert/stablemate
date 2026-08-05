@@ -8,7 +8,6 @@ class MonitorsTest < ApplicationSystemTestCase
     @project.monitors.delete_all # start clean so the count is predictable
   end
 
-  # S3 — create a monitor (using a preset) and see the ping-URL card + curl snippet.
   test "S3: create a monitor and reveal the ping-URL card and curl snippet" do
     sign_in @alice
     first(:link, "New monitor").click
@@ -42,7 +41,6 @@ class MonitorsTest < ApplicationSystemTestCase
     refute_text "Paused"
   end
 
-  # S5 — rotate the token on the detail page; the displayed ping URL changes.
   test "S5: rotate the ping token changes the displayed ping URL" do
     monitor = @project.monitors.create!(name: "Rotatable", expected_interval_seconds: 3600, grace_period_seconds: 300)
     sign_in @alice

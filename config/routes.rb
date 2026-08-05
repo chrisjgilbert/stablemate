@@ -1,8 +1,4 @@
 Rails.application.routes.draw do
-  # Authentication (Rails 8 generator). The session resource is the sign-in/out
-  # endpoint; we add friendly /sign_in + /sign_up aliases per the design (R3).
-  # `only:` trims the generator's default seven-a-piece down to the actions the
-  # controllers implement — the rest routed to nothing.
   resource :session, only: %i[new create destroy]
   resources :passwords, param: :token, only: %i[new create edit update]
 
@@ -11,66 +7,52 @@ Rails.application.routes.draw do
   post "sign_up",  to: "registrations#create"
   resources :registrations, only: %i[new create]
 
-  # Non-blocking email verification link.
   get "verify/:token", to: "email_verifications#show", as: :email_verification
 
-  # The signed-in account page: who you are, and how to leave (WS-D). The nested
-  # password resource is a sub-resource rather than a custom verb, and is NOT the
-  # `resources :passwords` flow above — see Accounts::PasswordsController for the
-  # distinction.
+  # The nested password resource is NOT the `resources :passwords` flow above —
+  # see Accounts::PasswordsController for the distinction.
   resource :account, only: %i[show destroy] do
     resource :password, only: :update, module: :accounts
   end
 
-  # First-class projects: the grouping entity that owns monitors and the
-  # per-project API keys. Standard REST, tenant-scoped to current_user.projects.
-  # Keys are managed from a project's show page (Design B — a key is one app's
-  # identity), so issuance/revoke are a nested sub-resource. (docs/specs/projects.md §6)
+  # Keys are managed from a project's show page (a key is one app's identity), so
+  # issuance/revoke are a nested sub-resource.
   resources :projects do
     resources :api_keys, only: %i[create destroy], module: :projects
   end
 
-  # Authenticated monitor UI. CRUD plus the sub-resource controllers that replace
-  # custom verbs: pause/resume and rotate-token (architecture.md §7).
+  # CRUD plus the sub-resource controllers that replace custom verbs.
   resources :monitors do
     resource :pause, only: %i[create destroy], module: :monitors
     resource :ping_token, only: :update, module: :monitors
-    # Move a monitor between projects — a sub-resource, not a custom verb
-    # (CLAUDE.md rule 4). Manual monitors only (projects.md §6, §12-I).
     resource :project, only: :update, module: :monitors
   end
 
-  # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
-  # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", as: :rails_health_check
 
-  # API keys are per-project now (Design B, projects.md §12-E/§13-S9): they're
-  # generated and revoked from a project's show page. The old standalone
-  # settings/api_keys screen is gone — keep a redirect so any bookmark lands on the
-  # projects list, where the keys now live.
+  # API keys are per-project now: they're generated and revoked from a project's
+  # show page. The old standalone settings/api_keys screen is gone — keep a
+  # redirect so any bookmark lands on the projects list.
   namespace :settings do
     get "api_keys", to: redirect("/projects"), as: :api_keys
   end
 
-  # Hosted-tier billing (issue #19). The routes exist, but every billing
-  # controller is gated by Stablemate.billing_enabled? (Billing::BaseController):
-  # on a keyless self-host instance the whole namespace answers an opaque 404, so
-  # there is no billing surface to probe and no UI ever links here. Custom verbs
-  # are replaced by RESTful sub-resources: upgrade = create a checkout; manage
-  # card = create a portal session; downgrade = create the choose-5 selection.
+  # Every billing controller is gated by Stablemate.billing_enabled?
+  # (Billing::BaseController): on a keyless self-host instance the whole namespace
+  # answers an opaque 404. Custom verbs are replaced by RESTful sub-resources:
+  # upgrade = create a checkout; manage card = create a portal session;
+  # downgrade = create the choose-5 selection.
   namespace :billing do
     resource :subscription, only: :show, controller: "subscriptions"
     resource :checkout, only: :create, controller: "checkouts"
     resource :portal_session, only: :create, controller: "portal_sessions"
-    # The gated "choose your 5" downgrade (PRD §5.6): show the picker, then
-    # commit the chosen set. A singular sub-resource of the subscription.
     resource :downgrade, only: %i[new create], controller: "downgrades"
     # Stripe's signed, idempotent webhook — the only writer of User.plan.
     resource :webhook, only: :create, controller: "webhooks"
   end
 
   # Bearer-authed JSON API for the companion gem. Tenant-scoped to the API key's
-  # owner. Sync + read + token rotation; paths kept per the PRD. (architecture.md §7)
+  # owner; paths kept per the PRD.
   namespace :api do
     namespace :v1 do
       resources :monitors, only: %i[index show] do
@@ -85,21 +67,20 @@ Rails.application.routes.draw do
   end
 
   # Public ping hot path — the token is the credential. Both verbs so a bare
-  # `curl` works; recorded as a "create" of a ping. (architecture.md §7)
+  # `curl` works.
   match "/ping/:ping_token", to: "pings#create", via: %i[get post], as: :ping
 
-  # Public marketing pricing page (issue #45). Renders for everyone, signed in
-  # or not, regardless of the billing config-gate — it's marketing, not a
-  # billing surface (unlike the Billing:: namespace, which 404s when keyless).
+  # Renders for everyone, signed in or not, regardless of the billing config-gate
+  # — it's marketing, not a billing surface (unlike the Billing:: namespace, which
+  # 404s when keyless).
   get "pricing", to: "pages#pricing"
 
-  # Public legal documents (launch-readiness §4 / WS-C). Same shape as /pricing:
-  # published to everyone, signed in or not, and deliberately outside the billing
-  # config-gate — a self-hoster's users read the same terms as anyone else's.
+  # Same shape as /pricing, and deliberately outside the billing config-gate — a
+  # self-hoster's users read the same terms as anyone else's.
   get "terms",   to: "pages#terms"
   get "privacy", to: "pages#privacy"
 
-  # Defines the root path route ("/"). Anonymous visitors get the marketing
-  # landing page; signed-in users are redirected to their dashboard. (phase-4)
+  # Anonymous visitors get the marketing landing page; signed-in users are
+  # redirected to their dashboard.
   root "pages#home"
 end

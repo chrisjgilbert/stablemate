@@ -31,7 +31,7 @@ class LaunchHardeningTest < ApplicationSystemTestCase
   end
 
   # S16 — a user with the max monitors sees the at-limit treatment on the New
-  # monitor action and "5 / 5" on the dashboard, with no upgrade/pricing UI.
+  # monitor action and the dashboard, with no upgrade/pricing UI.
   test "S16: at the monitor limit, the dashboard and New action show the at-limit state with no pricing UI" do
     alice = users(:alice)
     project = alice.projects.sole

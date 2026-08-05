@@ -1,11 +1,10 @@
 # The two Honeybadger settings that are ours rather than the gem's: where the API
 # key comes from, and what an error report may carry off our infrastructure.
-# Everything else — env, root, insights — stays in config/honeybadger.yml.
 #
 # Honeybadger is a third party, so filtering is a privacy decision. Its defaults
 # cover only `password`, `password_confirmation` and `HTTP_AUTHORIZATION`, and it
-# picks up Rails' filter_parameters only for notices raised inside a request —
-# not in a job. Four fields leak separately, so each is closed separately:
+# picks up Rails' filter_parameters only for notices raised inside a request — not
+# in a job. Four fields leak separately, so each is closed separately:
 #
 #   1. PARAMS — reuse Rails' list verbatim so the two can't drift.
 #   2. HTTP_COOKIE — reported raw, and carries the signed session_id cookie.
@@ -28,17 +27,14 @@ redacted_ping_path = "/ping/[FILTERED]"
 
 Honeybadger.configure do |config|
   # Not in config/honeybadger.yml: that file is git-tracked and self-hosters clone
-  # it, so a literal there would ship our credential to everyone. ENV first, then
-  # credentials — the rule for every third-party secret. nil is supported; the gem
-  # drops the notice and a keyless instance runs normally with reporting off.
+  # it, so a literal there would ship our credential to everyone.
   #
   # ⚠️ OWNER ACTION: the key that used to live in the YAML is permanently in this
   # repository's git history and must be ROTATED in the Honeybadger dashboard.
   #
-  # Assigned only when we have one. A value set from `configure` outranks every
+  # Assigned only when we have one: a value set from `configure` outranks every
   # other source the gem reads, so an unconditional assignment would push nil over
-  # a key a self-hoster set the gem's own way and silently switch their reporting
-  # off.
+  # a key a self-hoster set the gem's own way and silently switch reporting off.
   if (api_key = Stablemate.honeybadger_api_key)
     config.api_key = api_key
   end

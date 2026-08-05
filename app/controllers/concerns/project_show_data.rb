@@ -1,7 +1,5 @@
-# Loads everything projects/show renders for @project: its monitors (with the
-# preloaded sparkline ticks the reused _row partial needs) and its masked API
-# keys. Shared by ProjectsController#show and Projects::ApiKeysController#create —
-# which re-renders show with the shown-once key modal — so the two never drift.
+# Shared by ProjectsController#show and Projects::ApiKeysController#create — which
+# re-renders show with the shown-once key modal — so the two never drift.
 module ProjectShowData
   extend ActiveSupport::Concern
 

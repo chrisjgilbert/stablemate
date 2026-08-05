@@ -1,10 +1,6 @@
 <%#
-  First-run / zero-project empty state (projects.md §6, §13-S6). Under Design B a
-  monitor and an API key both live inside a project, so before anything else the
-  user creates their first project. Shown on the dashboard (no projects yet) and
-  on an empty projects index (e.g. after deleting the last project). The gem copy
-  is honest: a project's API key is required before the gem registers anything —
-  not the old "zero setup, your jobs register themselves" pitch.
+  Zero-project empty state. A monitor and an API key both live inside a project,
+  so before anything else the user creates their first project.
 %>
 <div class="rounded-xl border border-border bg-surface p-10 shadow-sm text-center max-w-xl mx-auto"
      data-testid="first-project-empty-state">
@@ -15,8 +11,7 @@
     connect the gem with the project's API key.
   </p>
 
-  <%# Inline create (§3): a brand-new user makes their first project without an
-      extra page load. Validation errors still fall back to projects#new. %>
+  <%# Inline create; validation errors still fall back to projects#new. %>
   <%= form_with model: current_user.projects.new, url: projects_path,
         class: "mt-5 flex items-center justify-center gap-2",
         data: { testid: "create-first-project" } do |form| %>

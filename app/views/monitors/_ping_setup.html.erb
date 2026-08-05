@@ -1,13 +1,4 @@
 <%# locals: (monitor:, collapsed: false) %>
-<%#
-  Ping URL card: copyable ping URL + curl snippet + rotate. Setup is a one-time
-  concern, so show.html.erb renders this two ways:
-  - unwrapped (collapsed: false) near the top while wiring up is the user's
-    next step: a never-pinged manual monitor, or the one render right after a
-    token rotation (the old URL just died; the new one must be seen).
-  - a closed <details> disclosure (collapsed: true) at the bottom otherwise,
-    so it stops crowding the triage view.
-%>
 <% rotate_button = button_to("Rotate token", monitor_ping_token_path(monitor), method: :patch,
      form: { data: { turbo_confirm: "Rotate the token? The current ping URL stops working immediately." } },
      class: "h-7 px-2.5 rounded-lg border border-border text-[12px] font-semibold text-secondary hover:bg-hairline") %>

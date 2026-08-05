@@ -12,7 +12,6 @@ class Monitoring::Monitor::MissedPingTest < ActiveSupport::TestCase
     @monitor.update!(next_due_at: 10.minutes.ago)
   end
 
-  # Scenario 20 — up -> down, opens exactly one incident, enqueues one down email.
   test "flags an up monitor down, opens one incident, and enqueues one down email" do
     assert_difference -> { @monitor.incidents.count }, 1 do
       assert_enqueued_emails 1 do
@@ -28,7 +27,6 @@ class Monitoring::Monitor::MissedPingTest < ActiveSupport::TestCase
     assert notification.delivered_at.present?
   end
 
-  # Scenario 21 — running twice opens no second incident, sends no second email.
   test "flagging an already-down monitor opens no second incident or email" do
     @monitor.flag_missed!
 

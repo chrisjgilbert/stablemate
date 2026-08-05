@@ -1,7 +1,6 @@
 module Monitors
   # Sub-resource replacing a custom POST /:id/pause verb: pausing *is* creating
-  # the monitor's pause; resuming is destroying it. Delegates to the Pausing
-  # concern on the record. Tenant-scoped via current_user.monitors.
+  # the monitor's pause; resuming is destroying it.
   class PausesController < ApplicationController
     before_action :set_monitor
 

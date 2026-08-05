@@ -9,7 +9,6 @@ class DashboardProjectsTest < ApplicationSystemTestCase
 
   setup { @alice = users(:alice) }
 
-  # (b) the dashboard groups monitor rows under per-project section headers.
   test "the dashboard groups monitors under per-project headers" do
     first = @alice.projects.sole
     first.monitors.delete_all
@@ -29,7 +28,6 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     end
   end
 
-  # (c) create a monitor into a chosen project via the form's project selector.
   test "creating a monitor into a chosen project via the selector" do
     @alice.projects.sole.monitors.delete_all
     target = @alice.projects.create!(name: "Target service")
@@ -69,7 +67,6 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     assert_text "Fresh app"
   end
 
-  # (§3) the first-run card creates the first project INLINE — no extra page load.
   test "the first-run card creates the first project inline" do
     bob = users(:bob)
     bob.projects.destroy_all
@@ -99,7 +96,6 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     assert_no_selector "[data-testid='empty-state']"
   end
 
-  # (§2) each group header links to new-monitor pre-selecting that project.
   test "a project group header links to new monitor pre-selecting that project" do
     first = @alice.projects.sole
     first.monitors.delete_all
@@ -116,7 +112,6 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     assert_selector "option[selected]", text: "Second service"
   end
 
-  # (§8) at the monitor cap the cap-skip banner offers an Upgrade-to-Pro link.
   test "the cap-skip banner links to upgrade when at the monitor cap" do
     with_billing_enabled do
       project = @alice.projects.sole

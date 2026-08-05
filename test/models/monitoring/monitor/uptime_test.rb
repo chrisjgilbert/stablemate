@@ -1,8 +1,5 @@
 require "test_helper"
 
-# [unit] Monitoring::Monitor::Uptime — presentation reads of the rolled-up data:
-# the 90-element day-status series (oldest→newest, live current day), the overall
-# uptime percent (no-data excluded), and the dashboard MiniTicks helper.
 class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
   setup do
     freeze_time
@@ -20,13 +17,11 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
 
   teardown { unfreeze_time }
 
-  # Scenario 6 — the series has 90 elements, oldest→newest, with the live today bucket.
   test "uptime_series returns 90 day statuses oldest to newest including a live today" do
     series = @monitor.uptime_series(days: 90)
 
     assert_equal 90, series.size
     assert(series.all? { |s| %i[up partial down no_data].include?(s) })
-    # The last element is today, computed live: an up monitor with no incident is up.
     assert_equal :up, series.last
   end
 
@@ -36,13 +31,11 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
 
     series = @monitor.uptime_series(days: 90)
 
-    # Position: today is index 89, yesterday index 88.
     assert_equal :partial, series[88]
   end
 
   test "uptime_series marks a day with no stat and before nothing as no_data" do
     series = @monitor.uptime_series(days: 90)
-    # No stats stored and today is the only live day → earlier days are no_data.
     assert_equal :no_data, series.first
   end
 
@@ -73,7 +66,6 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_equal :down, series.last
   end
 
-  # Scenario 7 — overall % = up / (up + down), no-data excluded; hand fixture.
   test "uptime_percent is up over up-plus-down with no-data excluded" do
     # Pinned to 00:00 UTC so today's live segment has no elapsed seconds to
     # contribute — this case is about the persisted-day math. Today's live
@@ -81,7 +73,6 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     travel_to Date.current.to_time(:utc)
 
     base = Date.current - 10
-    # Day A: fully up (86400 up). Day B: half down (43200 up, 43200 down).
     @monitor.uptime_day_stats.create!(day: base, up_seconds: 86_400, down_seconds: 0, ping_count: 1)
     @monitor.uptime_day_stats.create!(day: base + 1, up_seconds: 43_200, down_seconds: 43_200, ping_count: 1)
     # Day C: no-data (0/0) — must be excluded from the denominator.
@@ -91,7 +82,6 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_in_delta 75.0, @monitor.uptime_percent(days: 90), 0.01
   end
 
-  # "—" is only honest when nothing at all has been measured — today included.
   test "uptime_percent is nil when nothing has been measured, today included" do
     never_pinged = @project.monitors.create!(
       name: "Never pinged", expected_interval_seconds: 3600, grace_period_seconds: 300, status: "pending"
@@ -100,10 +90,9 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_nil never_pinged.uptime_percent(days: 90)
   end
 
-  # F8 (#51) — the probe: an all-green rolled history plus a resolved outage
-  # today. Today has no UptimeDayStat until the 00:10 rollup, so the percent used
-  # to sit at a stale 100.00% beside an amber today bar for up to 24h (and the
-  # API served that number). The bar and the percent must read the same seconds.
+  # F8 — today has no UptimeDayStat until the 00:10 rollup, so the percent used to
+  # sit at a stale 100.00% beside an amber today bar for up to 24h. The bar and the
+  # percent must read the same seconds.
   test "uptime_percent counts today's resolved outage before the nightly rollup" do
     travel_to Date.current.to_time(:utc) + 12.hours
 
@@ -125,7 +114,6 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_operator percent, :<, 100.0
   end
 
-  # A monitor whose only data is today reports today's number, not "—".
   test "uptime_percent reflects today alone when nothing has been rolled up yet" do
     travel_to Date.current.to_time(:utc) + 12.hours
 
@@ -161,10 +149,9 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_in_delta 50.0, @monitor.uptime_percent(days: 90), 0.01
   end
 
-  # Today's live stat is a snapshot of *now*, read fresh each time. It has been
-  # memoized twice before — once outright, once keyed on the wall-clock second —
-  # and both answered with the state at first read, which is wrong the moment the
-  # record changes or the day rolls over under a long-lived instance.
+  # Today's live stat is a snapshot of *now*. It has been memoized twice before —
+  # once outright, once keyed on the wall-clock second — and both answered with the
+  # state at first read, which is wrong the moment the record changes.
   test "the live day's stat follows the record, not the first read" do
     travel_to Date.current.to_time(:utc) + 12.hours
 
@@ -185,8 +172,6 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
       "a paused today is no-data, even on an instance that already read it as measured"
   end
 
-  # Recent events feed: pings + incident open/resolve, cause-aware labels
-  # (job-failure-details.md §9).
   test "recent_events renders a success ping as a ping event" do
     @monitor.ping_events.create!(received_at: 1.minute.ago, duration_ms: 42)
 
@@ -239,10 +224,8 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_equal [ :down, :failure ], kinds.first(2)
   end
 
-  # M13 — mini_ticks_for ranks rows inside a window-function subquery, and the
-  # outer SELECT's row order is not guaranteed to survive that under a different
-  # plan. Newest-first per monitor is the contract mini_ticks reverses into the
-  # sparkline, so pin it here rather than trust the planner.
+  # M13 — mini_ticks_for ranks rows inside a window-function subquery, and the outer
+  # SELECT's row order is not guaranteed to survive that under a different plan.
   test "mini_ticks_for returns each monitor's kinds newest first" do
     other = @project.monitors.create!(
       name: "Second sparkline", expected_interval_seconds: 3600, grace_period_seconds: 300, status: "up"
@@ -270,7 +253,6 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_equal %w[down up down up], @monitor.mini_ticks(kinds: ticks[@monitor.id])
   end
 
-  # MiniTicks helper: last 16 ping events mapped to up/down ticks.
   test "mini_ticks maps the last 16 ping events to up and down ticks" do
     18.times do |i|
       @monitor.ping_events.create!(received_at: i.minutes.ago, kind: i.even? ? "success" : "failure")

@@ -3,7 +3,6 @@ require "test_helper"
 class Monitors::PingTokensControllerTest < ActionDispatch::IntegrationTest
   setup { @alice = users(:alice); @monitor = monitors(:up) }
 
-  # Scenario 12 — rotating changes the token and the old token 404s on ping.
   test "update rotates the token; the old token then 404s on ping" do
     sign_in @alice
     old_token = @monitor.ping_token

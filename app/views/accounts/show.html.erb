@@ -13,10 +13,8 @@
         <%= current_user.email_address %>
       </div>
     </div>
-    <%# One badge with the state in ternaries — the two branches differed only in
-        three colour tokens and one word. shared/_status_badge was considered and
-        rejected: it speaks monitor-status vocabulary (up/down/paused/pending),
-        which is the wrong language for whether an email address is confirmed. %>
+    <%# Deliberately not shared/_status_badge: it speaks monitor-status vocabulary
+        (up/down/paused/pending), the wrong language for a confirmed address. %>
     <% verified = current_user.verified? %>
     <span class="inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[11px] font-semibold shrink-0 <%= verified ? "bg-up-bg text-up-text" : "bg-pending-bg text-pending-text" %>">
       <span class="w-1.5 h-1.5 rounded-full <%= verified ? "bg-up-dot" : "bg-pending-dot" %>"></span>
@@ -24,9 +22,8 @@
     </span>
   </div>
 
-  <%# Billing lives on its own page; link there only when the hosted tier is
-      configured, exactly like the header nav (a keyless self-host instance 404s
-      the whole Billing:: namespace, so a link would be a dead end). %>
+  <%# A keyless self-host instance 404s the whole Billing:: namespace, so a link
+      would be a dead end. %>
   <% if billing_enabled? %>
     <div class="mt-4 pt-4 border-t border-hairline flex items-center justify-between gap-4">
       <div class="text-[13px] text-muted">Plan and payment details</div>

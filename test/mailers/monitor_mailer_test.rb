@@ -6,7 +6,6 @@ class MonitorMailerTest < ActionMailer::TestCase
 
   setup { @monitor = monitors(:up) }
 
-  # Scenario 27 — down email renders with name, expected-by, detail link, to owner.
   test "down renders with the monitor name, expected-by time, and detail link" do
     @monitor.update!(next_due_at: 1.hour.ago)
     mail = MonitorMailer.down(@monitor)
@@ -72,7 +71,6 @@ class MonitorMailerTest < ActionMailer::TestCase
     assert_match(/Check your job logs/i, mail.html_part.body.decoded)
   end
 
-  # A nil incident degrades to the missed-ping copy, defensively.
   test "down with no incident degrades to the missed-ping copy" do
     @monitor.update!(next_due_at: 1.hour.ago)
     mail = MonitorMailer.down(@monitor)
@@ -123,7 +121,6 @@ class MonitorMailerTest < ActionMailer::TestCase
     assert_no_match(/boom/, mail.body.encoded)
   end
 
-  # Scenario 28 — recovered email renders and is addressed to the owner.
   test "recovered renders and is delivered to the owner" do
     mail = MonitorMailer.recovered(@monitor)
 
@@ -133,8 +130,6 @@ class MonitorMailerTest < ActionMailer::TestCase
     assert_match monitor_url(@monitor), mail.body.encoded
   end
 
-  # Scenario 10 — down/recovered emails carry a configured From and render a detail
-  # link whose host comes from config (default_url_options), not any request.
   test "down and recovered set a configured From address" do
     configured_from = ApplicationMailer.default[:from]
     assert configured_from.present?

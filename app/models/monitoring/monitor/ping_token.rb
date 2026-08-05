@@ -1,12 +1,11 @@
 module Monitoring
   class Monitor
-    # The ping_token is the credential for the public ping endpoint: random,
-    # unguessable, unique, and treated as a secret. Generated on create; can be
-    # rotated to invalidate the old ping URL.
+    # The ping_token is the credential for the public ping endpoint, and is
+    # treated as a secret.
     module PingToken
       extend ActiveSupport::Concern
 
-      # 32 url-safe alphanumeric chars (~190 bits) — unguessable, no encoding worries.
+      # 32 url-safe alphanumeric chars (~190 bits).
       TOKEN_LENGTH = 32
 
       included do
@@ -14,7 +13,6 @@ module Monitoring
         validates :ping_token, presence: true, uniqueness: true
       end
 
-      # Replace the token with a fresh unique value (invalidates the old URL).
       def rotate_ping_token!
         update!(ping_token: self.class.generate_ping_token)
       end

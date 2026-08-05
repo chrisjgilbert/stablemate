@@ -1,8 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
 
-// Human-friendly preset selector for interval/grace. Picking a preset writes its
-// seconds value into the hidden field; picking "Custom" reveals a seconds input.
-// (design-system.md — "human presets + Custom"; the stored value is seconds.)
+// Picking a preset writes its seconds value into the hidden field; picking
+// "Custom" reveals a seconds input. The stored value is always seconds.
 export default class extends Controller {
   static targets = ["select", "custom", "value"]
 

@@ -1,13 +1,9 @@
 <% content_for :title, @monitor.name %>
 <% open_incident = @monitor.open_incident %>
-<%# Setup is a one-time concern: the full card renders only while wiring up is
-    genuinely the next step, or for the one render right after a token rotation
-    (the one-shot flash reveal — see Monitors::PingTokensController#update for
-    why it's a flash, not an anchor). Collapsed to a bottom disclosure otherwise. %>
+<%# The one-shot flash reveal is a flash rather than an anchor — see
+    Monitors::PingTokensController#update. %>
 <% ping_setup_collapsed = !@monitor.awaiting_setup? && !flash[:reveal_ping_setup] %>
 
-<%# Live status: subscribe to the monitor's stream so broadcast_status_update's
-    :badge replace lands on the header badge without a reload (mirrors _row.html.erb). %>
 <%= turbo_stream_from @monitor %>
 
 <div class="max-w-3xl mx-auto space-y-6">
@@ -19,11 +15,9 @@
       <%= render "shared/gem_chip", monitor: @monitor, variant: :full %>
     </div>
     <div class="flex items-center gap-2">
-      <%# Pause/Resume is user-driven monitoring control. A `suspended` monitor
-          (plan-downgrade, issue #19) has no pause/resume affordance: it can't be
-          resumed without re-upgrading, and pausing it would flip it to `paused`,
-          which DOES count toward the cap — letting a downgraded user quietly push
-          suspended monitors back into their cap. So hide it entirely when suspended. %>
+      <%# A `suspended` monitor gets no pause/resume affordance: pausing it would
+          flip it to `paused`, which DOES count toward the cap — letting a
+          downgraded user quietly push suspended monitors back into their cap. %>
       <% unless @monitor.suspended? %>
         <% if @monitor.paused? %>
           <%= button_to "Resume", monitor_pause_path(@monitor), method: :delete,
@@ -42,18 +36,11 @@
   </div>
 
   <% if open_incident %>
-    <%# Active-incident banner (spec §3.4 + job-failure-details.md §9): red,
-        pulsing down dot, cause-aware copy in ONE shell — only the heading
-        tail, the error block, and the expected-by/grace rows vary by cause.
-        NO Acknowledge button — incidents are open/resolved only, resolved by
-        a recovering ping.
-        - missed_ping: expected-by / grace elapsed / down for. Expected-by is
-          the incident's START (the moment the grace window elapsed), not the
-          live due_with_grace_at — a failure ping on an already-down monitor
-          advances next_due_at, which would render a nonsensical FUTURE
-          "expected by" on an active outage.
-        - reported_error: the error itself instead of expected-by/grace
-          (nothing was late — the job ran and said so). %>
+    <%# NO Acknowledge button — incidents are open/resolved only, resolved by a
+        recovering ping. "Expected by" is the incident's START, not the live
+        due_with_grace_at: a failure ping on an already-down monitor advances
+        next_due_at, which would render a nonsensical FUTURE time on an active
+        outage. %>
     <div class="rounded-xl border border-down-dot bg-down-bg p-5" data-testid="incident-banner">
       <h3 class="flex items-center gap-2 font-display text-base font-bold text-down-text">
         <span class="w-2 h-2 rounded-full bg-down-dot status-dot-pulse"></span>
@@ -75,13 +62,10 @@
     </div>
   <% end %>
 
-  <%# Ping URL card + curl snippet — full and visible here only while the
-      monitor still needs wiring up; see ping_setup_collapsed above. %>
   <% unless ping_setup_collapsed %>
     <%= render "monitors/ping_setup", monitor: @monitor %>
   <% end %>
 
-  <%# Settings summary %>
   <div class="rounded-xl border border-border bg-surface p-6 shadow-sm">
     <h2 class="text-[13px] font-semibold text-secondary mb-4">Settings</h2>
     <dl class="grid grid-cols-2 gap-y-3 text-[13px]">
@@ -90,20 +74,15 @@
       <dt class="text-muted">Grace period</dt><dd class="font-mono"><%= humanize_seconds(@monitor.grace_period_seconds) %></dd>
       <dt class="text-muted">Last ping</dt>
       <dd class="font-mono"><%= mono_timestamp(@monitor.last_ping_at) %></dd>
-      <%# The down case is already covered by "Expected by" in the incident
-          banner above. %>
       <%= render "monitors/next_check", monitor: @monitor, variant: :dl %>
     </dl>
   </div>
 
-  <%# Which project this monitor lives in + the move control (manual monitors only). %>
   <%= render "monitors/move", monitor: @monitor %>
 
-  <%# 90-day uptime history (real rollup data) + the recent-events feed. %>
   <%= render "monitors/uptime_panel", monitor: @monitor %>
   <%= render "monitors/recent_events", monitor: @monitor %>
 
-  <%# Collapsed setup, once live. %>
   <% if ping_setup_collapsed %>
     <%= render "monitors/ping_setup", monitor: @monitor, collapsed: true %>
   <% end %>

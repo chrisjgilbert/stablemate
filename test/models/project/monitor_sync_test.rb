@@ -1,9 +1,7 @@
 require "test_helper"
 
-# Ported from User::MonitorSyncTest to project scope (projects.md §4.3 / §10). The
-# upsert now keys on (project, registration_key) and the cap budget stays PER-USER
-# (the row lock stays on the user). Every original scenario carries over; new tests
-# prove the collision fix, the per-user budget across projects, and the user lock.
+# The upsert keys on (project, registration_key); the cap budget stays PER-USER
+# (the row lock stays on the user).
 class Project::MonitorSyncTest < ActiveSupport::TestCase
   # bob owns exactly one fixture monitor, in his one fixture project.
   setup do
@@ -59,7 +57,6 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
   end
 
   test "updates to existing monitors succeed even at the cap" do
-    # Fill bob to the cap with gem monitors.
     @project.sync_monitors(entries: (1..4).map { |i| entry("k#{i}") })
     assert @user.reload.at_monitor_cap?
 
@@ -101,10 +98,8 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     refute @project.monitors.exists?(registration_key: "bad")
   end
 
-  # M7 — one payload listing the same key twice used to be processed twice: the
-  # second pass found the row the first had just written and pushed the SAME
-  # monitor into the result again, so the gem saw one job as two monitors (and a
-  # diverging app was reported as two conflicts). Collapse repeats to one entry.
+  # M7 — one payload listing the same key twice used to be processed twice, so the
+  # gem saw one job as two monitors (and a diverging app as two conflicts).
   test "a registration_key repeated in one payload yields one monitor" do
     result = @project.sync_monitors(app: "my-app", entries: [
       entry("daily_digest", name: "First", interval: 3600),
@@ -142,17 +137,14 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
   end
 
   test "a concurrent create of the same key (RecordNotUnique) is upserted, not raised" do
-    # The race: a sibling boot process (another Puma worker / container running
-    # the railtie's after_initialize sync) already inserted this key, but THIS
-    # run's lookup ran before that insert landed, so it takes the create path and
-    # the partial unique index raises RecordNotUnique. The operation must recover
-    # by updating the now-existing row (idempotent), never 500.
+    # The race: a sibling boot process already inserted this key, but THIS run's
+    # lookup ran before that insert landed, so it takes the create path and the
+    # partial unique index raises RecordNotUnique. The operation must recover by
+    # updating the now-existing row, never 500.
     #
-    # Drive persist_create directly against an already-existing key — that is
-    # exactly the state the create path hits during the race — so the unique
-    # index fires for real and the rescue's re-find + update runs. The row the
-    # winner inserted carries the settings it synced (last_synced_*), so the
-    # loser's update sees an un-overridden monitor and may write to it.
+    # Driving persist_create directly against an already-existing key is exactly
+    # the state the create path hits during the race, so the unique index fires for
+    # real and the rescue's re-find + update runs.
     @project.monitors.create!(
       registration_key: "racey", name: "Original", expected_interval_seconds: 3600,
       grace_period_seconds: 300, source: "gem", status: "pending",
@@ -164,8 +156,7 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     racing_entry = Project::MonitorSync::Entry.from(
       entry("racey", name: "Updated", interval: 7200)
     )
-    # persist_create accumulates into the operation's own ivars (seeded by #sync_monitors);
-    # seed them directly for this white-box drive of the RecordNotUnique rescue path.
+    # persist_create accumulates into ivars normally seeded by #sync_monitors.
     %i[@registered @skipped @conflicts].each { |iv| op.instance_variable_set(iv, []) }
 
     assert_nothing_raised do
@@ -190,11 +181,10 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     refute @project.monitors.exists?(registration_key: "bad")
   end
 
-  # M8 — the shape check exists so a malformed entry is classified BEFORE the cap
-  # check. It read the numbers through to_i, where nil and garbage both become 0
-  # and sailed through as a valid grace, so at the cap a malformed entry came back
-  # as "limit_reached" — telling the operator to buy more slots for an entry that
-  # would never have registered anyway.
+  # M8 — the shape check reads the numbers through to_i, where nil and garbage both
+  # become a valid grace of 0, so at the cap a malformed entry came back as
+  # "limit_reached" — telling the operator to buy slots for an entry that would
+  # never have registered.
   test "a malformed grace_period_seconds reports invalid, not limit_reached, at the cap" do
     @project.sync_monitors(entries: (1..4).map { |i| entry("k#{i}") })
     assert @user.reload.at_monitor_cap?

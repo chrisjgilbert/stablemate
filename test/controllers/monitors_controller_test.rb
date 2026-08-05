@@ -12,13 +12,11 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     @bobs = monitors(:bobs)
   end
 
-  # Scenario 3 — protected routes redirect anonymous users to sign in.
   test "anonymous users are redirected to sign in" do
     get monitors_path
     assert_redirected_to new_session_path
   end
 
-  # Scenario 6 — dashboard lists only the current user's monitors.
   test "index lists only the current user's monitors" do
     sign_in @alice
     get monitors_path
@@ -50,7 +48,6 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_equal baseline, counts.call, "adding a monitor must not add a ping_events query"
   end
 
-  # Scenario 5 — cross-tenant access is impossible (404, not 403, no leak).
   test "a user cannot show another user's monitor" do
     sign_in @alice
     get monitor_path(@bobs)
@@ -78,7 +75,6 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
-  # Scenario 7 — create stores seconds, generates token, manual + pending.
   test "create makes a manual, pending monitor with a token" do
     sign_in @bob
     @bobs_project.monitors.delete_all
@@ -153,7 +149,6 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # Scenario 13 (request) — destroy removes the monitor.
   test "destroy removes the owner's monitor" do
     sign_in @alice
     assert_difference -> { @alice.monitors.count }, -1 do
@@ -261,7 +256,6 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to new_project_path(after: "new_monitor")
   end
 
-  # projects.md §6/§7 — the selector pre-selects the most-recent project by default.
   test "new pre-selects the most-recent project by default" do
     sign_in @alice
     newer = @alice.projects.create!(name: "Newer app")

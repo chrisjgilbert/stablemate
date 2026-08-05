@@ -17,7 +17,6 @@ class ConfigGatedCapsTest < ApplicationSystemTestCase
     @project.monitors.delete_all # predictable count
   end
 
-  # Caps OFF — a user creates a monitor past the old 5-limit with no at-limit UI.
   test "caps OFF: a sixth monitor creates successfully with no at-limit UI" do
     stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
       6.times { |i| @project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
@@ -72,7 +71,6 @@ class ConfigGatedCapsTest < ApplicationSystemTestCase
     end
   end
 
-  # Caps ON — at capacity, the sign-up screen is in waitlist mode (managed instance).
   test "caps ON: at capacity the sign-up screen renders the waitlist" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
       visit sign_up_path

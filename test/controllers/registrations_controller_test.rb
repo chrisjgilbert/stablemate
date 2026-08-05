@@ -18,7 +18,6 @@ class RegistrationsControllerTest < ActionDispatch::IntegrationTest
     refute User.exists?(email_address: "over@example.com")
   end
 
-  # Scenario 1 — sign up creates a free, unverified user, starts a session, mails.
   test "sign up creates a user, starts a session, and sends a verification email" do
     assert_difference -> { User.count }, 1 do
       assert_enqueued_email_with UserMailer, :verification, args: ->(a) { a.first.email_address == "fresh@example.com" } do
@@ -51,10 +50,6 @@ class RegistrationsControllerTest < ActionDispatch::IntegrationTest
     assert_match "Welcome to Stablemate.", response.body
   end
 
-  # Scenario 2 — an unverified user can immediately create monitors (no verification
-  # gate — locked decision #3). Under Projects a monitor needs a project, so the
-  # fresh user creates one first (the zero-project onboarding UX is Phase 4); the
-  # point being asserted is unchanged: verification never blocks creation.
   test "an unverified user can create a monitor right after signing up" do
     post sign_up_path, params: {
       email_address: "fresh@example.com", password: "password1234", password_confirmation: "password1234"
@@ -76,8 +71,6 @@ class RegistrationsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_entity
   end
 
-  # Scenario 1 — at the cap, GET /sign_up renders waitlist mode: email field, no
-  # password field.
   test "at capacity, the sign-up screen renders waitlist mode (no password field)" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
       get sign_up_path
@@ -88,8 +81,6 @@ class RegistrationsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # Scenario 2 — submitting in waitlist mode creates a WaitlistSignup, no User, no
-  # session, and shows the calm success.
   test "at capacity, submitting creates a WaitlistSignup with no User and no session" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
       assert_difference -> { WaitlistSignup.count }, 1 do
@@ -104,7 +95,6 @@ class RegistrationsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # Scenario 3 — a duplicate waitlist email is a friendly success, not an error.
   test "at capacity, a duplicate waitlist email is a friendly success" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
       WaitlistSignup.create!(email_address: "twice@example.com")
@@ -119,7 +109,6 @@ class RegistrationsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # At capacity, a blank email re-renders the waitlist form (no crash, no row).
   test "at capacity, a blank waitlist email re-renders the form without creating a row" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count) do
       assert_no_difference -> { WaitlistSignup.count } do
@@ -151,7 +140,6 @@ class RegistrationsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  # Scenario 5 — raising the cap re-opens normal sign-up.
   test "raising the cap re-opens normal sign-up" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
       assert_difference -> { User.count }, 1 do

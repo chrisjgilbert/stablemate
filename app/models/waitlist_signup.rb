@@ -1,7 +1,5 @@
-# A launch waitlist entry, captured when the global account cap is reached
-# (SIGNUP_ACCOUNT_CAP). No login, no account — just an email we can invite later.
-# Created by the Signup coordinator's at-capacity branch; never edited (no
-# updated_at), so a duplicate email is a friendly no-op rather than an error.
+# A launch waitlist entry, captured when the global account cap is reached. No
+# login, no account — just an email we can invite later.
 class WaitlistSignup < ApplicationRecord
   include EmailNormalization
 

@@ -1,6 +1,4 @@
-# Async delivery for User::SignupAlert (mirrors ActionMailer's deliver_later)
-# so a Slack hiccup never blocks sign-up. Orchestration only — the actual
-# Slack post lives on the operation object, not here.
+# Async delivery for User::SignupAlert so a Slack hiccup never blocks sign-up.
 class NotifySignupJob < ApplicationJob
   queue_as :default
 
