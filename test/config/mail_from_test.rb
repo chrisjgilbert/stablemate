@@ -1,19 +1,11 @@
 require "test_helper"
 
-# Every address this app sends from must resolve from STABLEMATE_MAIL_FROM, and
-# that includes the ones Pay sends.
+# Every address this app sends from must resolve from STABLEMATE_MAIL_FROM,
+# including the ones Pay sends: Pay picks its from-address as
+# `Pay.support_email || ::ApplicationMailer.default_params[:from]`, so setting
+# support_email would override ours with a domain a self-hoster doesn't own.
 #
-# Pay picks its from-address as `Pay.support_email || ::ApplicationMailer
-# .default_params[:from]` (pay/app/mailers/pay/application_mailer.rb). Setting
-# `config.support_email` therefore does not add an address — it OVERRIDES ours,
-# and a hardcoded literal there is a domain a self-hoster does not own. Pay's own
-# mailers are off today (`send_emails = false`), so the override is dormant, but
-# the initializer documents how to switch them on in one line, and Pay::Receipts
-# reads the same value. Leaving `Pay.support_email` unset is what makes the two
-# agree for everyone.
-#
-# A boot test because initializers only run at boot: pay.rb reads the env once,
-# and the already-booted suite can't re-run it under a different one.
+# A boot test because pay.rb reads the env once, at boot.
 class MailFromTest < ActiveSupport::TestCase
   include BootTestHelper
 

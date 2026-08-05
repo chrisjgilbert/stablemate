@@ -161,10 +161,8 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     assert_in_delta 50.0, @monitor.uptime_percent(days: 90), 0.01
   end
 
-  # The monitor detail page and the API detail endpoint both render the bar AND
-  # the percent, and each of those recomputed today's live stat from scratch — two
-  # identical incident scans per render, for a number that also has to agree
-  # between them.
+  # The detail page renders the bar AND the percent off one monitor, and the two
+  # have to agree as well as be cheap.
   test "the live day's stat is computed once for the bar and the percent" do
     travel_to Date.current.to_time(:utc) + 12.hours
     @monitor.incidents.create!(started_at: Date.current.to_time(:utc) + 6.hours, cause: "missed_ping")
@@ -175,23 +173,6 @@ class Monitoring::Monitor::UptimeTest < ActiveSupport::TestCase
     end
 
     assert_equal 1, scans, "today's incidents should be scanned once per render, not once per reader"
-  end
-
-  # …but the snapshot is of a moment, so it must not outlive one. Nothing in a
-  # request moves the clock; `travel_to` in a test does, and a memo that survived
-  # it would quietly answer with the old time.
-  test "the live day's stat is recomputed when the clock moves" do
-    travel_to Date.current.to_time(:utc) + 6.hours
-    @monitor.incidents.create!(started_at: Date.current.to_time(:utc) + 3.hours,
-      resolved_at: Date.current.to_time(:utc) + 6.hours, cause: "missed_ping")
-
-    # 3h up, 3h down of the 6h elapsed.
-    assert_in_delta 50.0, @monitor.uptime_percent(days: 90), 0.01
-
-    travel_to Date.current.to_time(:utc) + 12.hours
-
-    # Six more hours of uptime on the same instance: 9h up, 3h down.
-    assert_in_delta 75.0, @monitor.uptime_percent(days: 90), 0.01
   end
 
   # Recent events feed: pings + incident open/resolve, cause-aware labels

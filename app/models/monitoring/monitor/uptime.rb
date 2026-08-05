@@ -187,23 +187,11 @@ module Monitoring
         # ONE method feeds both readers — the bar's today segment
         # (live_today_status) and uptime_percent — so the % and the bar cannot
         # disagree, and today is classified by the same up/down/partial cutoffs it
-        # will get once the rollup persists it (UptimeDayStat#status).
-        #
-        # Memoized because the detail page's uptime panel renders BOTH readers off
-        # one monitor — the bar and the percent — so every one of those responses
-        # ran today's incident scan twice for the same answer. (The API detail
-        # endpoint serves only the percent, so it was already paying once.) Two
-        # readers, one number, one scan. Keyed on the second it was taken in rather
-        # than memoized outright: this is a snapshot of *now*, and a `travel_to` in
-        # a test (or a day rolling over under a long-lived object) must get a fresh
-        # one instead of yesterday's. Within a render the clock does not move, so
-        # the key is stable exactly where the saving is.
+        # will get once the rollup persists it (UptimeDayStat#status). Memoized per
+        # instance for the same reason windowed_day_stats is: the detail panel
+        # renders both readers off one monitor, and that should be one scan.
         def live_today_stat
-          now = Time.current
-          return @live_today_stat if @live_today_stat_second == now.to_i
-
-          @live_today_stat_second = now.to_i
-          @live_today_stat = compute_live_today_stat(now)
+          @live_today_stat ||= compute_live_today_stat(Time.current)
         end
 
         def compute_live_today_stat(now)

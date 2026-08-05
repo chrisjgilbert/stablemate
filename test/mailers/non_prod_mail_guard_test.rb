@@ -1,4 +1,8 @@
 require "test_helper"
+# Mail is no longer loaded at boot (mail_interceptor.rb registers from an
+# on_load hook), so ask for it rather than depending on another test in this
+# parallel worker having loaded Action Mailer first.
+require "mail"
 
 # The non-prod mail guard (config/initializers/mail_interceptor.rb). The interceptor
 # is not *registered* in the test env (test uses delivery_method :test), so we exercise

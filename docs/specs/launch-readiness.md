@@ -35,6 +35,7 @@ boxes here → next chunk.
 | 4 | Dependabot backlog | WS-B | **MERGED** | #70 |
 | 5 | Chunk 4 follow-ups — Action SHA pins, drop `rails/all`, driver convention | — | **MERGED** | #72 |
 | 6 | Chunk 5 review follow-ups — dead Pay setting, boot-order coupling, pin guard | — | **MERGED** | #74 |
+| — | Cleanup pass — memo bug, order-dependent test, comment mass, over-reach from 4–6 | — | **IN REVIEW** | — |
 
 Deliberately **not** in these chunks: WS-E (publishing the gem needs an
 MFA'd RubyGems account — owner action, though the repo-side prep can ride in a
@@ -258,6 +259,11 @@ against the merged diff. What they found:
       that re-derives the skips.
 - [x] Review → `/simplify` → `/verify` → CI → PR → merge
 
+> **Partly reverted by the cleanup pass (5 Aug) — see its entry below.**
+> `WorkflowPinsTest` and `StripeEagerLoadTest` are gone, and `bin/ci`'s dependency
+> probe is back to `bundle check`. The SHA pins, the `CHROMIUM_PATH` guard, the
+> `Pay.support_email` deletion and the boot-order fix all stay.
+
 The efficiency pass found two things worth real money:
 
 - [x] **The Stripe SDK no longer eager-loads into a keyless instance.** stripe's
@@ -318,6 +324,54 @@ knowing:
 - `active_model/railtie` in the explicit list is **redundant but harmless**:
   `activerecord/railtie.rb` already requires it, so registration order is
   unchanged.
+
+### Cleanup pass — 5 Aug (not a chunk)
+
+A read of chunks 4–6 as a whole rather than as diffs. The chunks were each
+individually defensible and collectively drifting: chunk 5 was chunk 4's review
+follow-ups and chunk 6 was chunk 5's, so the work had stopped coming from the
+punch list and started coming from the reviews. What that produced, and what was
+undone:
+
+- [x] **A real bug: `live_today_stat` was memoized on the wall-clock second.** It
+      returned a stale answer after any data change within the same second, and
+      under `freeze_time` — which this project's conventions mandate — it never
+      expired at all. Now a plain `||=`, matching `windowed_day_stats` beside it.
+      The test that pinned the clock-keyed behaviour described a test-only
+      scenario and went with it; the one-scan-per-render guard stays.
+- [x] **A latent order-dependent failure on `main`.** Chunk 6 stopped loading
+      `Mail` at boot, and `non_prod_mail_guard_test.rb` references `Mail`
+      directly — so it passed only when another test in the same parallel worker
+      had loaded Action Mailer first. Five errors when run alone, on `main`, with
+      CI green. It now requires what it uses.
+- [x] **`StripeEagerLoadTest` and the `eager_load_namespaces.delete(Stripe)`
+      gate removed.** Mutating a framework-internal registry to undo a
+      third-party railtie, for ~350ms and 34MB on a boot that happens once, is
+      not worth the coupling or the two production boots the test paid per run.
+- [x] **`WorkflowPinsTest` removed.** A Minitest case parsing GitHub Actions YAML
+      is the wrong tool, and it had holes: it read only the FIRST line matching
+      each action (so the deploy job's second `actions/checkout` was never
+      checked) and never saw job-level `uses:`. The SHA pins and the re-pinning
+      recipe stay; use `actionlint`/`zizmor` if this needs enforcing.
+- [x] **`bin/ci`'s dependency probe reverted to `bundle check`.** A hardcoded
+      require list that silently drifts from the gemspec, to save ~26s on a
+      ~110s CI step nobody was waiting on.
+- [x] **Comment mass cut roughly in half across the files those chunks touched**
+      (`pay.rb` was 79 comment lines to 16 of code). What went: decision history
+      ("until chunk 6…", "the first version of this step…"), duplicated
+      rationale, and recorded measurements — two of which already disagreed with
+      each other. What stayed: why the current code is the way it is. The history
+      is in the git log and in this ledger, which is where it belongs.
+
+**Not changed, flagged instead:** `Monitoring::Monitor`'s
+`after_destroy_commit :release_owner_downgrade_lock` reaches up two levels to
+mutate billing state, and fires once per monitor (five deletions ⇒ five calls).
+The choose-N lock now has five release paths, each added because one route got
+stuck. Worth consolidating to one authoritative path — a design decision, not a
+cleanup.
+
+**Process:** don't let a chunk be defined by the previous chunk's review. A
+review finding is a candidate, not a mandate, and it should carry a cost ceiling.
 
 > **Review note (2026-08-01).** An adversarial pressure-test pass verified every
 > file/behaviour claim in this spec against the code and the installed gems.

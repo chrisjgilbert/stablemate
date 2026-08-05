@@ -44,11 +44,10 @@ class NonProdMailGuard
   end
 end
 
-# on_load rather than touching ActionMailer::Base here, matching
-# mail_delivery_retries.rb. Referencing the constant at initializer-load time
-# forces action_mailer/base.rb — and with it `require "mail"` — to run during
-# boot, which is load-order coupling we don't want and, until chunk 6, was
-# quietly satisfying an unrelated dependency in pay.rb.
+# on_load rather than touching ActionMailer::Base here (matching
+# mail_delivery_retries.rb): referencing the constant at initializer-load time
+# would force action_mailer/base.rb to load during boot, coupling other
+# initializers to our position in the load order.
 unless Rails.env.production? || Rails.env.test?
   ActiveSupport.on_load(:action_mailer) do
     ActionMailer::Base.register_interceptor(NonProdMailGuard)
