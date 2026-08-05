@@ -30,7 +30,7 @@ Actions is green → tick the boxes here → next chunk.
 | 3 | Stop monkey-patching globals in the job tests | #4 | **MERGED** | #87 |
 | 4 | Humble-Object the production env config; retire 8 boots | #2 | **MERGED** | #88 |
 | 5 | Two owners: fixture-free tests get a fixture-free user | #1 | **MERGED** | #89 |
-| 6 | `rubocop-minitest` to stop the regressions | #7 | **IN REVIEW** | #90 |
+| 6 | `rubocop-minitest` to stop the regressions | #7 | **MERGED** | #90 |
 | 7 | The system suite's load sensitivity — an Erratic Test | #8 | **IN REVIEW** | #91 |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
