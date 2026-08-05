@@ -4,11 +4,11 @@ module Api
     class MonitorsController < BaseController
       def index
         monitors = current_project.monitors.order(:created_at)
-        render json: { monitors: monitors.map { |m| monitor_json(m) } }
+        render json: { monitors: monitors.map { |monitor| present(monitor).summary } }
       end
 
       def show
-        render json: monitor_detail_json(find_monitor)
+        render json: present(find_monitor).detail
       end
     end
   end
