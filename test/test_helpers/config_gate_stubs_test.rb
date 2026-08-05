@@ -35,10 +35,16 @@ class ConfigGateStubsTest < ActiveSupport::TestCase
   end
 
   test "with_billing_disabled forces the gate off and restores it" do
+    # billing_enabled? is already false in the test env, so comparing the value
+    # afterwards proves nothing — a leaked stub reads identically. Compare the
+    # method itself, which a leak would leave replaced.
+    before = Stablemate.method(:billing_enabled?)
+
     with_billing_disabled { assert_not Stablemate.billing_enabled? }
 
     assert_raises(RuntimeError) { with_billing_disabled { raise "boom" } }
-    assert_nothing_raised { Stablemate.billing_enabled? }
+    assert_equal before, Stablemate.method(:billing_enabled?),
+      "billing_enabled? leaked out of the stub block"
   end
 
   test "with_slack_enabled swaps the webhook URL and puts it back when the block raises" do
@@ -83,6 +89,22 @@ class ConfigGateStubsTest < ActiveSupport::TestCase
 
     assert_equal before, Pay::Stripe::Subscription.method(:sync),
       "the real Pay sync must be back afterwards"
+  end
+
+  # Object#stub saves the original under a fixed __minitest_stub__<name> alias, so
+  # stubbing the same method twice over corrupts that saved copy: the inner unwind
+  # raises NameError and the method is left UNDEFINED for every test after it in
+  # the worker. That is a mystifying way to find out, and the damage is done by
+  # then — so the gates refuse the nesting up front instead.
+  test "nesting the same gate is refused before it can corrupt the method" do
+    error = assert_raises(ArgumentError) do
+      with_slack_enabled { with_slack_disabled { flunk "the inner gate should not have opened" } }
+    end
+
+    assert_match(/slack_webhook_url/, error.message)
+    assert_match(/already stubbed/, error.message)
+    # The guard must fire BEFORE the method is damaged, so it still answers.
+    assert_nothing_raised { Stablemate.slack_webhook_url }
   end
 
   private

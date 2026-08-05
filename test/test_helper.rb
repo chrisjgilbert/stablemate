@@ -11,7 +11,6 @@ require_relative "test_helpers/config_gate_test_helper"
 # hanging in CI). localhost stays open for the Capybara/Puma server and Cuprite's
 # CDP connection to Chromium. The Stripe paths are tested end-to-end against
 # stubbed api.stripe.com responses — see test_helpers/stripe_api_stubs.rb.
-require "minitest/mock"
 require "webmock/minitest"
 WebMock.disable_net_connect!(allow_localhost: true)
 require_relative "test_helpers/stripe_api_stubs"
