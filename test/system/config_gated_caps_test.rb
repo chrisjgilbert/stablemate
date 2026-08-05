@@ -12,15 +12,15 @@ require "application_system_test_case"
 # this is the same mechanism LaunchHardeningTest already relies on.
 class ConfigGatedCapsTest < ApplicationSystemTestCase
   setup do
-    @alice = users(:alice)
-    @project = @alice.projects.sole
-    @project.monitors.delete_all # predictable count
+    # carol owns no monitors, so this file's counts are only what it creates.
+    @user = users(:carol)
+    @project = @user.projects.sole
   end
 
   test "caps OFF: a sixth monitor creates successfully with no at-limit UI" do
     stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
       6.times { |i| @project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
-      sign_in @alice
+      sign_in @user
 
       # No at-limit treatment, and the "New monitor" affordance is present.
       assert_no_selector "[data-testid='at-limit']"
@@ -34,7 +34,7 @@ class ConfigGatedCapsTest < ApplicationSystemTestCase
       click_on "Create monitor"
 
       assert_text "Seventh monitor"
-      assert_equal 7, @alice.monitors.count
+      assert_equal 7, @user.monitors.count
     end
   end
 
@@ -63,7 +63,7 @@ class ConfigGatedCapsTest < ApplicationSystemTestCase
   test "caps ON: the dashboard shows the at-limit state at the configured cap" do
     stub_const(Stablemate, :MAX_MONITORS_PER_USER, 5) do
       5.times { |i| @project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
-      sign_in @alice
+      sign_in @user
 
       assert_text "5 / 5"
       assert_selector "[data-testid='at-limit']"

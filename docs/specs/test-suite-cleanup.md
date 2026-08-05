@@ -28,8 +28,8 @@ Actions is green → tick the boxes here → next chunk.
 | 1 | Adopt `minitest-mock`; retire the hand-rolled method/ENV stubs | #3 | **MERGED** | #77 |
 | 2 | Finish the half-done extractions; kill `User.take` | #5, #6 | **MERGED** | #78 |
 | 3 | Stop monkey-patching globals in the job tests | #4 | **MERGED** | #87 |
-| 4 | Humble-Object the production env config; retire 8 boots | #2 | **IN REVIEW** | #88 |
-| 5 | Shrink the monitors General Fixture | #1 | **TODO** | — |
+| 4 | Humble-Object the production env config; retire 8 boots | #2 | **MERGED** | #88 |
+| 5 | Two owners: fixture-free tests get a fixture-free user | #1 | **IN REVIEW** | #89 |
 | 6 | `rubocop-minitest` to stop the regressions | #7 | **TODO** | — |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
@@ -174,15 +174,41 @@ extraction was confirmed behaviour-preserving rule by rule. Verified
 independently against real production boots: a blank `STABLEMATE_FORCE_SSL`
 still forces SSL, and Rails' private proxy ranges are still prepended.
 
-## Chunk 5 — Shrink the monitors General Fixture (finding #1)
+## Chunk 5 — Two owners, not one (finding #1)
 
-44 `delete_all`/`destroy_all` calls exist only to demolish `monitors.yml` before
-a test can start. The comments are the tell: `# predictable count`,
-`# stay within the per-user cap`.
+**The plan changed once the numbers were in, and the original was wrong.**
 
-- [ ] keep `users.yml` / `projects.yml` (genuine immutable reference data)
-- [ ] monitors → a Creation Method called from the tests that need one
-- [ ] keep the couple of fixture monitors the tenant-isolation tests genuinely share
+The review said 44 `delete_all`/`destroy_all` calls existed only to demolish
+`monitors.yml`, and proposed replacing the fixture with a Creation Method. But
+23 files use those monitors *by name*, 81 times over — it is real reference data
+for tests that want a ready-made monitor to act on, and 48 `projects.sole` calls
+depend on the current shape. Deleting it would have been a large, risky rewrite
+of working tests.
+
+What was actually wrong: **one set of users served two opposite needs** — own
+some monitors, own none — so half the suite had to undo the setup before it
+could start (`# predictable count`, `# stay within the per-user cap`).
+
+- [x] keep `users.yml` / `projects.yml` and the monitors fixture — all genuine
+      shared reference data for the 23 files that use it
+- [x] add **carol** and **dave**, who own no monitors and never will
+- [x] point the count-sensitive tests at them and drop the demolition
+
+| | before | after |
+|---|---|---|
+| `delete_all` / `destroy_all` | 44 | **30** |
+| files doing it | 24 | **12** |
+
+**The 7 that remain and are NOT this smell:** a sweep test (detection, prune,
+rollup) asserts over every monitor there is, so an empty world is its premise
+rather than an inconvenience. Verified by removing them — three tests fail, on
+enqueued-job counts and the free-plan cap — so they stay. Worth keeping the
+distinction straight: a *global* wipe in a sweep test is legitimate; a
+*per-project* one to dodge a fixture is the smell.
+
+**Left alone deliberately:** `monitors_controller_test` and
+`projects_controller_test` both use the fixture monitors *and* demolish them,
+per test. Converting those needs a per-test judgement rather than a setup swap.
 
 ## Chunk 6 — Stop the regressions (finding #7)
 

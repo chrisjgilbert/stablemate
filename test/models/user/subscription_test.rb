@@ -5,9 +5,9 @@ class User::SubscriptionTest < ActiveSupport::TestCase
   ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze
 
   setup do
-    @user = users(:bob)
+    # carol owns no monitors, so this file's counts are only what it creates.
+    @user = users(:carol)
     @project = @user.projects.sole
-    @project.monitors.delete_all
   end
 
   test "subscribed_to_pro? reflects the active Pay subscription mirror" do

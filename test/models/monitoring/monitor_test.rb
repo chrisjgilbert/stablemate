@@ -3,8 +3,8 @@ require "test_helper"
 class Monitoring::MonitorTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
-  # Use bob (no fixture monitors) so cap-of-5 doesn't trip these create tests.
-  setup { @user = users(:bob); @project = @user.projects.sole; @project.monitors.delete_all }
+  # carol owns no monitors, so the cap assertions here count only what they create.
+  setup { @user = users(:carol); @project = @user.projects.sole }
 
   # Valid interval/grace are required by the model — supply them everywhere.
   ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze

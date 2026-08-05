@@ -6,9 +6,9 @@ class User::DowngradeTest < ActiveSupport::TestCase
   FREE  = Stablemate::FREE_PLAN_MONITOR_LIMIT
 
   setup do
-    @user = users(:bob)
+    # carol owns no monitors, so this file's counts are only what it creates.
+    @user = users(:carol)
     @project = @user.projects.sole
-    @project.monitors.delete_all
   end
 
   # Build n active monitors with the env cap OFF (so creation isn't blocked),

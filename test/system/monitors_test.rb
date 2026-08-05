@@ -3,13 +3,13 @@ require "application_system_test_case"
 # S3 (create), S4 (pause/resume), S5 (rotate token), S7 (cap reached).
 class MonitorsTest < ApplicationSystemTestCase
   setup do
-    @alice = users(:alice)
-    @project = @alice.projects.sole
-    @project.monitors.delete_all # start clean so the count is predictable
+    # carol owns no monitors, so this file's counts are only what it creates.
+    @user = users(:carol)
+    @project = @user.projects.sole
   end
 
   test "S3: create a monitor and reveal the ping-URL card and curl snippet" do
-    sign_in @alice
+    sign_in @user
     first(:link, "New monitor").click
 
     fill_in "Name", with: "Nightly export"
@@ -23,7 +23,7 @@ class MonitorsTest < ApplicationSystemTestCase
     assert_selector "input[aria-label='Ping URL'][value*='/ping/']"
     assert_selector "input[aria-label='curl snippet'][value*='curl -fsS']"
 
-    monitor = @alice.monitors.order(:created_at).last
+    monitor = @user.monitors.order(:created_at).last
     assert_equal 3600, monitor.expected_interval_seconds
     assert_equal 300, monitor.grace_period_seconds
   end
@@ -31,7 +31,7 @@ class MonitorsTest < ApplicationSystemTestCase
   # S4 — pause then resume; the badge tracks the status.
   test "S4: pause and resume a monitor" do
     monitor = @project.monitors.create!(name: "Pausable", expected_interval_seconds: 3600, grace_period_seconds: 300, status: "pending")
-    sign_in @alice
+    sign_in @user
     visit monitor_path(monitor)
 
     click_on "Pause"
@@ -43,7 +43,7 @@ class MonitorsTest < ApplicationSystemTestCase
 
   test "S5: rotate the ping token changes the displayed ping URL" do
     monitor = @project.monitors.create!(name: "Rotatable", expected_interval_seconds: 3600, grace_period_seconds: 300)
-    sign_in @alice
+    sign_in @user
     visit monitor_path(monitor)
 
     original = find("input[aria-label='Ping URL']").value
@@ -57,7 +57,7 @@ class MonitorsTest < ApplicationSystemTestCase
   # reach it from the index). The link is stretched across the whole row.
   test "S8: clicking a monitor row opens its detail page" do
     monitor = @project.monitors.create!(name: "Clickable", expected_interval_seconds: 3600, grace_period_seconds: 300)
-    sign_in @alice
+    sign_in @user
     assert_text "Clickable" # on the index/dashboard
 
     within "##{ActionView::RecordIdentifier.dom_id(monitor, :row)}" do
@@ -79,7 +79,7 @@ class MonitorsTest < ApplicationSystemTestCase
   test "S9: a live monitor collapses the ping-URL setup, rotating reveals it once" do
     monitor = @project.monitors.create!(name: "Live job", expected_interval_seconds: 3600,
       grace_period_seconds: 300, status: "up", last_ping_at: 5.minutes.ago)
-    sign_in @alice
+    sign_in @user
     visit monitor_path(monitor)
 
     # Collapsed by default — present, but not open (visibility inside <details>
@@ -112,7 +112,7 @@ class MonitorsTest < ApplicationSystemTestCase
     Stablemate::MAX_MONITORS_PER_USER.times do |i|
       @project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
     end
-    sign_in @alice
+    sign_in @user
 
     assert_text "#{Stablemate::MAX_MONITORS_PER_USER} / #{Stablemate::MAX_MONITORS_PER_USER}"
     assert_selector "[data-testid='at-limit']"
