@@ -18,17 +18,29 @@ class QueryCountingTest < ActiveSupport::TestCase
   end
 
   # The reason this exists rather than Rails' assert_queries_count: an N+1 loop
-  # issues the SAME statement every iteration, so the query cache would hide it.
-  test "count_queries_matching counts a repeated identical query every time" do
+  # issues the SAME statement every iteration, so the query cache serves all but
+  # the first — and Rails' own capture_sql skips cached events, hiding the N+1.
+  # Hence the CACHED block: it is the case the helper is here for, and the one
+  # the dashboard guard (monitors_controller_test) actually runs under, since a
+  # request has the query cache on.
+  test "count_queries_matching counts a repeated identical query every time, cache hits included" do
     count = count_queries_matching(/FROM "monitors"/) do
-      Monitoring::Monitor.uncached { 3.times { Monitoring::Monitor.where(id: @monitor.id).load } }
+      Monitoring::Monitor.cache { 3.times { Monitoring::Monitor.where(id: @monitor.id).load } }
     end
 
-    assert_equal 3, count
+    assert_equal 3, count, "the two cache hits must be counted, not swallowed"
   end
 
-  test "count_queries_matching ignores schema lookups" do
-    assert_equal 0, count_queries_matching(/./) { Monitoring::Monitor.connection.schema_cache.columns("monitors") }
+  # Named "SCHEMA" is how Rails labels an adapter's own metadata lookups; they are
+  # noise from whichever test touched a table first, so they must not be counted.
+  # The unlabelled twin is counted, which is what keeps this from passing vacuously.
+  test "count_queries_matching ignores schema lookups but counts the same statement otherwise" do
+    assert_equal 0, count_queries_matching(/SELECT 1/) {
+      Monitoring::Monitor.with_connection { |c| c.execute("SELECT 1", "SCHEMA") }
+    }
+    assert_equal 1, count_queries_matching(/SELECT 1/) {
+      Monitoring::Monitor.with_connection { |c| c.execute("SELECT 1") }
+    }
   end
 
   test "sql_executed_during returns the statements in the order they were issued" do
