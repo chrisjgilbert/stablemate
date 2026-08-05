@@ -784,9 +784,14 @@ each load-bearing:
   monitor's key reappears in a run, the upsert un-retires it through
   `reactivate_heartbeat!` — the existing single home for the
   pending/up/overdue re-entry rule, shared with pause-resume and
-  plan-reactivation. So a wrong prune costs one deploy of not-monitoring and
-  is fully reversed, with history intact, by the next sync that includes the
-  task. Hard delete remains the UI's delete button only (§3.3).
+  plan-reactivation. **A revive re-enters the cap**, and must not ride the
+  "updates are always allowed at the cap" rule — retiring frees a slot, so
+  restoring the task re-occupies one, and at the cap the revive is refused and
+  reported as `skipped: limit_reached` exactly as a create would be (the
+  monitor stays retired; nothing is silently over cap). So a wrong prune costs
+  one deploy of not-monitoring and is fully reversed, with history intact, by
+  the next sync that includes the task. Hard delete remains the UI's delete
+  button only (§3.3).
 
   **The absent-versus-skipped guard, which only the CLI can supply.** An
   orphan is not always a removed task: a task still *in* `recurring.yml`
@@ -1562,7 +1567,9 @@ design dependency. Decide §10 when convenient; do not stop for it.
   monitored. Two apps syncing disjoint task sets into one project must not
   orphan each other (the `last_synced_app` match), and a backfilled
   `manual-<id>` monitor never appears (the `source` check).
-- **Prune, five ways (§6.1).** `PRUNE=1` retires a truly-absent task's monitor;
+- **Prune, six ways (§6.1).** `PRUNE=1` retires a truly-absent task's monitor;
+  a revive at the cap is refused as `limit_reached` and the monitor stays
+  retired — it must not ride the updates-allowed-at-cap rule;
   a present-but-skipped task (delete its `class:` line) is reported and **not**
   retired; a forged prune list naming a `manual-<id>` or another app's key
   retires nothing (the server re-checks its own orphan rule); a retired monitor
