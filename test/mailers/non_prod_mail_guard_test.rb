@@ -16,6 +16,24 @@ class NonProdMailGuardTest < ActiveSupport::TestCase
 
   def with_allowlist(value, &block) = with_env("MAIL_ALLOWLIST", value, &block)
 
+  # Which environments the guard covers — the decision the initializer acts on,
+  # asked here rather than by booting each environment to see what it registered.
+  # Development is the one that matters: it is a box a developer can reach real
+  # inboxes from, and nothing else protects it.
+  test "guards every environment that can reach a real inbox by accident" do
+    assert NonProdMailGuard.guards?("development"),
+      "development is what this exists for — a dev box must not mail real people"
+    assert NonProdMailGuard.guards?("staging"), "any future non-prod environment is guarded by default"
+  end
+
+  # Production sends to real people on purpose. Test registers nothing, because an
+  # interceptor would flip perform_deliveries off and empty
+  # ActionMailer::Base.deliveries, breaking the mailer and notification tests.
+  test "does not guard production, and does not guard test" do
+    assert_not NonProdMailGuard.guards?("production")
+    assert_not NonProdMailGuard.guards?("test")
+  end
+
   test "drops recipients not on the allowlist and halts delivery" do
     with_allowlist("me@allowed.test") do
       message = build_message(to: [ "stranger@example.com" ])

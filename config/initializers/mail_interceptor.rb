@@ -19,6 +19,18 @@ class NonProdMailGuard
     LetterOpener::DeliveryMethod
   ].freeze
 
+  # Which environments this guards. Production sends to real people on purpose;
+  # test registers nothing, because an interceptor here would flip
+  # perform_deliveries off and empty ActionMailer::Base.deliveries, breaking the
+  # mailer and notification tests. Everything else — development, and any future
+  # staging — is a box that can reach real inboxes by accident, so it is guarded.
+  #
+  # A predicate rather than an inline condition below so the rule can be asked in
+  # a test without booting the environment it describes.
+  def self.guards?(env)
+    !%w[production test].include?(env.to_s)
+  end
+
   def self.allowlist
     ENV.fetch("MAIL_ALLOWLIST", "").split(",").filter_map { |a| a.strip.downcase.presence }
   end
@@ -42,7 +54,7 @@ end
 # mail_delivery_retries.rb): referencing the constant at initializer-load time
 # would force action_mailer/base.rb to load during boot, coupling other
 # initializers to our position in the load order.
-unless Rails.env.production? || Rails.env.test?
+if NonProdMailGuard.guards?(Rails.env)
   ActiveSupport.on_load(:action_mailer) do
     ActionMailer::Base.register_interceptor(NonProdMailGuard)
   end

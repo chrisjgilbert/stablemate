@@ -31,8 +31,8 @@ Actions is green → tick the boxes here → next chunk.
 | 4 | Humble-Object the production env config; retire 8 boots | #2 | **MERGED** | #88 |
 | 5 | Two owners: fixture-free tests get a fixture-free user | #1 | **MERGED** | #89 |
 | 6 | `rubocop-minitest` to stop the regressions | #7 | **MERGED** | #90 |
-| 7 | The system suite's load sensitivity — an Erratic Test | #8 | **IN REVIEW** | #91 |
-| 8 | Stop testing config; test behaviour | #9 | **IN REVIEW** | #93 |
+| 7 | The system suite's load sensitivity — an Erratic Test | #8 | **MERGED** | #91 |
+| 8 | Stop testing config and booting; test behaviour | #9 | **IN REVIEW** | #93 |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
 
@@ -360,40 +360,38 @@ directly; where none did, the assertion is gone.
 
 | | before | after |
 |---|---|---|
-| `test/config` wall time | ~16s | **2.6s** |
-| boots in the suite | 7 | **1** |
+| `test/config` wall time | ~16s | **1.6s** |
+| boots in the suite | 7 | **0** |
 
-**Both remaining boot tests were then converted to behaviour, and one deleted.**
+**Then all of them went, boot helper included.** The standing preference is
+against config and boot tests, and the last holdout did not need to be either.
 
-`development_boot_test.rb` read `Mail.@@delivery_interceptors` and asserted the
-guard was in the list. It now **delivers a message** aimed at a stranger and
-asserts the recipients were stripped and no send attempted — the behaviour, of
-which the interceptor list was only today's mechanism. It still boots, because
-`NonProdMailGuard` registers from an `on_load(:action_mailer)` hook that runs
-only outside production and test, so no in-process test can enter the one
-environment that runs it. Mutation-checked: unregistering the guard fails it with
-*"a stranger's address must be stripped in development"*.
-
-Only the DENY path is asserted there. The allow path would really deliver — that
-is what it means — and a boot test that opens an SMTP connection fails on any
-machine without a mail server. What survives the allowlist is exercised
-in-process, message by message, in `non_prod_mail_guard_test.rb`.
-
-The delivery is rescued so an attempted send is *reported* rather than crashing
-the child: without that, the mutation failed as "app failed to boot", which sends
-the reader to entirely the wrong place.
-
-`mail_from_test.rb` is **deleted**. Its three assertions were: `app_from` equals
-the env value (which restates the `ENV.fetch` that set it), and two protecting
-Pay's from-address — on emails Pay never sends, since `config.send_emails =
-false`. The live behaviour underneath is "an alert arrives from an address the
-recipient's SPF/DKIM accepts", and that is now asserted on a **real delivered
+`mail_from_test.rb` — deleted. `app_from` restated the `ENV.fetch` that set it,
+and the other two protected Pay's from-address on emails Pay never sends
+(`config.send_emails = false`). The live behaviour — an alert arriving from an
+address the recipient's SPF/DKIM accepts — is now asserted on a **real delivered
 alert** in `monitor_mailer_test.rb`, in-process.
+
+`development_boot_test.rb` — deleted, and the thing it protected kept, by the
+same move as chunk 4. Registering `NonProdMailGuard` outside production and test
+is a **decision**; `NonProdMailGuard.guards?(env)` is now that decision as a
+predicate, asked in-process, while the initializer is a one-line `if` nobody
+tests. Mutation-checked: dropping development from the guarded set fails with
+*"a dev box must not mail real people"*.
+
+That is the shape the whole ledger converged on:
+
+| | test it? |
+|---|---|
+| a **decision** with edge cases | yes — as a plain object, in-process |
+| an **assignment** or a registration | no — a reader checks it in less time than a boot takes |
+
+`boot_test_helper.rb` is gone with them.
 
 | | before chunk 8 | after |
 |---|---|---|
-| `test/config` wall time | ~16s | **2.6s** |
-| boots in the suite | 7 | **1** |
+| `test/config` wall time | ~16s | **1.6s** |
+| boots in the suite | 7 | **0** |
 
 **What is deliberately not covered any more.** A Pay upgrade silently changing
 how it resolves `STRIPE_PRIVATE_KEY` would no longer fail CI — the test
