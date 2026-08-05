@@ -360,20 +360,40 @@ directly; where none did, the assertion is gone.
 
 | | before | after |
 |---|---|---|
-| `test/config` wall time | ~16s | **4.5s** |
-| boots in the suite | 7 | **2** |
+| `test/config` wall time | ~16s | **2.6s** |
+| boots in the suite | 7 | **1** |
 
-**The two boots that remain, and why they are different.** Both are about a
-*behaviour* that only exists in an environment nothing else enters:
+**Both remaining boot tests were then converted to behaviour, and one deleted.**
 
-- `development_boot_test.rb` — `NonProdMailGuard` is registered from an
-  `on_load(:action_mailer)` hook only outside production and test, so the test
-  env never runs that branch. It is what stops development mail reaching real
-  people. Severe, silent, and unobservable without entering development.
-- `mail_from_test.rb` — Pay resolves its from-address as
-  `Pay.support_email || ApplicationMailer.default_params[:from]`, read once at
-  boot. A self-hoster sending from a domain they do not own fails SPF/DKIM
-  silently.
+`development_boot_test.rb` read `Mail.@@delivery_interceptors` and asserted the
+guard was in the list. It now **delivers a message** aimed at a stranger and
+asserts the recipients were stripped and no send attempted — the behaviour, of
+which the interceptor list was only today's mechanism. It still boots, because
+`NonProdMailGuard` registers from an `on_load(:action_mailer)` hook that runs
+only outside production and test, so no in-process test can enter the one
+environment that runs it. Mutation-checked: unregistering the guard fails it with
+*"a stranger's address must be stripped in development"*.
+
+Only the DENY path is asserted there. The allow path would really deliver — that
+is what it means — and a boot test that opens an SMTP connection fails on any
+machine without a mail server. What survives the allowlist is exercised
+in-process, message by message, in `non_prod_mail_guard_test.rb`.
+
+The delivery is rescued so an attempted send is *reported* rather than crashing
+the child: without that, the mutation failed as "app failed to boot", which sends
+the reader to entirely the wrong place.
+
+`mail_from_test.rb` is **deleted**. Its three assertions were: `app_from` equals
+the env value (which restates the `ENV.fetch` that set it), and two protecting
+Pay's from-address — on emails Pay never sends, since `config.send_emails =
+false`. The live behaviour underneath is "an alert arrives from an address the
+recipient's SPF/DKIM accepts", and that is now asserted on a **real delivered
+alert** in `monitor_mailer_test.rb`, in-process.
+
+| | before chunk 8 | after |
+|---|---|---|
+| `test/config` wall time | ~16s | **2.6s** |
+| boots in the suite | 7 | **1** |
 
 **What is deliberately not covered any more.** A Pay upgrade silently changing
 how it resolves `STRIPE_PRIVATE_KEY` would no longer fail CI — the test
