@@ -33,7 +33,7 @@ Actions is green → tick the boxes here → next chunk.
 | 6 | `rubocop-minitest` to stop the regressions | #7 | **MERGED** | #90 |
 | 7 | The system suite's load sensitivity — an Erratic Test | #8 | **MERGED** | #91 |
 | 8 | Stop testing config and booting; test behaviour | #9 | **MERGED** | #93 |
-| 9 | Tests that test implementation, not behaviour | follow-up | **IN REVIEW** | — |
+| 9 | Tests that test implementation, not behaviour | follow-up | **IN REVIEW** | #95 |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
 
