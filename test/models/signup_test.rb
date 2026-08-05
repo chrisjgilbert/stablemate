@@ -148,7 +148,7 @@ class SignupTest < ActiveSupport::TestCase
   # count the INSERT is predicated on — has to be re-made under the lock.
   test "the create path takes the capacity lock before it counts accounts and inserts the user" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, User.count + 1) do
-      statements = capture_sql do
+      statements = sql_executed_during do
         Signup.new(email: "locked@example.com", password: "password1234").run
       end
 
@@ -215,7 +215,7 @@ class SignupTest < ActiveSupport::TestCase
 
   test "with the signup cap OFF there is no window to guard, so no lock is taken" do
     stub_const(Stablemate, :SIGNUP_ACCOUNT_CAP, 0) do
-      statements = capture_sql do
+      statements = sql_executed_during do
         Signup.new(email: "unlocked@example.com", password: "password1234").run
       end
 
@@ -308,17 +308,6 @@ class SignupTest < ActiveSupport::TestCase
       yield
     ensure
       User.skip_callback(:create, :before, racer, raise: false)
-    end
-
-    def capture_sql
-      statements = []
-      subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|
-        statements << payload[:sql]
-      end
-      yield
-      statements
-    ensure
-      ActiveSupport::Notifications.unsubscribe(subscriber)
     end
 
     def index_of(statements, pattern)
