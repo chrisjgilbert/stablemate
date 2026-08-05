@@ -32,6 +32,11 @@ module Monitoring
         # deliberately does not (PRD §3.3).
         scope :counting_toward_cap, -> { where.not(status: "suspended") }
 
+        # Its complement — the plan-suspended monitors, which the downgrade and
+        # re-upgrade paths restore from. Declared next to counting_toward_cap so the
+        # two halves of the cap rule are read and changed together.
+        scope :suspended, -> { where(status: "suspended") }
+
         # next_due_at is derived from (last contact + interval), so an interval edit
         # has to re-derive it or the OLD cadence keeps driving detection: loosening
         # hourly -> daily would still fire a false `down` an hour later. On the model
@@ -53,6 +58,12 @@ module Monitoring
       # Eligible for detection and uptime measurement. A `down` monitor is still
       # monitored (it's mid-outage).
       def monitored? = up? || down?
+
+      # Was this monitor already paused by its user when a plan downgrade suspended
+      # it? Reactivation restores those straight to `paused` rather than
+      # re-evaluating the heartbeat. False when nothing was remembered — a monitor
+      # suspended before the memory column existed must not be guessed into a pause.
+      def suspended_from_paused? = status_before_suspension == "paused"
 
       def ever_pinged?
         last_ping_at.present?

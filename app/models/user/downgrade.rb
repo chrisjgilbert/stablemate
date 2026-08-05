@@ -54,7 +54,7 @@ class User
       # path that touches both takes them in that order — locking monitors first
       # here would invert the order and deadlock a concurrent sync or re-upgrade.
       @user.with_lock do
-        @user.monitors.where(id: keep).where(status: "suspended").find_each(&:reactivate!)
+        @user.monitors.where(id: keep).suspended.find_each(&:reactivate!)
         active_scope.where.not(id: keep).find_each(&:suspend!)
         @user.clear_downgrade_choice!
       end

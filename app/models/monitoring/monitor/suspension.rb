@@ -43,7 +43,7 @@ module Monitoring
       def reactivate!
         return unless @monitor.suspended?
 
-        if @monitor.status_before_suspension == "paused"
+        if @monitor.suspended_from_paused?
           @monitor.update!(status: "paused", status_before_suspension: nil)
         else
           # Cleared first so the memory can never outlive its suspension — the
