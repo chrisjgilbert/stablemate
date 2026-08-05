@@ -10,7 +10,8 @@
 <div class="flex items-end gap-[2px] h-[34px]" role="img" aria-label="Uptime, last <%= days.size %> days">
   <% days.each_with_index do |status, i| %>
     <% ago = days.size - 1 - i %>
-    <span class="flex-1 h-full rounded-[2px] <%= fills.fetch(status, fills["no-data"]) %>"
+    <span data-testid="uptime-day"
+          class="flex-1 h-full rounded-[2px] <%= fills.fetch(status, fills["no-data"]) %>"
           title="<%= ago.zero? ? "today" : "#{ago}d ago" %>"></span>
   <% end %>
 </div>

@@ -42,7 +42,7 @@ class ComponentsTest < ActionView::TestCase
     checks = ([ "up" ] * 15) + [ "down" ] # 16 checks, 15 up
     html = render(partial: "shared/mini_ticks", locals: { checks: checks })
 
-    assert_equal 16, html.scan(/rounded-\[1\.5px\]/).size
+    assert_equal 16, html.scan(/data-testid="check-tick"/).size
     assert_match "94%", html # 15/16 = 93.75 → 94
   end
 end
