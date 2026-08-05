@@ -5,6 +5,7 @@ require_relative "test_helpers/session_test_helper"
 require_relative "test_helpers/boot_test_helper"
 require_relative "test_helpers/query_counting_test_helper"
 require_relative "test_helpers/config_gate_test_helper"
+require_relative "test_helpers/log_capture_test_helper"
 
 # Network lockdown: no test may reach the real internet. Outbound HTTP is blocked
 # so an accidental live Stripe call fails loudly instead of hitting the API (or
@@ -31,6 +32,7 @@ module ActiveSupport
     include CloudflareAnalyticsTestHelper
     include PaySubscriptionMirror
     include QueryCountingTestHelper
+    include LogCaptureTestHelper
 
     # The rate-limit stores persist across tests within a worker; clear them so
     # ordinary per-test requests never accumulate into a spurious throttle.

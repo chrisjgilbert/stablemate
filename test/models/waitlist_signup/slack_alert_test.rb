@@ -1,5 +1,7 @@
 require "test_helper"
 
+# The alert owns one thing: the sentence it sends. The transport guarantees are
+# stated once in test/models/slack/webhook_test.rb.
 class WaitlistSignup::SlackAlertTest < ActiveSupport::TestCase
   test "deliver! posts a message naming the email to the Slack webhook" do
     with_slack_enabled do
@@ -17,16 +19,8 @@ class WaitlistSignup::SlackAlertTest < ActiveSupport::TestCase
     end
   end
 
-  test "deliver! is a no-op when Slack is not configured" do
-    with_slack_disabled do
-      signup = WaitlistSignup.create!(email_address: "waiter@example.com")
-
-      WaitlistSignup::SlackAlert.new(signup).deliver!
-
-      assert_not_requested :post, /hooks\.slack\.com/
-    end
-  end
-
+  # Escaping belongs to the transport, but it is the property a user-supplied
+  # value depends on, so it stays pinned end-to-end through the waitlist path.
   test "deliver! escapes Slack mrkdwn special characters in the email" do
     with_slack_enabled do
       signup = WaitlistSignup.new(email_address: "a<b&c>d@example.com")
@@ -38,42 +32,6 @@ class WaitlistSignup::SlackAlertTest < ActiveSupport::TestCase
       WaitlistSignup::SlackAlert.new(signup).deliver!
 
       assert_requested request
-    end
-  end
-
-  test "deliver! logs a non-2xx response instead of treating it as delivered" do
-    with_slack_enabled do
-      signup = WaitlistSignup.create!(email_address: "waiter@example.com")
-      stub_request(:post, TestCredentials::SLACK_WEBHOOK_URL).to_return(status: 404, body: "no_team")
-
-      out = StringIO.new
-      old_logger = Rails.logger
-      Rails.logger = ActiveSupport::Logger.new(out)
-      begin
-        WaitlistSignup::SlackAlert.new(signup).deliver!
-      ensure
-        Rails.logger = old_logger
-      end
-
-      assert_match(/Slack waitlist alert returned 404/, out.string)
-    end
-  end
-
-  test "deliver! logs and swallows the error instead of raising when the request fails" do
-    with_slack_enabled do
-      signup = WaitlistSignup.create!(email_address: "waiter@example.com")
-      stub_request(:post, TestCredentials::SLACK_WEBHOOK_URL).to_raise(Net::OpenTimeout)
-
-      out = StringIO.new
-      old_logger = Rails.logger
-      Rails.logger = ActiveSupport::Logger.new(out)
-      begin
-        WaitlistSignup::SlackAlert.new(signup).deliver!
-      ensure
-        Rails.logger = old_logger
-      end
-
-      assert_match(/Slack waitlist alert failed/, out.string)
     end
   end
 end
