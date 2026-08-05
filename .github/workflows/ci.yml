@@ -5,6 +5,15 @@ on:
     branches: ["main"]
   pull_request:
 
+# Least privilege for the GITHUB_TOKEN, inherited by both jobs. Nothing here
+# calls the GitHub API or pushes — `ci` runs bin/ci, and `deploy` authenticates
+# to the server over SSH and to the registry with its own password — so read
+# access for the checkout is the whole requirement. Without this block both jobs
+# would run at the repository's default token scope, which is write on many
+# repos. (zizmor: excessive-permissions)
+permissions:
+  contents: read
+
 # Third-party actions are pinned to a COMMIT SHA with the version in a trailing
 # comment. A tag can be repointed at any time, and the deploy job below runs
 # these actions with five production secrets and an authenticated SSH agent in
@@ -44,7 +53,27 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432
 
     steps:
+      # persist-credentials: false — checkout otherwise leaves the token in
+      # .git/config, where anything later in the job (an uploaded artifact, a
+      # `git` invocation in a script) can carry it off. Nothing here reuses it.
+      # (zizmor: artipacked)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Audit the workflow itself. This job runs bin/ci with no secrets, but the
+      # deploy job below holds five, so the file is worth linting: unpinned
+      # actions, token scope, template injection, artifact poisoning. Run as a
+      # pinned PyPI tool rather than a fifth third-party action — adding another
+      # action to the set we're hardening is self-defeating, and this needs no
+      # extra token scope. Offline, so it makes no network calls of its own.
+      #
+      # This is the one check that lives here rather than in bin/ci (CLAUDE.md
+      # names bin/ci the single gate): it lints a file only GitHub consumes, and
+      # putting a Python toolchain in bin/ci would make every contributor's local
+      # run either fail or silently skip it.
+      - name: Audit the workflows (zizmor)
+        run: pipx run zizmor==1.29.0 --offline --no-progress .github/workflows/
 
       - name: Check for a scaffolded app
         id: app
@@ -135,6 +164,8 @@ jobs:
       # Checkout is unconditional because the preflight below reads the repo to
       # work out what a deploy needs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Deploying needs secrets only the owner of a real server can supply. Until
       # they are set, skip the rest of the job rather than leaving main
