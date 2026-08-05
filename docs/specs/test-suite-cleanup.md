@@ -32,6 +32,7 @@ Actions is green → tick the boxes here → next chunk.
 | 5 | Two owners: fixture-free tests get a fixture-free user | #1 | **MERGED** | #89 |
 | 6 | `rubocop-minitest` to stop the regressions | #7 | **MERGED** | #90 |
 | 7 | The system suite's load sensitivity — an Erratic Test | #8 | **IN REVIEW** | #91 |
+| 8 | Stop testing config; test behaviour | #9 | **IN REVIEW** | TBD |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
 
@@ -321,3 +322,63 @@ spanned a Turbo re-render.
 Still open, and deliberately so: `monitors_controller_test` and
 `projects_controller_test` both use the fixture monitors *and* demolish them per
 test, which needs a per-test judgement rather than a setup swap.
+
+
+## Chunk 8 — Stop testing config; test behaviour (finding #9)
+
+Chunk 4 moved the env→config *derivation* into a plain object, and left two boot
+tests behind on the reasoning that a boot still proves production "wires it in".
+Pressed on why we test config at all, that reasoning does not survive.
+
+**What production.rb does with the object is nine straight assignments** —
+`config.force_ssl = deployment.ssl_enabled?`, and so on. Asserting `force_ssl ==
+true` afterwards tests Rails' attribute writer. It was not a tautology before
+chunk 4, because the assertions reached real branching; chunk 4 is what made it
+one, by moving that branching somewhere it can be tested in 1.4s.
+
+The deeper objection is that the survivors were **implementation, not
+behaviour**: `::Stripe.api_key.present?` reads an SDK attribute, and
+`pay_paths.empty?` reads the routing table. Nobody's experience changes because
+a variable is set. Where a behaviour existed underneath, it is now asserted
+directly; where none did, the assertion is gone.
+
+- [x] `production_env_config_test.rb` — nine assignment tautologies, plus a
+      "production boots" check the Dockerfile already performs at image build
+      (`RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile`)
+- [x] `billing_boot_test.rb` — one non-tautological assertion
+      (`::Stripe.api_key.present?`), and it reads an SDK internal
+- [x] `pay_automount_routes_test.rb` → `test/controllers/pay_engine_routes_test.rb`,
+      which **requests the paths and asserts 404** instead of asking
+      `routes.recognize_path`. Mutation-checked: deleting
+      `Pay.automount_routes = false` turns `/pay/payments/1` from 404 into 302.
+      This is the half that mattered — Pay draws it unconditionally, and the page
+      embeds a PaymentIntent's `client_secret`.
+- [x] `honeybadger_api_key_test.rb` → `honeybadger_secret_test.rb`, keeping only
+      the assertion that needed no boot (no key committed to the repo — a plain
+      YAML read). The env-vs-YAML precedence pair was testing Honeybadger's own
+      resolution rules.
+
+| | before | after |
+|---|---|---|
+| `test/config` wall time | ~16s | **4.5s** |
+| boots in the suite | 7 | **2** |
+
+**The two boots that remain, and why they are different.** Both are about a
+*behaviour* that only exists in an environment nothing else enters:
+
+- `development_boot_test.rb` — `NonProdMailGuard` is registered from an
+  `on_load(:action_mailer)` hook only outside production and test, so the test
+  env never runs that branch. It is what stops development mail reaching real
+  people. Severe, silent, and unobservable without entering development.
+- `mail_from_test.rb` — Pay resolves its from-address as
+  `Pay.support_email || ApplicationMailer.default_params[:from]`, read once at
+  boot. A self-hoster sending from a domain they do not own fails SPF/DKIM
+  silently.
+
+**What is deliberately not covered any more.** A Pay upgrade silently changing
+how it resolves `STRIPE_PRIVATE_KEY` would no longer fail CI — the test
+environment has no Stripe keys, so nothing else notices, and the first customer
+to click Upgrade would find out. That belongs in a post-deploy smoke check
+against the running instance (real keys, real config, real behaviour), not in a
+suite that has to fake all three. Recorded here so the gap is a decision rather
+than an oversight.

@@ -6,9 +6,12 @@ require_relative "../../config/initializers/deployment_config"
 # This logic used to sit inline in config/environments/production.rb, where the
 # only way to reach it was to boot a whole production process per case — 8 boots,
 # ~34s, to assert things like "a blank SMTP_PORT falls back to 587". The rules
-# themselves never needed a Rails process; they needed an argument. One boot
-# smoke test (production_env_config_test.rb) still proves production actually
-# wires this object in.
+# themselves never needed a Rails process; they needed an argument.
+#
+# What production.rb now does with this object is nine straight assignments
+# (config.force_ssl = deployment.ssl_enabled?, and so on). There is no test for
+# those: asserting that assigning X makes the attribute equal X tests Rails'
+# attribute writer, and a reader checks it by eye in less time than a boot takes.
 class DeploymentConfigTest < ActiveSupport::TestCase
   # Positional credentials, not a keyword: with a keyword in the signature Ruby
   # reads `config_for("A" => "b")` as keywords rather than a hash argument.
