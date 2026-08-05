@@ -32,7 +32,8 @@ Actions is green → tick the boxes here → next chunk.
 | 5 | Two owners: fixture-free tests get a fixture-free user | #1 | **MERGED** | #89 |
 | 6 | `rubocop-minitest` to stop the regressions | #7 | **MERGED** | #90 |
 | 7 | The system suite's load sensitivity — an Erratic Test | #8 | **MERGED** | #91 |
-| 8 | Stop testing config and booting; test behaviour | #9 | **IN REVIEW** | #93 |
+| 8 | Stop testing config and booting; test behaviour | #9 | **MERGED** | #93 |
+| 9 | Tests that test implementation, not behaviour | follow-up | **IN REVIEW** | — |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
 
@@ -415,3 +416,60 @@ to click Upgrade would find out. That belongs in a post-deploy smoke check
 against the running instance (real keys, real config, real behaviour), not in a
 suite that has to fake all three. Recorded here so the gap is a decision rather
 than an oversight.
+
+---
+
+## 9 · Tests that test implementation, not behaviour
+
+A follow-up pass, asked for once chunks 1–8 were on `main`: a sweep for the
+same fault the boot tests had — a test that asserts *how* the code is built
+rather than *what it does* — everywhere else in the suite.
+
+Three survived the sweep. (What it did **not** find is worth recording too:
+no `assert_select` on styling, no assertions on gem internals outside the ones
+chunk 8 already removed, and the `sql_executed_during` / `assert_sql_order`
+sites in `signup_test.rb` and the pausing/suspension tests are pinning
+concurrency invariants that have no other observable — those stay.)
+
+- [x] **Counting elements by their corner radius.** Three assertions counted
+      DOM nodes with `rounded-[1.5px]` / `rounded-[2px]` — a Tailwind utility
+      class, i.e. how round the bars are. A designer changing a radius broke
+      the suite with no behaviour change, and the selector said nothing about
+      what was being counted. `_mini_ticks` and `_uptime_bar` now carry
+      `data-testid="check-tick"` / `data-testid="uptime-day"`, which both the
+      component test and the two system tests ask for.
+- [x] **A private method and three ivars.** The `MonitorSync` race test called
+      the private `#persist_create`, hand-seeded the `@registered` / `@skipped`
+      / `@conflicts` that `#sync_monitors` normally seeds, and read its results
+      back out of them — green even if the operation's public contract broke,
+      red if the ivars were ever renamed. It now calls `#sync_monitors` and
+      asserts on the hash it returns. The one thing the race actually breaks —
+      the first lookup missing a committed row — is staged with a stub, and
+      only the first: blinding every lookup stages a different bug and passes
+      while the recovery is broken. Mutation-checked.
+- [x] **A spy where the database would do.** "Sync locks the user, not the
+      project" patched `#with_lock` onto both records and asserted which was
+      called. The `SELECT … FOR UPDATE` the database receives says the same
+      thing, counts any other route to the lock, and needs no monkey-patch.
+      Mutation-checked: locking the project fails it.
+
+The two remaining spies in `signup_test.rb` are kept — bcrypt leaves no SQL
+behind, and the capacity probe has to run *inside* the deciding window — but
+their save/restore now goes through `Object#stub` rather than a hand-rolled
+`define_singleton_method` in an `ensure`. That was the last of them:
+
+| | before | after |
+|---|---|---|
+| `define_singleton_method` / `class_eval` / `alias_method` / `singleton_class` in `test/` | 6 | **0**\* |
+| assertions counting Tailwind utility classes | 3 | **0** |
+| tests reaching private methods or ivars | 1 | **0** |
+
+\* one `singleton_class` reference remains in `config_gate_test_helper.rb`, and
+is the opposite of a monkey-patch: it reads minitest's own `__minitest_stub__`
+marker to catch a gate being double-stubbed.
+
+**Found and fixed in chunk 8's review instead of here**, being in a file that
+chunk already touched: two mailer tests read the very config they were
+checking (`assert_equal ApplicationMailer.default[:from], mail.from`, and the
+same shape for the link host). Both pass for *any* value, including a From
+address that fails SPF and a link host taken from the request.
