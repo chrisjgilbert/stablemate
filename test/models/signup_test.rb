@@ -306,30 +306,22 @@ class SignupTest < ActiveSupport::TestCase
       subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|
         events << :lock if payload[:sql].to_s.match?(/pg_advisory_xact_lock/)
       end
-      original = BCrypt::Password.method(:create)
-      BCrypt::Password.define_singleton_method(:create) do |*args, **kwargs|
-        events << :hash
-        original.call(*args, **kwargs)
-      end
+      hashing = BCrypt::Password.method(:create)
+      watched = ->(*args, **kwargs) { events << :hash; hashing.call(*args, **kwargs) }
 
-      yield
+      BCrypt::Password.stub(:create, watched) { yield }
       events
     ensure
-      BCrypt::Password.define_singleton_method(:create, original) if original
       ActiveSupport::Notifications.unsubscribe(subscriber) if subscriber
     end
 
     # Run `probe` at the moment Signup consults the cap — i.e. inside the window
     # the lock is supposed to close.
     def while_deciding_capacity(probe)
-      original = Signup.method(:at_capacity?)
-      Signup.define_singleton_method(:at_capacity?) do
-        probe.call
-        original.call
-      end
-      yield
-    ensure
-      Signup.define_singleton_method(:at_capacity?, original)
+      deciding = Signup.method(:at_capacity?)
+      watched = -> { probe.call; deciding.call }
+
+      Signup.stub(:at_capacity?, watched) { yield }
     end
 
     # Try to take the signup lock from a genuinely separate database connection

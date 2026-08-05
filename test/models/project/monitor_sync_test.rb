@@ -465,17 +465,20 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
 
   # The row lock stays on the USER, not the project (§4.3): the cap is per-user, so
   # concurrent syncs of different projects of one user must serialise on the shared
-  # user row for the slot accounting to be atomic. Spy that with_lock is taken on
-  # the user and never on the project.
+  # user row for the slot accounting to be atomic.
+  #
+  # Read off the SELECT … FOR UPDATE the database actually receives, rather than by
+  # patching #with_lock onto the two records and watching which one is called:
+  # locking is what the statement does, and any other route to it — a bare
+  # `lock!`, a `where(...).lock` — counts just the same.
   test "sync holds the row lock on the user, not the project" do
-    locked = []
-    user = @project.user # memoize the delegated instance the operation will reuse
-    user.define_singleton_method(:with_lock) { |&blk| locked << :user; blk.call }
-    @project.define_singleton_method(:with_lock) { |&blk| locked << :project; blk.call }
+    locks = sql_executed_during { @project.sync_monitors(entries: [ entry("x") ]) }
+      .grep(/FOR UPDATE/)
 
-    @project.sync_monitors(entries: [ entry("x") ])
-
-    assert_equal [ :user ], locked
+    assert locks.any? { |sql| sql.match?(/FROM "users"/) },
+      "the slot accounting must serialise on the shared user row: #{locks.inspect}"
+    assert_empty locks.grep(/FROM "projects"/),
+      "locking the project leaves a user's other projects free to race for the same slots"
   end
 
   # last_synced_app (§3.2 / §13-B3): the gem's app string is recorded on create,
