@@ -123,7 +123,7 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
       batch = User.downgrade_grace_expired.to_a.sort_by { |u| u.id == @user.id ? 0 : 1 }
       assert_equal 2, batch.size
 
-      # Bob closes his account while the job is mid-batch.
+      # Carol closes her account while the job is mid-batch.
       with_billing_disabled { @user.close_account! }
 
       assert_nothing_raised { batch.each(&:enforce_downgrade_fallback!) }
@@ -139,14 +139,14 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
     overdue = start_grace!(FREE + 2)
 
     other = users(:dave)
-    # Her window opens later, so her deadline is still in the future below.
+    # Dave's window opens later, so their deadline is still in the future below.
     start_grace!(FREE + 1, user: other, opens_at: Stablemate::DOWNGRADE_GRACE_PERIOD.from_now - 2.days)
 
     travel_to Stablemate::DOWNGRADE_GRACE_PERIOD.from_now + 1.hour do
       EnforceOverdueDowngradesJob.perform_now
     end
 
-    # Bob (overdue) settled; Alice (still in window) untouched.
+    # Carol (overdue) settled; dave (still in window) untouched.
     refute @user.reload.awaiting_downgrade_choice?
     assert_equal 2, overdue.last(2).count { |m| m.reload.suspended? }
     assert other.reload.awaiting_downgrade_choice?

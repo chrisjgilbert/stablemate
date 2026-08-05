@@ -9,7 +9,7 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
   FREE  = Stablemate::FREE_PLAN_MONITOR_LIMIT
 
   # carol owns no monitors, so these counts are only what the tests create.
-  setup { @alice = users(:carol); @project = @alice.projects.sole }
+  setup { @user = users(:carol); @project = @user.projects.sole }
 
   # S-DR1 (WU-2, H1) — pausing a DOWN monitor clears its incident, and after a
   # ping + resume the badge returns to Up with no lingering "down" banner. This is
@@ -21,7 +21,7 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
     )
     monitor.flag_missed! # overdue -> down, opens the incident + banner
 
-    sign_in @alice
+    sign_in @user
     visit monitor_path(monitor)
     assert_selector "[data-testid='incident-banner']"
 
@@ -43,13 +43,13 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
   # confirm (no un-submittable "pick exactly N" picker).
   test "S-DR2: a small Pro account downgrades via a confirm, not the picker" do
     with_billing_enabled do
-      @alice.update!(plan: "pro")
+      @user.update!(plan: "pro")
       (FREE - 2).times { |i| @project.monitors.create!(name: "Small#{i}", **ATTRS) }
       sub_id = "sub_sys_#{SecureRandom.hex(4)}"
-      give_pro_subscription!(user: @alice, subscription_id: sub_id)
+      give_pro_subscription!(user: @user, subscription_id: sub_id)
       stub_stripe_subscription_cancel(sub_id)
 
-      sign_in @alice
+      sign_in @user
       visit billing_subscription_path
       click_on "Downgrade to Free"
 
@@ -67,13 +67,13 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
   # auto-suspended ones) and confirming re-picks which N stay active.
   test "S-DR3: the involuntary choose-N lock lets the user re-pick which to keep" do
     with_billing_enabled do
-      @alice.update!(plan: "pro")
+      @user.update!(plan: "pro")
       monitors = (FREE + 2).times.map { |i| @project.monitors.create!(name: "Job#{i}", **ATTRS) }
       # No active Pro subscription mirror ⇒ the sync drops to Free involuntarily.
-      @alice.sync_plan_from_subscription!
-      assert @alice.reload.must_choose_downgrade?
+      @user.sync_plan_from_subscription!
+      assert @user.reload.must_choose_downgrade?
 
-      sign_in @alice
+      sign_in @user
       visit billing_subscription_path
       assert_selector "[data-testid='choose-five-lock']"
       click_on "Choose which #{FREE} to keep active"
@@ -84,8 +84,8 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
       click_on "Keep these & suspend the rest"
 
       assert_current_path billing_subscription_path
-      refute @alice.reload.awaiting_downgrade_choice?
-      assert_equal monitors.last(FREE).map(&:id).sort, @alice.monitors.counting_toward_cap.ids.sort
+      refute @user.reload.awaiting_downgrade_choice?
+      assert_equal monitors.last(FREE).map(&:id).sort, @user.monitors.counting_toward_cap.ids.sort
     end
   end
 end
