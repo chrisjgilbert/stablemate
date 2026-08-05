@@ -732,10 +732,10 @@ block, so the line a user scans for a task is the whole story for that task.
 The `curl` block prints for every `c.monitors` entry — those are the monitors
 checked in from outside the gem, and this is where §4's "the command prints
 ready-to-paste `curl` lines" promise is kept; without a slot in the binding
-shape, that promise would be silently unimplementable. It prints the real key
-(the command already holds it — §4's shown-once argument depends on this being
-where reconstruction happens), so the output is sensitive and says so when any
-`c.monitors` entry exists.
+shape, that promise would be silently unimplementable. It prints the real key —
+no reconstruction involved, the command reads it from the same config the gem
+does, which is §4's whole argument for shown-once being affordable — so the
+output is sensitive, and says so whenever a `c.monitors` entry exists.
 
 **It must report orphans, and must not delete them.** An orphan is a monitor the
 sync's own project holds that matches no task in this run — the task was renamed
