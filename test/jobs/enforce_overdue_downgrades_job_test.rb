@@ -9,7 +9,9 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
   ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze
   FREE  = Stablemate::FREE_PLAN_MONITOR_LIMIT
 
-  setup { @user = users(:bob) }
+  # carol and dave own no monitors — the grace/suspension counts here are only
+  # what the test builds.
+  setup { @user = users(:carol) }
 
   # Put a user in the grace state exactly as sync_plan_from_subscription! would:
   # over the Free cap, awaiting a choice, deadline set, nothing suspended.
@@ -20,7 +22,6 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
   # has already run out.
   def start_grace!(monitor_count, user: @user, opens_at: Time.current)
     project = user.projects.sole
-    project.monitors.delete_all
     monitors = nil
     with_billing_enabled do
       user.update!(plan: "pro")
@@ -113,8 +114,8 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
   # the batch.
   test "a record deleted mid-batch is skipped, and the rest of the batch still settles" do
     start_grace!(FREE + 2)
-    alice = users(:alice)
-    alice_monitors = start_grace!(FREE + 2, user: alice)
+    other = users(:dave)
+    other_monitors = start_grace!(FREE + 2, user: other)
 
     travel_to Stablemate::DOWNGRADE_GRACE_PERIOD.from_now + 1.hour do
       # The batch as the job loaded it, ordered so the doomed record is walked
@@ -128,18 +129,18 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
       assert_nothing_raised { batch.each(&:enforce_downgrade_fallback!) }
     end
 
-    # Alice — after the deleted record — still got settled.
-    refute alice.reload.awaiting_downgrade_choice?
-    assert_equal 2, alice_monitors.last(2).count { |m| m.reload.suspended? }
+    # The user after the deleted record still got settled.
+    refute other.reload.awaiting_downgrade_choice?
+    assert_equal 2, other_monitors.last(2).count { |m| m.reload.suspended? }
   end
 
   test "a user still within the window is left untouched even when another is overdue" do
-    # Two users in grace: bob overdue, alice still inside her window. Only bob settles.
+    # Two users in grace: carol overdue, dave still inside their window. Only carol settles.
     overdue = start_grace!(FREE + 2)
 
-    alice = users(:alice)
+    other = users(:dave)
     # Her window opens later, so her deadline is still in the future below.
-    start_grace!(FREE + 1, user: alice, opens_at: Stablemate::DOWNGRADE_GRACE_PERIOD.from_now - 2.days)
+    start_grace!(FREE + 1, user: other, opens_at: Stablemate::DOWNGRADE_GRACE_PERIOD.from_now - 2.days)
 
     travel_to Stablemate::DOWNGRADE_GRACE_PERIOD.from_now + 1.hour do
       EnforceOverdueDowngradesJob.perform_now
@@ -148,7 +149,7 @@ class EnforceOverdueDowngradesJobTest < ActiveJob::TestCase
     # Bob (overdue) settled; Alice (still in window) untouched.
     refute @user.reload.awaiting_downgrade_choice?
     assert_equal 2, overdue.last(2).count { |m| m.reload.suspended? }
-    assert alice.reload.awaiting_downgrade_choice?
-    assert_equal 0, alice.monitors.where(status: "suspended").count
+    assert other.reload.awaiting_downgrade_choice?
+    assert_equal 0, other.monitors.where(status: "suspended").count
   end
 end

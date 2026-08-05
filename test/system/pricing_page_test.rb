@@ -41,10 +41,8 @@ class PricingPageTest < ApplicationSystemTestCase
 
   test "a signed-in free user on a billing-enabled instance upgrades straight from pricing" do
     with_billing_enabled do
-      user = users(:alice)
-      # user.monitors is now a has_many :through projects, which can't delete_all;
-      # clear through each project (§13-B2 build-site rule).
-      user.projects.each { |project| project.monitors.delete_all }
+      # carol owns no monitors, so the cap here is reached only by what we build.
+      user = users(:carol)
       sign_in user
 
       visit pricing_path

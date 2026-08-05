@@ -3,9 +3,9 @@ require "application_system_test_case"
 # S3 (create), S4 (pause/resume), S5 (rotate token), S7 (cap reached).
 class MonitorsTest < ApplicationSystemTestCase
   setup do
-    @alice = users(:alice)
+    # carol owns no monitors, so this file's counts are only what it creates.
+    @alice = users(:carol)
     @project = @alice.projects.sole
-    @project.monitors.delete_all # start clean so the count is predictable
   end
 
   test "S3: create a monitor and reveal the ping-URL card and curl snippet" do

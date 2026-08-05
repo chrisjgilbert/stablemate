@@ -1,7 +1,8 @@
 require "test_helper"
 
 class User::PlanTest < ActiveSupport::TestCase
-  setup { @user = users(:bob); @project = @user.projects.sole; @project.monitors.delete_all }
+  # carol owns no monitors, so this file's counts are only what it creates.
+  setup { @user = users(:carol); @project = @user.projects.sole }
 
   ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze
 

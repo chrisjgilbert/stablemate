@@ -14,9 +14,9 @@ class BillingTest < ApplicationSystemTestCase
   PRO   = Stablemate::PRO_PLAN_MONITOR_LIMIT
 
   setup do
-    @user = users(:alice)
+    # carol owns no monitors, so this file's counts are only what it creates.
+    @user = users(:carol)
     @project = @user.projects.sole
-    @project.monitors.delete_all
   end
 
   # Populate Pay's mirror, then run the same sync the verified webhook would —

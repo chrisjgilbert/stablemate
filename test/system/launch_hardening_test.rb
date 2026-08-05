@@ -33,9 +33,9 @@ class LaunchHardeningTest < ApplicationSystemTestCase
   # S16 — a user with the max monitors sees the at-limit treatment on the New
   # monitor action and the dashboard, with no upgrade/pricing UI.
   test "S16: at the monitor limit, the dashboard and New action show the at-limit state with no pricing UI" do
-    alice = users(:alice)
+    # carol owns no monitors, so this file's counts are only what it creates.
+    alice = users(:carol)
     project = alice.projects.sole
-    project.monitors.delete_all
     Stablemate::MAX_MONITORS_PER_USER.times do |i|
       project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
     end

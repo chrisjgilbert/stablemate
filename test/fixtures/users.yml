@@ -18,3 +18,28 @@ bob:
   email_address: bob@example.com
   password_digest: <%= password_digest %>
   plan: free
+
+<%# Carol and dave own NO monitors, and that is their whole purpose.
+#
+#   alice / bob  — own the fixture monitors below. For tests that want a
+#                  ready-made monitor to act on (23 files, 81 references).
+#   carol / dave — start empty. For tests that control their own monitor set:
+#                  anything asserting a count, driving a plan cap, or sweeping
+#                  every monitor there is.
+#
+# Those two needs are opposite, and for a long time one set of fixtures served
+# both — so 24 files opened with `monitors.delete_all` to get back to a known
+# count ("# predictable count", "# stay within the per-user cap"). Two owners
+# costs two rows and removes all of it. Give a test the user whose starting
+# state it actually wants. %>
+carol:
+  email_address: carol@example.com
+  password_digest: <%= password_digest %>
+  plan: free
+  verified_at: <%= 1.day.ago.utc.iso8601 %>
+
+dave:
+  email_address: dave@example.com
+  password_digest: <%= password_digest %>
+  plan: free
+  verified_at: <%= 1.day.ago.utc.iso8601 %>

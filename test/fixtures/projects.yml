@@ -9,3 +9,12 @@ alices_default:
 bobs_default:
   user: bob
   name: Bob's app
+
+# Deliberately empty of monitors — see the note in users.yml.
+carols_default:
+  user: carol
+  name: Carol's app
+
+daves_default:
+  user: dave
+  name: Dave's app

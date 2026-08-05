@@ -8,7 +8,8 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
   ATTRS = { expected_interval_seconds: 3600, grace_period_seconds: 300 }.freeze
   FREE  = Stablemate::FREE_PLAN_MONITOR_LIMIT
 
-  setup { @alice = users(:alice); @project = @alice.projects.sole }
+  # carol owns no monitors, so these counts are only what the tests create.
+  setup { @alice = users(:carol); @project = @alice.projects.sole }
 
   # S-DR1 (WU-2, H1) — pausing a DOWN monitor clears its incident, and after a
   # ping + resume the badge returns to Up with no lingering "down" banner. This is
@@ -43,7 +44,6 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
   test "S-DR2: a small Pro account downgrades via a confirm, not the picker" do
     with_billing_enabled do
       @alice.update!(plan: "pro")
-      @project.monitors.delete_all
       (FREE - 2).times { |i| @project.monitors.create!(name: "Small#{i}", **ATTRS) }
       sub_id = "sub_sys_#{SecureRandom.hex(4)}"
       give_pro_subscription!(user: @alice, subscription_id: sub_id)
@@ -68,7 +68,6 @@ class DesignReviewFixesTest < ApplicationSystemTestCase
   test "S-DR3: the involuntary choose-N lock lets the user re-pick which to keep" do
     with_billing_enabled do
       @alice.update!(plan: "pro")
-      @project.monitors.delete_all
       monitors = (FREE + 2).times.map { |i| @project.monitors.create!(name: "Job#{i}", **ATTRS) }
       # No active Pro subscription mirror ⇒ the sync drops to Free involuntarily.
       @alice.sync_plan_from_subscription!

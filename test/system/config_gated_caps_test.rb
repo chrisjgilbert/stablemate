@@ -12,9 +12,9 @@ require "application_system_test_case"
 # this is the same mechanism LaunchHardeningTest already relies on.
 class ConfigGatedCapsTest < ApplicationSystemTestCase
   setup do
-    @alice = users(:alice)
+    # carol owns no monitors, so this file's counts are only what it creates.
+    @alice = users(:carol)
     @project = @alice.projects.sole
-    @project.monitors.delete_all # predictable count
   end
 
   test "caps OFF: a sixth monitor creates successfully with no at-limit UI" do

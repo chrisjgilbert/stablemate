@@ -9,9 +9,9 @@ class DowngradeGraceTest < ApplicationSystemTestCase
   FREE  = Stablemate::FREE_PLAN_MONITOR_LIMIT
 
   setup do
-    @user = users(:alice)
+    # carol owns no monitors, so this file's counts are only what it creates.
+    @user = users(:carol)
     @project = @user.projects.sole
-    @project.monitors.delete_all
     @second = @user.projects.create!(name: "Payments")
   end
 
