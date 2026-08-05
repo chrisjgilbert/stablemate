@@ -56,24 +56,14 @@ module Monitoring
           [ @monitor.created_at, @monitor.first_ping_at, day_start ].max
         end
 
-        # Incidents don't overlap each other (the open-incident invariant), so a
-        # plain sum of clamped overlaps is correct.
+        # The shared rule on the record, which the live intraday reading uses too so
+        # the two can't drift. Clamped to the monitor's existence window so
+        # pre-creation time never counts as down.
         def raw_down_seconds(day_start, day_end)
           window_start = measurement_window_start(day_start)
           return 0 if window_start.nil? || window_start >= day_end
 
-          @monitor.incidents.where("started_at < ?", day_end).find_each.sum do |incident|
-            # An OPEN incident on a not-measured monitor is a stranded artifact — it
-            # must not extend downtime to end-of-day for a window we weren't
-            # watching. Pause/suspend resolve incidents, so this only catches
-            # legacy data.
-            next 0 if incident.resolved_at.nil? && !@monitor.monitored?
-
-            interval_end = incident.resolved_at || day_end
-            overlap_start = [ incident.started_at, window_start ].max
-            overlap_end   = [ interval_end, day_end ].min
-            [ (overlap_end - overlap_start).to_i, 0 ].max
-          end
+          @monitor.down_seconds_during(window_start...day_end)
         end
 
         def ping_count(day_start, day_end)
