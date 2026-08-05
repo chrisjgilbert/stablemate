@@ -276,7 +276,24 @@ showed it was **two** bugs wearing one costume.
       named, and would have checked the wrong card if the plans were reordered.
 - [x] **An ordinary timeout.** `default_max_wait_time` was Capybara's stock 2s,
       never configured. 5s costs nothing when things are fast — waiting
-      assertions return as soon as the condition holds.
+      assertions return as soon as the condition holds. Read with `.presence`,
+      not `ENV.fetch`'s default: a workflow setting it from a step output it
+      could not produce passes an EMPTY STRING, which `fetch` treats as present
+      and `Float()` then rejects, killing the suite at file load. The first
+      version of this chunk had that bug — twelve lines below the comment in the
+      same file warning about it for `CHROMIUM_PATH`.
+
+**Five capture-then-act sites remain, and are out of scope rather than missed.**
+Capybara's action helpers only re-find for links, buttons and form fields
+addressed by their accessible name. These five target a `<summary>`, a
+`data-testid` on a non-button, and checkboxes selected by CSS attribute — none
+of which `click_on` / `check` can locate — so `find(…).click` is the only form
+available. The window is a single CDP round trip with no intervening render,
+which is why they have never been seen to fail; the eight that were fixed all
+spanned a Turbo re-render.
+
+  billing_test.rb:72, design_review_fixes_test.rb:58 & :83,
+  downgrade_grace_test.rb:44, monitors_test.rb:92
 
 | wait window | before | after |
 |---|---|---|
@@ -299,7 +316,7 @@ showed it was **two** bugs wearing one costume.
 | `delete_all` / `destroy_all` | 44 in 24 files | **30 in 12** |
 | minitest lint cops | none | **on, with probes** |
 | system suite at a 2s wait | intermittent under load | **green** |
-| captured-node interactions (`ObsoleteNode` risk) | 8 | **0** |
+| captured-node interactions, reducible | 8 | **0** |
 
 Still open, and deliberately so: `monitors_controller_test` and
 `projects_controller_test` both use the fixture monitors *and* demolish them per

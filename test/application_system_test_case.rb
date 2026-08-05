@@ -31,7 +31,11 @@ end
 # NB this does NOT paper over a stale-element race: holding a node reference
 # across a Turbo re-render raises ObsoleteNode however long the window is. Those
 # have to be re-found instead — see the plan cards in pricing_page_test.
-Capybara.default_max_wait_time = Float(ENV.fetch("CAPYBARA_MAX_WAIT_TIME", 5))
+# `.presence`, not ENV.fetch's default: a workflow that sets this from a step
+# output it could not produce passes an EMPTY STRING, which fetch treats as
+# present and Float() then rejects — killing the whole suite at file load rather
+# than falling back. Exactly the hazard CHROMIUM_PATH guards against above.
+Capybara.default_max_wait_time = Float(ENV["CAPYBARA_MAX_WAIT_TIME"].presence || 5)
 
 # Let `fill_in` / `select` find a control by its aria-label. Several controls
 # here are labelled that way (the interval and grace presets), and without this

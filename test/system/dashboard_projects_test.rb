@@ -22,7 +22,7 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     assert_text "Beta job"
 
     # The Beta row lives under the Second-service section, not the other one.
-    within find("section[data-testid='project-group']", text: "Second service") do
+    within "section[data-testid='project-group']", text: "Second service" do
       assert_text "Beta job"
       assert_no_text "Alpha job"
     end
@@ -89,7 +89,7 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     project.monitors.delete_all
 
     sign_in @alice
-    within find("section[data-testid='project-group']", text: project.name) do
+    within "section[data-testid='project-group']", text: project.name do
       assert_text "No monitors yet"
     end
     # No doubled account-wide empty state — the per-group hint covers it.
@@ -104,7 +104,7 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     target.monitors.create!(name: "Beta job", **ATTRS)
 
     sign_in @alice
-    within find("section[data-testid='project-group']", text: "Second service") do
+    within "section[data-testid='project-group']", text: "Second service" do
       click_on "New monitor"
     end
 
