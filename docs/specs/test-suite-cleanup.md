@@ -25,10 +25,10 @@ Actions is green → tick the boxes here → next chunk.
 
 | # | Chunk | Finding | Status | PR |
 |---|-------|---------|--------|-----|
-| 1 | Adopt `minitest-mock`; retire the hand-rolled method/ENV stubs | #3 | **IN REVIEW** | #77 |
-| 2 | Finish the half-done extractions; kill `User.take` | #5, #6 | **IN REVIEW** | #78 |
-| 3 | Stop monkey-patching globals in the job tests | #4 | **IN REVIEW** | #79 |
-| 4 | Humble-Object the production env config; retire 8 boots | #2 | **IN REVIEW** | #81 |
+| 1 | Adopt `minitest-mock`; retire the hand-rolled method/ENV stubs | #3 | **MERGED** | #77 |
+| 2 | Finish the half-done extractions; kill `User.take` | #5, #6 | **MERGED** | #78 |
+| 3 | Stop monkey-patching globals in the job tests | #4 | **MERGED** | #87 |
+| 4 | Humble-Object the production env config; retire 8 boots | #2 | **IN REVIEW** | #88 |
 | 5 | Shrink the monitors General Fixture | #1 | **TODO** | — |
 | 6 | `rubocop-minitest` to stop the regressions | #7 | **TODO** | — |
 
