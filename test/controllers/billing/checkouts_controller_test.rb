@@ -15,14 +15,12 @@ class Billing::CheckoutsControllerTest < ActionDispatch::IntegrationTest
     super(status: status, customer_id: "cus_test_123", subscription_id: "sub_test_123")
   end
 
-  def give_active_pro_subscription! = give_pro_subscription!
-
   # WU-4 (H4) — an already-Pro user must not be able to open a second Checkout
   # (which Stripe would happily turn into a second subscription + double charge).
   test "an already-Pro user is bounced from checkout with no Stripe call" do
     with_billing_enabled do
       Stablemate.stub(:stripe_price_id_pro, "price_pro_123") do
-        give_active_pro_subscription!
+        give_pro_subscription!
         sign_in @user
 
         post billing_checkout_path
