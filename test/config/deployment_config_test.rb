@@ -83,6 +83,22 @@ class DeploymentConfigTest < ActiveSupport::TestCase
     assert_not_includes config.allowed_hosts, nil
   end
 
+  # Splitting on the first ":" to drop a port also mangles anything else that
+  # contains one. A scheme yields "https"; an IPv6 literal yields "[2001". Both
+  # are non-nil, so host_authorization? flips ON with an allow-list nothing can
+  # match — 403 on every request, while /up stays excluded so the health check
+  # goes on reporting green. Silent total outage from a typo.
+  test "a host given with a scheme is still allowed by its bare name" do
+    config = config_for("STABLEMATE_HOST" => "https://status.example.com")
+
+    assert_equal %w[status.example.com], config.allowed_hosts
+  end
+
+  test "an IPv6 literal survives the port strip" do
+    assert_equal %w[[2001:db8::1]], config_for("STABLEMATE_HOST" => "[2001:db8::1]").allowed_hosts
+    assert_equal %w[[2001:db8::1]], config_for("STABLEMATE_HOST" => "[2001:db8::1]:3000").allowed_hosts
+  end
+
   # --- trusted proxies -----------------------------------------------------
 
   test "no proxies are trusted beyond Rails' own private ranges by default" do

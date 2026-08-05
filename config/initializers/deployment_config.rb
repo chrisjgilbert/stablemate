@@ -61,9 +61,7 @@ module Stablemate
       hosts = []
       hosts << host if fetch("STABLEMATE_HOST")
       hosts.concat(list("STABLEMATE_HOSTS"))
-      # compact because a degenerate entry (":") strips to nil, and a nil in
-      # config.hosts is a Host-header rule that can never match anything.
-      hosts.filter_map { |entry| entry.split(":").first }
+      hosts.filter_map { |entry| bare_host(entry) }
     end
 
     def host_authorization? = allowed_hosts.any?
@@ -113,6 +111,21 @@ module Stablemate
       def fetch(name) = @env[name].presence
 
       def list(name) = fetch(name).to_s.split(",").map(&:strip).reject(&:empty?)
+
+      # The name Rails matches an incoming Host header against: no scheme, no
+      # port. Naively splitting on the first ":" mangles anything else carrying
+      # one — a scheme becomes "https", an IPv6 literal becomes "[2001" — and
+      # because those are non-blank, host authorization would switch ON with an
+      # allow-list nothing can match, 403-ing every request while /up stays
+      # excluded and the health check reports green. nil for an entry with no
+      # host left in it, so it is dropped rather than becoming a dead rule.
+      def bare_host(entry)
+        without_scheme = entry.sub(%r{\A[a-z][a-z0-9+.\-]*://}i, "")
+        # An IPv6 literal is bracketed precisely so its colons aren't a port.
+        return Regexp.last_match(0) if without_scheme.match(/\A\[[^\]]+\]/)
+
+        without_scheme.split(":").first.presence
+      end
 
       def boolean(value, default:)
         ActiveModel::Type::Boolean.new.cast(value.nil? ? default : value)

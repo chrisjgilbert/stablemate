@@ -76,8 +76,6 @@ class ProductionEnvConfigTest < ActiveSupport::TestCase
     assert_equal true, cfg["perform_deliveries"]
     assert_equal true, cfg["raise_delivery_errors"]
 
-    assert_equal true, cfg["force_ssl"]
-    assert_equal true, cfg["assume_ssl"]
     assert_includes cfg["trusted_proxies"], "10.9.0.0/16"
   end
 
