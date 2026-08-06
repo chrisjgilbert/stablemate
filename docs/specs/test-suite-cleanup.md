@@ -1,6 +1,6 @@
 # Test suite cleanup — retiring the smells
 
-Status: **DONE** — all ten chunks merged. Author: Claude (session), 2026-08-04. Owner: @chrisjgilbert.
+Status: **IN PROGRESS** — chunks 1–9 merged, chunk 10 in review. Author: Claude (session), 2026-08-04. Owner: @chrisjgilbert.
 No product change; this is a **test-quality punch list**. It removes the smells
 found in the 2026-08-04 review of `test/`, using the catalog from Gerard
 Meszaros' *xUnit Test Patterns*, thoughtbot's *Let's Not* and Sandi Metz's
@@ -513,7 +513,7 @@ Asked the same three questions of it (ivars, `define_singleton_method`, `send`):
 | | `test/` | `gem/test/` before | after |
 |---|---|---|---|
 | `instance_variable_get`/`set` | 0 | 0 | 0 |
-| `define_singleton_method` etc. | 0 | 14 | **3** |
+| `define_singleton_method` etc. | 0 | 13 | **3** |
 | `send(:private_method)` | 0 | 1 | **0** |
 
 They were not all one smell, and the three survivors are deliberate.

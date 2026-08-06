@@ -4,8 +4,6 @@ require "minitest/autorun"
 require "stablemate"
 
 module Stablemate
-  # A fake client capturing sync payloads and pings — the gem's tests must make
-  # NO real network calls (CLAUDE.md environment rule).
   # Collects the warnings a component logs, so tests can assert on them without
   # parsing a StringIO. The logger is pluggable public API, so a plain object
   # answering #warn is all the contract requires.
@@ -45,6 +43,8 @@ module Stablemate
     def warn(_message) = raise(@error)
   end
 
+  # A fake client capturing sync payloads and pings — the gem's tests must make
+  # NO real network calls (CLAUDE.md environment rule).
   class FakeClient
     attr_reader :synced, :pinged, :listed, :reported, :ping_threads
 
@@ -66,7 +66,7 @@ module Stablemate
       # Which thread each ping arrived on — the default dispatcher is supposed to
       # get them off the caller's thread, and that is only observable from in here.
       # A Queue rather than an Array so a test can block until a ping lands
-      # instead of polling for it.
+      # instead of polling for it. Pushed LAST in #ping (see there).
       @ping_threads = Queue.new
       # pings arrive from the subscriber's background threads, so the sink must be
       # thread-safe for the concurrency test.
@@ -86,10 +86,14 @@ module Stablemate
     # Returns the configured ping status (:ok / :stale / :error), matching the real
     # Client's contract so the subscriber's re-sync path can be exercised.
     def ping(ping_url)
-      @ping_threads << Thread.current
       raise @ping_error if @ping_error
 
       @lock.synchronize { @pinged << ping_url }
+      # LAST, and after the @pinged append: a test that blocks on ping_threads.pop
+      # is released by this push, so anything it then asserts about @pinged must
+      # already be recorded. Pushing first leaves a window in which the popping
+      # thread runs before the background thread appends the URL.
+      @ping_threads << Thread.current
       @ping_status
     end
 

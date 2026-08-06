@@ -16,7 +16,13 @@ class ClientTest < StablemateTest
   # method proves the case statement works but not that #ping consults it, so a
   # #ping that stopped classifying at all would still have passed.
   def ping_status(response)
-    client_capturing_request(response).first.ping("https://sm.test/ping/abc")
+    client, captured = client_capturing_request(response)
+    status = client.ping("https://sm.test/ping/abc")
+    # #ping swallows everything and returns :error, so an :error expectation
+    # would also be satisfied by a client that blew up before it ever classified
+    # anything. Pin that the request actually reached the transport.
+    assert_equal "/ping/abc", captured[:path]
+    status
   end
 
   def test_2xx_is_ok
