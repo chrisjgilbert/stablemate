@@ -142,9 +142,11 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     # partial unique index raises RecordNotUnique. The operation must recover by
     # updating the now-existing row, never 500.
     #
-    # Driving persist_create directly against an already-existing key is exactly
-    # the state the create path hits during the race, so the unique index fires for
-    # real and the rescue's re-find + update runs.
+    # Staged through the ONE thing the race breaks — the lookup missing a row that
+    # is already committed. Everything else is real: the create path runs, the
+    # partial unique index fires for real, and the rescue's re-find + update runs.
+    # Blinding the lookup is what a stale read looks like from in here; a true
+    # two-connection race can't be staged under transactional fixtures.
     @project.monitors.create!(
       registration_key: "racey", name: "Original", expected_interval_seconds: 3600,
       grace_period_seconds: 300, source: "gem", status: "pending",
@@ -152,19 +154,34 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
       last_synced_grace_period_seconds: 300
     )
 
-    op = Project::MonitorSync.new(@project)
-    racing_entry = Project::MonitorSync::Entry.from(
-      entry("racey", name: "Updated", interval: 7200)
-    )
-    # persist_create accumulates into ivars normally seeded by #sync_monitors.
-    %i[@registered @skipped @conflicts].each { |iv| op.instance_variable_set(iv, []) }
+    # Only the racing key's FIRST lookup is blind. That's the shape of the race:
+    # the sync's own lookup missed, and by the time the insert has conflicted the
+    # row is plainly there for the rescue to re-find. Blinding every lookup would
+    # stage a different bug — and pass while the recovery was broken.
+    #
+    # Keyed on the registration key rather than on call order, and backed by the
+    # count assertion below, because a blind FIRST-CALL would be spent by any
+    # other find_by the operation happens to make first — after which the sync's
+    # own lookup finds the row, takes the update path, and every assertion here
+    # still passes with the RecordNotUnique recovery deleted outright.
+    lookup = @project.monitors.method(:find_by)
+    racey_lookups = 0
+    stale_read = lambda do |*args, **kwargs|
+      conditions = kwargs.presence || args.first
+      racing = conditions.is_a?(Hash) && conditions.symbolize_keys[:registration_key] == "racey"
+      next lookup.call(*args, **kwargs) unless racing
 
-    assert_nothing_raised do
-      op.send(:persist_create, racing_entry)
+      (racey_lookups += 1) == 1 ? nil : lookup.call(*args, **kwargs)
     end
 
-    assert_empty op.instance_variable_get(:@skipped)
-    assert_equal [ "racey" ], op.instance_variable_get(:@registered).map(&:registration_key)
+    result = @project.monitors.stub(:find_by, stale_read) do
+      @project.sync_monitors(entries: [ entry("racey", name: "Updated", interval: 7200) ])
+    end
+
+    assert_equal 2, racey_lookups,
+      "the recovery never ran: the create path must miss, hit the unique index, then re-find the row"
+    assert_empty result[:skipped]
+    assert_equal [ "racey" ], result[:registered].map(&:registration_key)
     assert_equal "Updated", @project.monitors.find_by(registration_key: "racey").name
     assert_equal 1, @project.monitors.where(registration_key: "racey").count
   end
@@ -462,17 +479,20 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
 
   # The row lock stays on the USER, not the project (§4.3): the cap is per-user, so
   # concurrent syncs of different projects of one user must serialise on the shared
-  # user row for the slot accounting to be atomic. Spy that with_lock is taken on
-  # the user and never on the project.
+  # user row for the slot accounting to be atomic.
+  #
+  # Read off the SELECT … FOR UPDATE the database actually receives, rather than by
+  # patching #with_lock onto the two records and watching which one is called:
+  # locking is what the statement does, and any other route to it — a bare
+  # `lock!`, a `where(...).lock` — counts just the same.
   test "sync holds the row lock on the user, not the project" do
-    locked = []
-    user = @project.user # memoize the delegated instance the operation will reuse
-    user.define_singleton_method(:with_lock) { |&blk| locked << :user; blk.call }
-    @project.define_singleton_method(:with_lock) { |&blk| locked << :project; blk.call }
+    locks = sql_executed_during { @project.sync_monitors(entries: [ entry("x") ]) }
+      .grep(/FOR UPDATE/)
 
-    @project.sync_monitors(entries: [ entry("x") ])
-
-    assert_equal [ :user ], locked
+    assert locks.any? { |sql| sql.match?(/FROM "users"/) },
+      "the slot accounting must serialise on the shared user row: #{locks.inspect}"
+    assert_empty locks.grep(/FROM "projects"/),
+      "locking the project leaves a user's other projects free to race for the same slots"
   end
 
   # last_synced_app (§3.2 / §13-B3): the gem's app string is recorded on create,

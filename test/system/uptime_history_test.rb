@@ -47,8 +47,7 @@ class UptimeHistoryTest < ApplicationSystemTestCase
     visit monitor_path(monitor)
 
     within "[data-testid='uptime-panel']" do
-      # UptimeBar renders 90 day bars (rounded-[2px]).
-      assert_equal 90, all("span.rounded-\\[2px\\]", visible: :all).size
+      assert_equal 90, all("[data-testid='uptime-day']", visible: :all).size
       # Today's outage shows amber on the bar AND in the number: the two read the
       # same seconds, so a stale 100.00% next to an amber bar is impossible.
       assert_selector "span[title='today'].bg-chart-partial", visible: :all
@@ -76,7 +75,7 @@ class UptimeHistoryTest < ApplicationSystemTestCase
 
     within "##{dom_id(monitor, :row)}" do
       within "[data-testid='mini-ticks']" do
-        assert_equal 16, all("span.rounded-\\[1\\.5px\\]", visible: :all).size
+        assert_equal 16, all("[data-testid='check-tick']", visible: :all).size
         assert_text "100%"
       end
     end
