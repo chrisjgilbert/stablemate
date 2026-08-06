@@ -154,18 +154,32 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
       last_synced_grace_period_seconds: 300
     )
 
-    # Only the FIRST lookup is blind. That's the shape of the race: the sync's
-    # own lookup missed, and by the time the insert has conflicted the row is
-    # plainly there for the rescue to re-find. Blinding every lookup would stage
-    # a different bug — and pass while the recovery was broken.
+    # Only the racing key's FIRST lookup is blind. That's the shape of the race:
+    # the sync's own lookup missed, and by the time the insert has conflicted the
+    # row is plainly there for the rescue to re-find. Blinding every lookup would
+    # stage a different bug — and pass while the recovery was broken.
+    #
+    # Keyed on the registration key rather than on call order, and backed by the
+    # count assertion below, because a blind FIRST-CALL would be spent by any
+    # other find_by the operation happens to make first — after which the sync's
+    # own lookup finds the row, takes the update path, and every assertion here
+    # still passes with the RecordNotUnique recovery deleted outright.
     lookup = @project.monitors.method(:find_by)
-    misses = 0
-    stale_read = ->(*args, **kwargs) { (misses += 1) == 1 ? nil : lookup.call(*args, **kwargs) }
+    racey_lookups = 0
+    stale_read = lambda do |*args, **kwargs|
+      conditions = kwargs.presence || args.first
+      racing = conditions.is_a?(Hash) && conditions.symbolize_keys[:registration_key] == "racey"
+      next lookup.call(*args, **kwargs) unless racing
+
+      (racey_lookups += 1) == 1 ? nil : lookup.call(*args, **kwargs)
+    end
 
     result = @project.monitors.stub(:find_by, stale_read) do
       @project.sync_monitors(entries: [ entry("racey", name: "Updated", interval: 7200) ])
     end
 
+    assert_equal 2, racey_lookups,
+      "the recovery never ran: the create path must miss, hit the unique index, then re-find the row"
     assert_empty result[:skipped]
     assert_equal [ "racey" ], result[:registered].map(&:registration_key)
     assert_equal "Updated", @project.monitors.find_by(registration_key: "racey").name

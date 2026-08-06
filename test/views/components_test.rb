@@ -33,7 +33,7 @@ class ComponentsTest < ActionView::TestCase
     days = %w[up up down] # oldest → newest
     html = render(partial: "shared/uptime_bar", locals: { days: days })
 
-    assert_equal 3, html.scan(/title=/).size
+    assert_equal 3, html.scan(/data-testid="uptime-day"/).size
     assert_match 'title="today"', html
     assert_match 'title="2d ago"', html
   end
