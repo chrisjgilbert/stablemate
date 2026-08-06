@@ -1,6 +1,6 @@
 # Test suite cleanup — retiring the smells
 
-Status: **IN PROGRESS**. Author: Claude (session), 2026-08-04. Owner: @chrisjgilbert.
+Status: **DONE** — all nine chunks merged. Author: Claude (session), 2026-08-04. Owner: @chrisjgilbert.
 No product change; this is a **test-quality punch list**. It removes the smells
 found in the 2026-08-04 review of `test/`, using the catalog from Gerard
 Meszaros' *xUnit Test Patterns*, thoughtbot's *Let's Not* and Sandi Metz's
@@ -33,7 +33,7 @@ Actions is green → tick the boxes here → next chunk.
 | 6 | `rubocop-minitest` to stop the regressions | #7 | **MERGED** | #90 |
 | 7 | The system suite's load sensitivity — an Erratic Test | #8 | **MERGED** | #91 |
 | 8 | Stop testing config and booting; test behaviour | #9 | **MERGED** | #93 |
-| 9 | Tests that test implementation, not behaviour | follow-up | **IN REVIEW** | #95 |
+| 9 | Tests that test implementation, not behaviour | follow-up | **MERGED** | #95 |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
 
@@ -46,6 +46,30 @@ Actions is green → tick the boxes here → next chunk.
 | `define_singleton_method` in `test_helper.rb` | 12 |
 | assertions carrying a failure message | 368 / 1693 (22%) |
 | conditional test logic | 0 — already clean, keep it that way |
+
+### Where it landed (on `ae588dd`, all nine merged)
+
+| Metric | Baseline | Now |
+|---|---|---|
+| the whole non-system suite | 537 tests / 6.2s + 41.6s of boots | **606 tests / 8.7s**, no boots |
+| boot-based tests | 18 | **0** |
+| `test/config` wall time | ~16s | **1.6s** |
+| `define_singleton_method` / `class_eval` / `alias_method` / `singleton_class` in `test/` | 12 | **0**\* |
+| duplicate SQL-capture helpers | 4 | **1** |
+| `delete_all`/`destroy_all` | 44 across 24 files | **30 across 12** |
+| tests reaching private methods or ivars | 1 | **0** |
+| assertions counting Tailwind utility classes | 3 | **0** |
+| a linter for any of this | none | `rubocop-minitest` |
+
+\* the one `singleton_class` left, in `config_gate_test_helper.rb`, is the
+opposite of a monkey-patch — it reads minitest's own `__minitest_stub__` marker
+to catch a gate being double-stubbed.
+
+`delete_all` is the one number that did not go to zero, and deliberately: chunk
+5 measured the fixtures as used by 23 files 81 times, so deleting them would
+have been a large, risky rewrite for a smell that a second fixture user
+(`carol`, `dave` — owning no monitors) resolves at the point it actually bites.
+The remaining 30 are files that genuinely want an empty table.
 
 ---
 
