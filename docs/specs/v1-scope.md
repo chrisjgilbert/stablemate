@@ -404,7 +404,9 @@ Two of the earlier draft's observations survive and are worth keeping:
 Same as `ApiKey` — SHA-256 digest plus `token_last4` for a masked list, raw value
 shown once at creation. Nothing needs to reconstruct it: the command prints
 ready-to-paste `curl` lines from the host's own config (§6.1), so the web
-interface never displays it.
+interface never *re*-displays it after creation — §7's setup panel, which
+renders both keys inside the install command exactly once, *is* the creation
+moment.
 
 **This must not be a "type" column on `api_keys`.** Authentication looks a token
 up across the whole table, so one table means a ping key authenticates the
@@ -678,6 +680,30 @@ targeted forgery.
 We accept it, because §6.5 needs the `404` to say "run `stablemate:sync`" and
 that is the failure this design exists to make visible. State it as an accepted
 cost rather than claiming it leaks nothing.
+
+### 5.5 The verify endpoint
+
+`GET /api/v1/verify`, authenticated by the **ping key**, answering
+`200 {"ok": true}` and recording nothing. It exists for §6.6: the only way to
+prove the check-in credential end-to-end without recording a check-in — the
+honest fragment carved out of the rejected preview ping (§11).
+
+- **`GET` is correct here, and §3.2's POST-only rule does not apply.** That rule
+  exists because a check-in has side effects a link-prefetch must not trigger;
+  verify has none, and the credential rides the header, so nothing secret enters
+  a URL.
+- **It lives in the pings controller family**: authenticates `PingKey`, must not
+  inherit `Api::V1::BaseController` (§5.2's structural rule, same reason), and
+  duplicates the same JSON contract, `rescue_from`, and rate-limit responder.
+  It sits under the per-IP layer only — there is no task key in the request for
+  the per-monitor layer to read.
+- **An API key is rejected with the opaque `401`.** This endpoint is the
+  deliberate, sole exception to "a ping key works only on check-ins" — §12's
+  credential-separation test names it in both directions.
+- It may touch the key's `last_used_at` under §5.2's five-minute coarsening;
+  nothing else. No monitor is read, no event written.
+- API-*key* verification needs no new surface — `GET /api/v1/monitors` already
+  proves that credential, and §6.6 uses exactly that.
 
 ## 6 · Gem design
 
@@ -1131,6 +1157,57 @@ the paragraph above. The railtie already uses the latter shape.
 host's job**. The gem's "nothing may propagate into the host" guarantee is
 currently enforced only on the dispatch side.
 
+### 6.6 The install command
+
+The reference standard, set by the tools this audience already loves: paste two
+commands, watch something real happen in the terminal *and* the dashboard,
+inside two minutes, without a deploy — and without faking the one thing this
+product exists to be truthful about. `bin/rails stablemate:install` is that
+first two minutes, and it is **dry-run by design**.
+
+```
+$ bin/rails stablemate:install SM_API_KEY=sm_live_… SM_PING_KEY=sm_ping_…
+writing config/initializers/stablemate.rb
+reading config/recurring.yml — this is what will be monitored:
+  reports.daily      every 24h   (derived from '0 9 * * *')
+  weekday_report     every 72h   (derived from '0 9 * * 1-5' — Fri→Mon gap;
+                                  tighten with c.overrides for a snugger window)
+✗ db_backup          skipped: command task, no class: to observe
+verifying credentials… ✓ API key valid   ✓ ping key valid
+nothing registered yet — registration runs on deploy (§6.2's hook).
+deploy, then watch: https://stablemate.example/projects/siftbox
+```
+
+The preview lines reuse §6.1's grammar; there is no synced count because
+nothing syncs. The rules, each with a wrong-looking-right alternative:
+
+- **Keys arrive as env-style arguments** — the `FORCE=1`/`PRUNE=1` idiom. Ugly
+  to type, and nobody types it: §7's setup panel renders the whole line, and
+  that render is the §4 shown-once moment.
+- **It registers nothing, and the environment guard is untouched.** Onboarding
+  is exactly the pressure that would erode §6.1's guard ("just `FORCE=1` the
+  first time") — dry-run-by-design removes the temptation. Everything it shows
+  immediately is real: config written, derivations computed (the 72-hour
+  weekday surprise surfaces *before* the first deploy, a moment none of the
+  UI-first competitors have), credentials proven end-to-end.
+- **Verification is two calls made with the argument keys**: the ping key
+  against §5.5, the API key against `GET /api/v1/monitors`. Server responses
+  stay opaque; the CLI knows which request failed and names the key. Either
+  failure exits non-zero.
+- **Secrets never land in committed files.** It writes the ENV-first
+  initializer skeleton (the existing `stablemate.rb` pattern) and persists the
+  keys by appending to an existing `.env`; with no `.env`, it prints the
+  `bin/rails credentials:edit` lines instead. Writing keys into the
+  initializer would be committing credentials to git.
+- **A missing `recurring.yml` is a note, not an error** — the app may simply
+  not have recurring jobs yet; print "none found yet", still verify. (Unlike
+  sync, where registering nothing is a failure — §6.1.)
+- **Idempotent.** With the initializer already present it refuses to clobber:
+  prints "already configured", verifies, previews, exits 0.
+
+Sequencing: the §5.5 endpoint ships in phase 1; this command ships with gem
+0.2.0 in phase 2, and §7's setup panel alongside it.
+
 ## 7 · What the user journey becomes
 
 **There is no browser-only path to seeing the product work.** Sign up, and the
@@ -1155,10 +1232,31 @@ rewritten in the same change:
 
 `stablemate_docs_url` already exists and is used on the marketing pages.
 
+**What replaces all three is a setup panel that watches the same moment the
+terminal does.** The empty-project state becomes: `bundle add stablemate`, then
+a "Generate setup command" button that issues **both** keys and renders the
+full §6.6 install line **once** — that render is the §4 creation moment. A
+reload shows the command with both keys masked plus a regenerate affordance,
+because nothing can re-display a hashed key. Below it, a milestone ladder
+driven by the live-update machinery the dashboard already uses, each state
+naming the *next* milestone and when to expect it:
+
+1. **"Waiting for your first sync"** — flips when a sync registers monitors.
+   One addition is needed for the flip: `Project::MonitorSync` does not
+   broadcast today, so newly-registered monitors appear only on reload; the
+   run must broadcast once when it commits.
+2. **"N monitors registered — waiting for first check-ins"** — each row then
+   flips green on its first real ping, which is machinery that already exists.
+
+The ladder never claims a job ran (§11's preview-ping rule stands). The first
+real check-in is the demo; the panel's job is to make the wait legible, not to
+shorten it dishonestly.
+
 **`db/seeds.rb` creates a manual monitor with no task name and prints a ping URL
 for a deleted route.** It is the documented walking-skeleton path, so it must
-become: create a project, issue **both** an API key and a ping key, and print the
-`stablemate:sync` invocation alongside a ready-to-paste check-in command. Issuing
+become: create a project, issue **both** an API key and a ping key, and print
+the §6.6 install line (which embeds both) alongside a ready-to-paste check-in
+command. Issuing
 only the API key would seed a skeleton that can register a monitor and never check
 one in — the permanently-grey-row failure this same section warns about.
 
@@ -1194,9 +1292,12 @@ Measured, not estimated.
 | Orphan computation in the sync response (§6.1) | ~25 |
 | `retired` status: vocabulary + cap scope + **both** ping arms (`CheckIn` and `FailureReport`) + resolve-incident-at-retire + `status_before_retirement` + the revive operation (re-arm, restore-paused, explicit cap branch in `MonitorSync`) + live-today stat + dashboard partition + choose-N picker exclusion (§6.1) | ~85 |
 | Prune: `declared_keys` + `prune` in the sync payload, retire/refuse split, `retired:` envelope (§6.1) | ~50 |
-| **Server subtotal** | **~1,169** |
+| Verify endpoint (§5.5): controller, route, per-IP limit | ~25 |
+| Setup panel (§7): both-keys issuance, shown-once render, masked reload, milestone ladder + the `MonitorSync` commit broadcast | ~110 |
+| **Server subtotal** | **~1,304** |
 | Gem deletions (§3.2) | ~100 |
 | Gem additions: `c.overrides` (validation, application to tuples) + derivation/orphan output + `PRUNE=1`/`declared_keys` (§6.1) | ~90 |
+| Gem: `stablemate:install` (§6.6) — arg parsing, initializer writer, `.env` append / credentials instructions, derivation preview, two verification calls | ~130 |
 | **Tests broken by UI removal** | ~393 across 15 files, 4 deleted whole |
 | **Tests broken by the edit/arbitration removal** | 2 of 30 in `monitors_controller_test.rb` (both cross-tenant guards at `:60`/`:66` — the protection they pin moves to the routes not existing), the edit half of `monitor_edit_delete_test.rb`, the arbitration tests in `monitor_sync_test.rb:279-431` less the one survivor, plus the upsert test at `:154-160` (§3.1) |
 | **Tests broken by the check-in move** | ~647 across 9 files, 3 deleted whole |
@@ -1259,7 +1360,8 @@ key from the UI, edit host credentials, redeploy the host. That does not fit.
 still exists:
 
 - **Phase 1 — additive, server only.** Add `PingKey`, the new endpoint, the route,
-  the rate limiters, the `registration_key` backfill — and the server half of
+  the rate limiters, the `registration_key` backfill, the verify endpoint
+  (§5.5) — and the server half of
   prune (§6.1): the `retired` status with its sites, and the
   `declared_keys`/`prune` handling in the sync path. All of it is inert until a
   0.2.0 gem sends the new fields, which is what makes it phase-1-safe: a
@@ -1600,10 +1702,10 @@ state §9.1's alert exists to catch, and — run against a monitor that is down 
 executes `CheckIn#recover`, closing a real incident and emailing "back up"
 (`incident.rb:28` makes that permanent). It also proves the wrong path: §6.2's
 hooks run on the deploying machine, so a preview exercises the laptop's network,
-not the worker's. The honest versions of the two needs it serves: a verify
-endpoint that authenticates the ping key without recording anything, and
-`pending` rendered as a designed state ("expecting its first check-in within
-24h") with §9.1 as the safety net. The first real ping is the demo.
+not the worker's. The honest versions of the two needs it serves are no longer
+suggestions — both are now specified: the verify endpoint is §5.5, and
+`pending` rendered as a designed state is §7's milestone ladder, with §9.1 as
+the safety net. The first real ping is the demo.
 
 **§10 does not block starting.** An earlier draft said to settle the billing
 question first. It overstates the dependency: the `suspended` status and its
@@ -1678,11 +1780,24 @@ design dependency. Decide §10 when convenient; do not stop for it.
   page they land on, and no surface offers monitor creation (§7).
 - **Tenant isolation.** The same task name in two projects; checked in with project
   A's key, project B's monitor untouched.
-- **Credential separation.** A ping key must be rejected by every other `/api/v1`
-  endpoint, and an API key rejected by the check-in endpoint. Assert on the class
+- **Credential separation.** A ping key must be rejected by every management
+  `/api/v1` endpoint, and an API key by the check-in endpoint — with §5.5 as the
+  named exception in both directions: verify must *accept* the ping key and
+  *reject* the API key. Assert on the class
   graph too — `assert_not …PingsController.ancestors.include?(BaseController)` —
   because a behavioural test is a snapshot and this controller sits in a directory
   where every sibling inherits the thing it must not.
+- **Verify endpoint (§5.5).** Ping key → `200 {"ok": true}` with nothing
+  written; API key and anonymous → opaque `401`; bounded by the per-IP limit.
+- **Install command (§6.6).** Registers nothing (assert the project is empty
+  after a run); writes the initializer once and refuses to clobber on re-run; a
+  bad credential names *which* key and exits non-zero; a missing
+  `recurring.yml` is a note and verification still runs; keys land in `.env`
+  or as printed instructions, never in a committed file.
+- **Browser: the setup panel (§7).** Generate the setup command, see both keys
+  once, reload → masked with a regenerate affordance; then drive the
+  waiting-for-sync flip by performing a sync server-side (Capybara cannot set
+  the `Authorization` header) and assert the panel updates without a reload.
 - **Browser: ping keys.** Issue one from the project page, see it once, see it
   masked afterwards, revoke it.
 - **The mismatch guard fires on a real mismatch and stays silent during a
