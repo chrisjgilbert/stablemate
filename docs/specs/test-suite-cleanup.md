@@ -1,6 +1,6 @@
 # Test suite cleanup — retiring the smells
 
-Status: **IN PROGRESS** — chunks 1–9 merged, chunk 10 in review. Author: Claude (session), 2026-08-04. Owner: @chrisjgilbert.
+Status: **DONE** — all ten chunks merged. Author: Claude (session), 2026-08-04. Owner: @chrisjgilbert.
 No product change; this is a **test-quality punch list**. It removes the smells
 found in the 2026-08-04 review of `test/`, using the catalog from Gerard
 Meszaros' *xUnit Test Patterns*, thoughtbot's *Let's Not* and Sandi Metz's
@@ -34,7 +34,7 @@ Actions is green → tick the boxes here → next chunk.
 | 7 | The system suite's load sensitivity — an Erratic Test | #8 | **MERGED** | #91 |
 | 8 | Stop testing config and booting; test behaviour | #9 | **MERGED** | #93 |
 | 9 | Tests that test implementation, not behaviour | follow-up | **MERGED** | #95 |
-| 10 | The gem suite's reflection — the one `test/` dir the sweep missed | follow-up | **IN REVIEW** | — |
+| 10 | The gem suite's reflection — the one `test/` dir the sweep missed | follow-up | **MERGED** | #97 |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
 
