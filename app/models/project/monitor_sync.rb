@@ -53,8 +53,17 @@ class Project
       # each reads the same remaining-slot budget and both create, exceeding the
       # cap. Seed @slots AFTER the lock so it reflects committed state.
       @project.user.with_lock do
-        @slots = @project.user.remaining_monitor_slots
         payload = unique_entries(entries)
+
+        # Converge FIRST, then seed the budget. A rename is an add plus an orphan
+        # in the SAME run, so a budget read before the retirement refuses the
+        # renamed task with limit_reached and frees its slot moments later —
+        # leaving the live renamed job monitored by nothing until the next deploy,
+        # and telling the operator to buy a slot that existed. Retiring first
+        # cannot reach anything this payload names: the orphan rule excludes every
+        # key the payload carries.
+        converge(payload.map(&:registration_key))
+        @slots = @project.user.remaining_monitor_slots
 
         payload.each do |entry|
           monitor = @project.monitors.find_by(registration_key: entry.registration_key)
@@ -80,8 +89,6 @@ class Project
             @skipped << skip(entry, "limit_reached")
           end
         end
-
-        converge(payload.map(&:registration_key))
       end
 
       { registered: @registered, skipped: @skipped, conflicts: @conflicts,

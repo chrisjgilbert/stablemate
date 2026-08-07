@@ -42,11 +42,20 @@ module Monitoring
       # So: a fresh window and no alert. If the restored job then fails to run,
       # detection fires after interval + grace with a true down alert.
       #
-      # DEVIATION (CLAUDE.md "say so"): §6.1 says revive restores `paused` and
-      # otherwise sets `up`. `suspended` is restored too — reviving a
-      # plan-suspended monitor to `up` would silently un-suspend it, the
-      # cap-evasion CheckIn's own guard exists to prevent. Retirement changed
-      # nothing about it being unmonitored, so revive puts it back as it was.
+      # TWO DEVIATIONS from §6.1's "restore `paused`, otherwise set `up`"
+      # (CLAUDE.md "say so"), because taken literally that rule reaches two states
+      # it was not written for:
+      #
+      # - `suspended` is restored too. Reviving a plan-suspended monitor to `up`
+      #   would silently un-suspend it — the cap evasion CheckIn's own guard
+      #   exists to prevent. Retirement changed nothing about it being
+      #   unmonitored, so revive puts it back as it was.
+      # - A monitor that has NEVER checked in goes back to `pending`, which is
+      #   what reactivate_heartbeat! does for that case and for the same reason.
+      #   `up` on a never-pinged monitor is the phantom green §11 rejects the
+      #   preview ping over: live_today_stat has no first_ping_at to measure from,
+      #   so it would score today 100% up for a job that has never once reported —
+      #   and detection would then email a missed check-in for it.
       def revive!(at: Time.current)
         return unless @monitor.retired?
 
@@ -54,6 +63,8 @@ module Monitoring
 
         if Monitor::NOT_MONITORED_STATUSES.include?(remembered)
           @monitor.update!(status: remembered, status_before_retirement: nil)
+        elsif !@monitor.ever_pinged?
+          @monitor.update!(status: "pending", status_before_retirement: nil)
         else
           @monitor.update!(status: "up", status_before_retirement: nil, next_due_at: due_at(at))
         end

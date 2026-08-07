@@ -157,6 +157,27 @@ class Monitoring::Monitor::RetirementTest < ActiveSupport::TestCase
     assert_equal "suspended", @monitor.reload.status
   end
 
+  # `up` on a monitor that has never reported is the phantom green the rejected
+  # preview ping was rejected over: with no first_ping_at to measure from, the
+  # live day scores 100% up for a job that has never run, and detection then
+  # emails a missed check-in for it one window later.
+  test "reviving a monitor that never checked in leaves it pending, not phantom up" do
+    never_pinged = @project.monitors.create!(
+      name: "new_task", registration_key: "new_task", source: "gem", status: "pending",
+      expected_interval_seconds: 3600, grace_period_seconds: 300
+    )
+    never_pinged.retire!
+    assert_equal "pending", never_pinged.reload.status_before_retirement
+
+    travel_to(3.days.from_now) { never_pinged.revive! }
+
+    assert_equal "pending", never_pinged.reload.status
+    assert_nil never_pinged.status_before_retirement
+    assert_nil never_pinged.uptime_percent(days: 1)
+    assert_equal :no_data, never_pinged.uptime_series(days: 1).last
+    assert_empty Monitoring::Monitor.detectable.where(id: never_pinged.id)
+  end
+
   test "reviving a monitor that is not retired does nothing" do
     @monitor.revive!
     assert_equal "up", @monitor.reload.status

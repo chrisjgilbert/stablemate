@@ -197,6 +197,9 @@ class Project::MonitorSyncPruneTest < ActiveSupport::TestCase
 
   test "a revive lands in the run's registered set and takes the new settings" do
     sync(%w[nightly_backup])
+    # A monitor that HAS reported, so the revive takes the re-arm branch — a
+    # never-pinged one goes back to `pending` and has no window to arm.
+    travel_to(1.hour.ago) { monitor("nightly_backup").check_in! }
     sync([], prune: true, declared_keys: %w[other])
 
     result = @project.sync_monitors(app: "my-app", declared_keys: %w[nightly_backup],
@@ -243,6 +246,23 @@ class Project::MonitorSyncPruneTest < ActiveSupport::TestCase
     assert_equal 1, monitor("old_report").ping_events.count
     assert_equal "pending", monitor("new_report").status
     assert_equal 0, monitor("new_report").ping_events.count
+  end
+
+  # A rename is an add plus an orphan in the SAME run, so at the cap the order
+  # matters: retiring the old key has to free its slot before the new one asks
+  # for it, or the live renamed job is monitored by nothing until the next deploy
+  # and the operator is told to buy a slot that existed all along.
+  test "a rename at the cap frees the old slot in time for the new key" do
+    limit = Stablemate::FREE_PLAN_MONITOR_LIMIT
+    sync((1..limit).map { |i| "task_#{i}" })
+    assert_equal 0, @user.reload.remaining_monitor_slots
+
+    result = sync((2..limit).map { |i| "task_#{i}" } + %w[renamed_task], prune: true)
+
+    assert_equal [ "task_1" ], result[:retired]
+    assert_empty result[:skipped]
+    assert_equal "pending", monitor("renamed_task").status
+    assert_equal limit, @user.reload.monitors.counting_toward_cap.count
   end
 
   # --- The schedule string rides along and does nothing (§6.3) ---------------

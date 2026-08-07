@@ -39,7 +39,7 @@ module Api
       # its spelling is.
       rate_limit to: PER_KEY_LIMIT, within: PER_KEY_WINDOW, name: "per-key",
                  by: -> {
-                   Digest::SHA256.hexdigest(request.authorization.presence || request.remote_ip)
+                   Digest::SHA256.hexdigest(request.authorization.presence || request.remote_ip.to_s)
                  },
                  with: RATE_LIMITED, store: RATE_LIMIT_STORE
       rate_limit to: PER_IP_LIMIT, within: PER_IP_WINDOW, name: "per-ip",

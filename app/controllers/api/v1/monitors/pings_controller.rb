@@ -39,7 +39,7 @@ module Api
         rate_limit to: PER_MONITOR_LIMIT, within: PER_MONITOR_WINDOW, name: "per-monitor",
                    by: -> {
                      credential = Digest::SHA256.hexdigest(
-                       request.authorization.to_s.presence || request.remote_ip
+                       request.authorization.to_s.presence || request.remote_ip.to_s
                      )
                      "#{credential}|#{Digest::SHA256.hexdigest(params[:registration_key].to_s)}"
                    },
@@ -58,10 +58,20 @@ module Api
           # refactor away from an HTML page.
           return render_not_found unless monitor
 
+          # `status` (alias `s`) carries the job's exit code — blank/absent/"0" is
+          # a success, ANY other value a failure. `status` wins when both spellings
+          # are sent. Parsed once per request into locals: two ternaries reading
+          # separate helpers invited the predicates to drift apart, and re-scanning
+          # params four times is waste on the hottest path in the system.
+          status  = string_param(:status, :s)
+          failure = status.present? && status != "0"
+
           monitor.check_in!(
             received_at: Time.current,
-            kind: failure? ? "failure" : "success",
-            error: failure? ? reported_error : nil,
+            kind: failure ? "failure" : "success",
+            # A failure without a message still records a non-blank error so the
+            # alert is never blank; truncation happens in the model layer.
+            error: failure ? string_param(:message, :m) || "exited with status #{status}" : nil,
             # request.remote_ip, so its meaning depends on trusted_proxies: this
             # endpoint sits behind kamal-proxy rather than being public.
             source_ip: request.remote_ip,
@@ -77,20 +87,6 @@ module Api
           # params, so a JSON client works too; form-encoded is the documented
           # contract.)
           #
-          # `status` (alias `s`) carries the job's exit code — blank/absent/"0" is
-          # a success, ANY other value a failure. `status` wins when both spellings
-          # are sent.
-          def failure?
-            status = string_param(:status, :s)
-            status.present? && status != "0"
-          end
-
-          # A failure without a message still records a non-blank error so the
-          # alert is never blank; truncation happens in the model layer.
-          def reported_error
-            string_param(:message, :m) || "exited with status #{string_param(:status, :s)}"
-          end
-
           # The widest value the int4 `duration_ms` column can hold. Anything above
           # it raises ActiveModel::RangeError on assignment, and that raise happens
           # INSIDE CheckIn's transaction — so a bad duration would roll back the

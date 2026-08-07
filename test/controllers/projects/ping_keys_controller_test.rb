@@ -37,6 +37,19 @@ class Projects::PingKeysControllerTest < ActionDispatch::IntegrationTest
     assert_response :created
   end
 
+  # `params.dig(:ping_key, :name)` raises TypeError when `ping_key` arrives as a
+  # scalar or an array, turning a malformed request into a 500 where the code
+  # means "fall back to the default name".
+  test "a malformed ping_key parameter falls back to the default name" do
+    [ { ping_key: "nonsense" }, { ping_key: [ "nonsense" ] } ].each do |params|
+      assert_difference -> { @project.ping_keys.count }, 1 do
+        post project_ping_keys_path(@project), params: params
+      end
+      assert_response :created
+      assert_equal "Ping key", @project.ping_keys.order(:created_at).last.name
+    end
+  end
+
   test "destroy revokes the key and redirects to the project" do
     key, = PingKey.issue(project: @project, name: "Production")
     assert_difference -> { @project.ping_keys.count }, -1 do

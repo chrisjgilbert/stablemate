@@ -51,10 +51,14 @@ module Api
             )
           end
 
+          # Memoized: five callers read it per request, and permit re-walks and
+          # re-allocates the whole monitors array each time — an app declaring 200
+          # recurring tasks would filter 1,000 entries per sync.
           def sync_params
-            params.permit(:app, :prune, declared_keys: [],
-                          monitors: [ :registration_key, :name, :expected_interval_seconds,
-                                      :grace_period_seconds, :schedule ])
+            @sync_params ||=
+              params.permit(:app, :prune, declared_keys: [],
+                            monitors: [ :registration_key, :name, :expected_interval_seconds,
+                                        :grace_period_seconds, :schedule ])
           end
 
           # The operation re-sanitizes each entry, but we also strip the payload to
