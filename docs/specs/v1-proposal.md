@@ -75,8 +75,9 @@ interface becomes a dashboard.
    interval-based — a weekday-only cron gets an honest, documented trade
    (a 72-hour window, or a tighter override that false-alarms at weekends) —
    but the raw cron expression is stored with each monitor, unused. Cron-aware
-   detection, the real fix, then becomes a server-only upgrade later: no gem
-   release, no wire migration.
+   detection, the real fix, is a **decided fast-follow** — and because the data
+   already flows, it is a server-only upgrade: no gem release, no wire
+   migration.
 
 8. **Alerting: email in V1, Slack immediately after** — before any push for
    users. The never-checked-in alert ships *with* V1, because a registered job
@@ -124,8 +125,12 @@ Each phase is one implementation effort with its tests specified in
 
 - **Pro pricing** (`v1-scope.md` §10) — the one undecided product question.
   It does not block phase 1.
-- After V1: Slack channel (decided, fast-follow), then cron-aware detection
-  when the stored schedule strings get their algorithm.
+- **Two decided fast-follows land after V1 and before any user-acquisition
+  push:** the Slack channel, then cron-aware detection — the stored schedule
+  strings get their algorithm, turning the weekday-job trade into a solved
+  problem. Slack first: it is smaller and improves every alert; cron-aware
+  second, since it carries one open design item (the schedule's timezone) and
+  a deliberate behaviour change to communicate.
 
 ## For the agent picking this up
 

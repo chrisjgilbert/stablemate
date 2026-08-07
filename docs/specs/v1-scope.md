@@ -1832,13 +1832,20 @@ not do is *promise* from the string: detection is interval-based in V1, so the
 panel never says "next expected Friday 09:00" off the cron — that claim waits
 for cron-aware detection.
 
-**Slack is fast-follow, decided.** The V1 channel layer stays email-only, and a
-Slack incoming-webhook channel ships immediately after V1 lands — before any
-user-acquisition push. The three-tier ownership line (job facts → repo,
-audience facts → UI, operational state → UI) makes it a `NotificationChannel`
-record with UI CRUD behind the existing `Channel#deliver` contract; the one new
-plumbing item is Active Record Encryption for the webhook URL, which the app
-does not yet configure.
+**Two fast-follows, decided, both landing before any user-acquisition push.**
+First, **Slack**: the V1 channel layer stays email-only, and a Slack
+incoming-webhook channel ships immediately after V1 lands. The three-tier
+ownership line (job facts → repo, audience facts → UI, operational state → UI)
+makes it a `NotificationChannel` record with UI CRUD behind the existing
+`Channel#deliver` contract; the one new plumbing item is Active Record
+Encryption for the webhook URL, which the app does not yet configure. Second,
+**cron-aware detection**: the stored `schedule` strings (§6.3) get their
+algorithm — next-due computed as the cron's next occurrence rather than
+last-ping-plus-interval — turning §3.1's weekday-job trade into a solved
+problem, server-side only. It sequences after Slack because it carries one
+open design item (a cron string alone doesn't pin occurrence times — the sync
+will likely need to carry the app's timezone once) and a deliberate behaviour
+change to enabling it, which §12 pins as on-purpose-only.
 
 **A deploy-time "preview ping" was considered and rejected — do not resurrect it
 as a quick onboarding win.** Sending a synthetic check-in per monitor after sync
