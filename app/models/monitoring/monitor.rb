@@ -128,6 +128,12 @@ module Monitoring
     def suspend!    = Suspension.new(self).suspend!
     def reactivate! = Suspension.new(self).reactivate!
 
+    # A retired monitor is the same, for a different reason: its task left the
+    # repo's config and `PRUNE=1` pruned it. Only a sync that sees the task again
+    # brings it back.
+    def retire! = Retirement.new(self).retire!
+    def revive!(at: Time.current) = Retirement.new(self).revive!(at:)
+
     # Returns a Transfer::Result — a gem monitor or a target collision is a clean
     # `ok? == false`, not an exception.
     def transfer_to(project)

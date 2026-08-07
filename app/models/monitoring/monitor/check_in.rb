@@ -35,12 +35,13 @@ module Monitoring
         # Returns a `recovered` Notification to dispatch (down -> up only), else nil.
         def apply_transition(received_at)
           case @monitor.status
-          when "paused", "suspended"
+          when *Monitor::NOT_MONITORED_STATUSES
             # Record the event but never transition or alert: the monitor is
             # deliberately not monitored, so a stray ping must not silently resume
             # it. For `suspended` this also guards the billing cap — reactivating
             # here would let a downgraded over-cap user monitor for free just by
-            # continuing to ping.
+            # continuing to ping. For `retired` it guards the same slot, and stops
+            # a still-running cron undoing a prune the repo asked for.
             nil
           when "down"
             recover(received_at)

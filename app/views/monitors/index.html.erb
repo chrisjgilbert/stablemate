@@ -92,4 +92,19 @@
       <%= render "monitors/list", monitors: @suspended_monitors, mini_ticks: @mini_ticks, card_class: "opacity-70" %>
     </div>
   <% end %>
+
+  <% if @retired_monitors.present? %>
+    <%# Pruned monitors: their task left the repo's config, so `stablemate:sync
+        PRUNE=1` retired them. Retained with their history, not monitored, no cap
+        slot — and brought back automatically the next time a sync sees the task
+        (v1-scope §6.1). %>
+    <div class="mt-8" data-testid="retired-section">
+      <h2 class="mb-2 text-[13px] font-semibold text-muted">Retired <span class="font-mono">(<%= @retired_monitors.size %>)</span></h2>
+      <p class="mb-3 text-[12px] text-muted">
+        No longer declared in your app's config, so monitoring stopped. History is kept —
+        restore the task and the next sync brings the monitor back.
+      </p>
+      <%= render "monitors/list", monitors: @retired_monitors, mini_ticks: @mini_ticks, card_class: "opacity-70" %>
+    </div>
+  <% end %>
 <% end %>
