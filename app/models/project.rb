@@ -11,7 +11,7 @@ class Project < ApplicationRecord
 
   validates :name, presence: true, uniqueness: { scope: :user_id }
 
-  def sync_monitors(app: nil, entries:)
-    MonitorSync.new(self).sync_monitors(app:, entries:)
+  def sync_monitors(app: nil, entries:, declared_keys: nil, prune: false)
+    MonitorSync.new(self).sync_monitors(app:, entries:, declared_keys:, prune:)
   end
 end

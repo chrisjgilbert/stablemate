@@ -116,4 +116,69 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
     refute_equal other_monitor.id, mine.id
     assert_equal "Other daily_digest", other_monitor.reload.name # untouched
   end
+
+  # --- Prune, over the wire (v1-scope §6.1, §11) -----------------------------
+
+  # The whole of phase 1 is inert until a 0.2.0 gem sends the new fields. A
+  # pre-0.2.0 payload sends neither, so it must write exactly what it writes
+  # today — the envelope gains two informational keys and nothing else moves.
+  test "a legacy payload registers as it always did and retires nothing" do
+    sync([ entry("daily_digest"), entry("nightly_backup") ])
+
+    assert_no_changes -> { @user.monitors.pluck(:status).sort } do
+      sync([ entry("daily_digest") ])
+    end
+    assert_response :success
+
+    body = response.parsed_body
+    assert_equal [ "daily_digest" ], body["monitors"].map { |m| m["registration_key"] }
+    assert_equal [ "nightly_backup" ], body["orphaned"]
+    assert_empty body["retired"]
+  end
+
+  test "prune with declared_keys retires the absent task and names it in the envelope" do
+    sync([ entry("daily_digest"), entry("nightly_backup") ])
+
+    post sync_api_v1_monitors_url, as: :json, headers: auth,
+         params: { app: "my-app", prune: true, declared_keys: %w[daily_digest],
+                   monitors: [ entry("daily_digest") ] }
+
+    assert_response :success
+    assert_equal [ "nightly_backup" ], response.parsed_body["retired"]
+    assert_empty response.parsed_body["orphaned"]
+    assert_equal "retired", @user.monitors.find_by(registration_key: "nightly_backup").status
+  end
+
+  # The gem sends the check-in form-encoded, and a rake task's flag arrives as a
+  # string — "1" has to mean the same thing as JSON's `true`.
+  test "the prune flag is honoured form-encoded as well as in JSON" do
+    sync([ entry("daily_digest"), entry("nightly_backup") ])
+
+    post sync_api_v1_monitors_url, headers: auth,
+         params: { app: "my-app", prune: "1", declared_keys: %w[daily_digest],
+                   monitors: [ entry("daily_digest") ] }
+
+    assert_response :success
+    assert_equal [ "nightly_backup" ], response.parsed_body["retired"]
+  end
+
+  test "a prune flag with no declared_keys retires nothing" do
+    sync([ entry("daily_digest"), entry("nightly_backup") ])
+
+    post sync_api_v1_monitors_url, as: :json, headers: auth,
+         params: { app: "my-app", prune: true, monitors: [ entry("daily_digest") ] }
+
+    assert_response :success
+    assert_empty response.parsed_body["retired"]
+    assert_equal "pending", @user.monitors.find_by(registration_key: "nightly_backup").status
+  end
+
+  test "the schedule string rides the wire and is stored" do
+    post sync_api_v1_monitors_url, as: :json, headers: auth,
+         params: { app: "my-app",
+                   monitors: [ entry("reports.daily").merge(schedule: "0 9 * * 1-5") ] }
+
+    assert_response :success
+    assert_equal "0 9 * * 1-5", @user.monitors.find_by(registration_key: "reports.daily").schedule
+  end
 end
