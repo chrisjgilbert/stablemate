@@ -1,0 +1,2027 @@
+# V1 scope — the engineering reference
+
+> **Read [`v1-proposal.md`](v1-proposal.md) first.** That is the proposal —
+> the architecture and the plan in reading order, without history. This
+> document is the reference behind it: every pinned decision, edge case, trap,
+> and required test, accumulated across eleven adversarial review rounds. It
+> is written for the implementer of a specific phase, consulted per section —
+> not read front to back.
+
+Status: **proposed**, not yet built. Supersedes the draft that lived at
+`ping-architecture.md`, which covered only the incident fix.
+
+This is a scope document. It fixes an incident, and it uses that work to settle
+what V1 is: **a monitor comes into existence exactly one way, and reports exactly
+one way.**
+
+---
+
+## 0 · What this amends
+
+`docs/specs/README.md` is binding. This document contradicts parts of it, so those
+parts need inline amendment notes in the same change, following the pattern
+already used there (decision #2: *"Amended by `job-failure-details.md` §5.1"*).
+
+Section numbers in the left column are **`README.md`'s**; those in the right are
+**this document's**.
+
+| Where (in `README.md`) | What changes |
+|---|---|
+| Decision #4, *"Gem ping reliability — fire-and-forget, errors swallowed"* | **Amended.** Errors are no longer swallowed: a `401` is logged once and a `404` once per task name (§6.5). "Never blocks the job" and "a transient outage is absorbed by the grace period" both survive intact. |
+| Decision #6, *"`registration_key` = the recurring.yml task key… the registrar writes it"* | **Amended.** It stops being an internal idempotency key and becomes the monitor's **public address**. A backfill becomes a second writer, and it becomes character-set sensitive. |
+| Decision #3, *"No gate on monitor creation"* | **Narrowed.** Survives only as a statement about `bin/rails stablemate:sync`. |
+| §2 Security defaults, the whole `ping_token` bullet | **Void.** Every clause — plaintext by design, the dashboard showing it, the API re-serving it, the uninformative 404, per-token rate limiting, rotation — describes surfaces this removes. |
+| §3 Data model, `Monitor` | `ping_token` and its unique index are deleted. **`source` stays**: new rows are always `"gem"` (sync is the only creator), §8's backfilled rows keep `"manual"` forever, and §6.1's orphan filter reads exactly that distinction (§3.3, §6.1). The status vocabulary gains **`retired`** — the prune state (§6.1): history kept, not monitored, no cap slot, revived by sync. |
+| §3 Data model, table set | **Gains `PingKey`** — `project_id`, `name`, `token_digest` (unique), `token_last4`, `last_used_at`, timestamps. A project may hold more than one, so rotation can overlap (§4). |
+| §2 Security defaults, the `ApiKey` bullet | **Widened**, not replaced. The same handling — hashed, constant-time compared, shown once, uninformative `401` — now covers both credentials, with the addition that the API key is no longer the credential on the check-in path (§4). |
+
+Decision #5 (*"user can tighten via UI override"*) is **amended: the capability
+survives, its home moves.** Tightening a monitor is still a first-class act, but
+it is done in config (`c.overrides`, §3.1) and applied by `stablemate:sync`, not
+in a web form. An earlier revision of this document kept UI editing *because* #5
+requires the capability — that reasoning conflated the capability with its
+location. Moving it into the repo is what lets monitor config have exactly one
+writer, which deletes the `last_synced_*` settings memory and `gem_may_write?`
+outright (§3.1) instead of preserving arbitration machinery whose only job was
+refereeing between two writers. The change your override protects lands in the
+same commit as the schedule it overrides.
+
+Two pre-existing errors in that data model are worth fixing while editing it: the
+`Monitor` block omits five shipped columns — though only `first_ping_at` and
+`status_before_suspension` still need adding, since the other three are the
+`last_synced_*` settings columns §3.1 now deletes — and it lists the status
+vocabulary without `suspended` (nor `retired`, which §6.1 adds).
+
+---
+
+## 1 · What V1 is
+
+**A scheduled job stops running, we email you.** Everything below is in service of
+making that one promise legible.
+
+After this work:
+
+- **Monitors come from one place.** `bin/rails stablemate:sync` reads
+  `config/recurring.yml`, plus anything declared in config, and registers it.
+  Nothing registers at boot. Nothing is created in the browser.
+- **Check-ins go to one endpoint**, authenticated by a credential that can
+  check in and prove itself (§5.5), and do nothing else:
+  ```
+  POST /api/v1/monitors/{registration_key}/pings
+  Authorization: Bearer sm_ping_…
+  ```
+- **Monitor configuration is code.** Schedules come from `recurring.yml`,
+  non-Rails monitors and interval overrides from `Stablemate.configure` — and
+  nothing else writes config. The web interface is a dashboard plus the two
+  *operational* actions only a human decides in the moment: pausing and
+  deleting. The line: if it describes how the job *should* behave, it lives in
+  the repo; if it's about what is happening *now*, it lives in the UI.
+
+What that costs is stated plainly in §7. The largest remaining question — whether
+billing belongs in V1 at all — is §10, and is not decided here.
+
+## 2 · The incident, and what actually fixes it
+
+The gem asked the server where to send check-ins at boot and remembered the
+answer. One timed-out call left it with nothing to send to, and nothing ever made
+it ask again:
+
+```ruby
+# gem/lib/stablemate/execution/subscriber.rb:256-260
+def dispatch(key, label:, &request)
+  url = url_for(key)
+  return unless url                 # ← gives up here, silently
+  @dispatcher.call(-> { deliver(url, label, &request) })
+```
+
+The repair path is reachable only *after* a request has been sent, and a request
+can only be sent if an address was found. **The repair is behind the door it is
+meant to open.** Four healthy jobs alerted as down while the monitoring was what
+had failed.
+
+**The incident fix is the first half of §3.2** — build the address locally and
+there is nothing to fetch, cache, or go stale. §3.2's second half (the header
+credential) is a security improvement, not an incident fix, and §3.1 and §3.3 are
+product decisions that ride along. All are worth doing; this document should not
+pretend they are all incident fixes.
+
+Once addresses are local, a failed registration degrades from *"all monitoring
+silently dead until restart"* to *"a schedule change wasn't picked up this
+deploy."* The two railtie defects below are untouched by it, and are handled in
+§6.5 and §9.2.
+
+Two related defects, both confirmed by booting a real app against the railtie:
+
+- `railtie.rb:44` is `next unless Stablemate.config.api_key`. With no key there
+  are **zero** `perform.active_job` listeners and no log line of any kind.
+- `railtie.rb:43-75` wraps all startup wiring in one catch-all, so a YAML syntax
+  error leaves the listener unattached with a single warning.
+
+## 3 · The three changes
+
+### 3.1 Registration becomes a command, and config becomes code
+
+`bin/rails stablemate:sync` already reads `recurring.yml`, builds tuples and posts
+them. It becomes the only registrar — and, with §3.3 removing the edit form, the
+**only writer of monitor config at all**. The railtie stops registering.
+
+Monitors that are not Rails jobs are declared in the same place, so they go
+through the same command:
+
+```ruby
+c.monitors = { "pg_backup" => { interval: 1.day, grace: 2.hours } }
+```
+
+**Overrides are declared beside them, and they are not optional polish.** The
+derived interval is the *largest* gap between consecutive runs, so a weekday-only
+`0 9 * * 1-5` derives 72 hours (Friday → Monday; measured with Fugit). Correct by
+construction — anything tighter false-alarms every weekend — and useless for the
+user who wants to know on Tuesday. With UI editing gone this is the only remedy,
+so it ships in the same change:
+
+```ruby
+c.overrides = { "weekday_report" => { interval: 26.hours } }
+```
+
+**Be honest about what that override buys, because the two sentences above are
+otherwise in tension:** 26 hours closes the Tuesday blind spot *by trading it
+for a false down every Saturday morning* (Friday 09:00 + 26h). V1's interval
+model cannot express "weekdays at 9am" — no interval can — and a user with
+weekday-only jobs must choose between the blind window and the weekly cry-wolf,
+with the docs saying so plainly. This is why **the sync payload carries each
+task's raw schedule string from day one** (decided; see §6.3): V1 detection
+stays interval-based, but the server stores the cron expression, so cron-aware
+detection — the real fix — later becomes a server-only upgrade with no gem
+release and no wire cutover, which is exactly the migration shape this project
+exists to avoid repeating.
+
+The rules, each of which has a wrong-looking-right alternative. Overrides accept
+`interval:` and `grace:` — **an unknown key inside the hash is the same config
+error as an unknown task key**, or `intervall:` gets the silent-typo treatment
+the outer rule exists to close. Integer seconds are allowed for the same
+plain-Ruby-host reason `c.monitors` allows them (§6.3). They apply to *derived*
+tasks only, and "derived" means **after the registrar's skips**: an override on a
+`c.monitors` key is a config error (you would simply edit the declaration), and
+so is one on a command task or an underivable schedule — the registrar never
+produces a tuple for those, so there is nothing to override. And **an override
+key matching no derived task fails the whole run, exit non-zero, before any
+request is made.** A typo'd key silently ignored means the weekday job keeps its
+72-hour window — the exact failure overrides exist to close — and half-applying
+the rest would make the failure ambiguous.
+
+Two mechanics that must be pinned or two implementers diverge. **Order:** the
+environment guard first (§6.1), then parse, then override validation, then the
+register-nothing exits, then the request — an override typo must be reported
+even on a run that would go on to register nothing, or the two errors mask each
+other. **Grace derivation:** the registrar computes grace *from* the interval
+(`grace_seconds(interval)`), so an interval-only override recomputes grace from
+the **overridden** interval; the schedule-derived grace is not kept. An explicit
+`grace:` wins over both. Anything else leaves a 26-hour override wearing a
+72-hour schedule's grace.
+
+**What this deletes — and an earlier revision of this section said the exact
+opposite, so the reversal needs spelling out.** The `last_synced_name` /
+`last_synced_expected_interval_seconds` / `last_synced_grace_period_seconds`
+columns and `gem_may_write?` existed to answer one question: *when the sync and a
+hand-edit disagree, whose value is it?* With no hand-edits the question has no
+second party. The sync writes every setting the payload carries — absent fields
+stay untouched, as today: old gems send partial payloads, and "unconditionally"
+read literally would write an absent name as `nil` and fail validation. The
+arbitration goes: `GEM_SETTINGS`, `gem_settings` and `gem_may_write?`
+(`monitor_sync.rb:157-218` — the span stops *before* `diverging_app?` at
+`:223-226`, which stays), the three columns and their migration. Of the ten tests
+pinning the old behaviour (`monitor_sync_test.rb:279-431`), most assert a refusal
+or the remembered columns and die with them; "an untouched monitor still tracks
+recurring.yml" (`:345`) asserts exactly what always-write does and survives; and
+the column drop reaches one test *outside* that range — the `RecordNotUnique`
+upsert test whose setup writes `last_synced_*` (`:154-160`). So does the "KNOWN
+LIMIT" coin-flip documented in `gem_may_write?` — a real bug class deleted, not
+resolved.
+
+Two things that look like part of this deletion and are not. **`last_synced_app`
+stays** — it feeds cross-app conflict detection (the merge at
+`monitor_sync.rb:147`, `diverging_app?` at `:223-226`), which has nothing to do
+with settings arbitration; "delete the
+`last_synced_*` columns" over-deletes by one. And the
+`before_update :recompute_next_due_at` callback stays — sync and console still
+edit intervals; only its comment's mention of the form needs updating.
+
+One property this buys: **recovery from config poisoning becomes unconditional.**
+§4's headline attack writes a 68-year interval via the sync endpoint. Under
+arbitration, re-running `stablemate:sync` fixed *that* attack — the attacker's
+request updates the remembered column too, so the correction passes
+`gem_may_write?`. Where the refusing branch actually bites is values changed
+*outside* the sync path — a console edit, or the pre-migration divergence the
+KNOWN-LIMIT comment documents — which reject an unchanged payload on every sync,
+forever, and whose documented escape hatch was the UI edit this spec deletes.
+Always-write has no refusing branch: `bin/rails stablemate:sync` restores
+whatever the repo says, every time. The repo is the source of truth, so the repo
+is also the recovery path.
+
+### 3.2 Check-ins are addressed locally and authenticated by header
+
+The gem already knows the task name. Using it as the address means nothing is
+fetched.
+
+The credential moves out of the URL and into a header, which buys four things a
+path-borne secret cannot:
+
+- **It leaves the logs.** Rails logs request paths verbatim and filters only query
+  strings.
+- **`GET` stops applying.** A check-in advances the monitor's clock and, on a
+  monitor that is down, resolves the incident and sends a "recovered" email.
+  Anything that follows a link — chat previews, mail prefetch, scanners — could
+  fire one. This endpoint is `POST` only.
+- **It becomes an ordinary REST resource.**
+- **Two specific faults never get written** — the rate-limiter fault (§5.3) and
+  the URL-parsing fault (§5.1), both of which come from having a credential and a
+  task name as adjacent path segments.
+
+| Removed from the gem | ~Lines |
+|---|---|
+| The shared address map and its lock | 25 |
+| The re-fetch mechanism, its throttle, mutex and timer | 25 |
+| The two methods that populate the map | 21 |
+| `list_monitors` and the "address rejected" state | 20 |
+| The startup wiring and the read-only fetch (`register_on_boot` stays, as a no-op — §11) | 8 |
+
+~100 lines of the 646 non-comment lines in `gem/lib` — but the count understates
+it. This is the gem's only state shared between threads, and most of its hard
+reasoning: an immutable snapshot swapped under a lock, readers guaranteed never to
+block, re-fetches throttled against a clock that cannot run backwards.
+
+### 3.3 Monitor configuration leaves the web interface
+
+Creation *and* editing go together — an earlier revision removed only creation and
+kept editing for decision #5, which §0 now amends. Keeping the edit form would
+keep the two-writer problem the rest of this document works to delete.
+
+The create path goes: `MonitorsController#new` and `#create`, `resolve_project`,
+`load_projects`, `new.html.erb`, and the six `new_monitor_path` references — five
+links plus `ProjectsController#after_create_path`. The edit path goes with it:
+`#edit` and `#update`, `monitor_params`, `edit.html.erb` (7 lines),
+`_form.html.erb` (42) and `_preset_field.html.erb` (26) whole — nothing else
+renders them once edit is gone — and the Edit link at `show.html.erb:36`. The
+route narrows to `resources :monitors, only: %i[index show destroy]` plus the
+pause sub-resource. What the show page renders in the form's place is read-only
+config with its source named, **and the copy branches on `source`** — because the
+§8 backfill leaves a permanent `"manual"` population that is *not* defined in any
+repo. A gem row says "Defined in your repo · registered by `stablemate:sync`"; a
+manual row says the truth instead — registered before CLI-only registration, its
+settings frozen (§11 states the remedy). Either way a user looking for the
+vanished Edit button is told where the knob went (§11 bounds what the note may
+claim).
+
+With one creator, these become dead or nearly so:
+
+| Dead | Why |
+|---|---|
+| `Monitor::Transfer`, `Monitors::ProjectsController`, the manual branch of `_move.html.erb` (§11) | Manual-only (`return … unless @monitor.manual?`). **Not unreachable** — §8's backfilled rows still satisfy the guard — but deleted anyway: an accepted capability loss for that frozen population, stated in §11. |
+| `awaiting_setup?` and the branch it drives | `manual? && !ever_pinged? && !suspended?` |
+| The provenance chip (`shared/_gem_chip.html.erb`, 20 lines + 2 render sites) | Noise once nearly every monitor is gem-synced. **`source`, `from_gem?` and `manual?` all stay** — §6.1's orphan filter and the panel branch above read them. |
+
+Keep the rest of `_move.html.erb`, described by structure rather than by line
+range. The heading and the "In &lt;project&gt;" link *above* the branch are the only
+place the detail page shows which project a monitor belongs to, and the closing
+`</div>` *below* it belongs to that block. What goes is the manual arm: the
+`if monitor.manual?` line, its body, the `else` and the `end` — leaving the
+non-manual arm's markup in place, unwrapped. Taking a literal line range instead
+strands the `else` or drops the closing tag.
+
+**The `source` column is kept — an earlier revision of this section dropped it,
+and the config-as-code amendment reversed that.** §6.1's orphan computation reads
+`source: "gem"` to keep the backfilled `manual-<id>` rows out of orphan reports
+permanently, and no substitute discriminator exists: the `last_synced_app` match
+fails on a manual row the gem has adopted (adoption writes the app but never
+`source` — `persist_update`), and §8.1 explicitly refuses to trust the
+`manual-` key prefix, which a human can type into `recurring.yml`. So: no drop,
+no migration, no API deprecation — `monitor_detail_json` keeps serving it, and
+`api.md:127` stays true.
+
+## 4 · Two credentials
+
+The check-in endpoint authenticates a **ping key** (`sm_ping_…`), a second
+project-scoped credential whose only capabilities are recording a check-in and
+answering §5.5's no-op verify. The
+management API keeps the existing API key (`sm_live_…`).
+
+**An earlier draft of this document argued for one credential and was wrong.**
+Its reasoning is preserved here because the correction is the argument:
+
+> *"The capability delta is lateral, not a ladder… Each holds a capability the
+> other lacks; both independently defeat the product's core promise. There is no
+> 'the ping key is the safe one' story to tell."*
+
+That was tested rather than argued, and it failed. **It is a ladder, and the API
+key is the top rung.**
+
+### Why, measured
+
+**An API key can durably silence alerting with one request.** `POST
+/api/v1/monitors/sync` may rewrite `expected_interval_seconds` on an existing
+monitor — `sync_params` permits it, `valid_shape?` checks only `positive?`, and
+the model validates only `greater_than: 0`. Observed: `3600 → 2_147_483_647`,
+HTTP 200. (Measured through `gem_may_write?`. On any gem-synced monitor the
+stored value equals the memory, so the guard passed in one request; only a
+nil-remembered monitor resisted, taking two requests with two distinct values —
+the first write lands in the memory column alone. §3.1 deletes the guard, making
+it one request everywhere; see §3.1 for what always-write changes about
+*recovery*.)
+And `before_update :recompute_next_due_at` fires on the sync itself, so the
+monitor's next due date moves to 2094 **immediately** — no follow-up check-in
+needed, nothing visible, one request.
+
+**An API key can also page the owner, in a worse form than the ping key can.**
+`monitor_mailer.rb:22`, `:29` and `:42` interpolate the monitor name straight into
+all three subjects:
+
+```ruby
+subject = "#{monitor.name} missed its check-in"
+```
+
+`validates :name, presence: true` is the only name validation and the column is an
+unbounded `varchar`. So the subject line is attacker-controlled and unbounded. The
+ping key's version of this capability — error text via `status=1` — lands in the
+*body*, hard-truncated to `ERROR_MESSAGE_LIMIT` in the model layer.
+
+The mailer documents the assumption this violates, in a comment written when the
+name was user-authored:
+
+> *"The subject carries only the monitor name, never the error (headers stay
+> injection-proof, lock-screen previews clean)."*
+
+**The capability sets are nested, not overlapping:**
+
+| | ping key | API key |
+|---|---|---|
+| page the owner with chosen text | body, truncated | **subject, unbounded** |
+| durably silence alerting | no | **yes, one request, invisible** |
+| enumerate every monitor and task name | in bulk, no — but see §5.4 | **yes, one request** |
+| rewrite name / interval / grace everywhere | no | **yes** |
+| emit a "recovered" email | yes | no |
+| write ping-event rows | yes | no |
+
+(§6.1's prune adds one API-key verb to this table: retiring orphaned monitors.
+It is deliberately reversible and history-keeping, so it is not a material new
+rung — a leaked key can already silence everything invisibly via the interval
+rewrite above; retiring is the louder, recoverable version of the same harm.
+Note there is no prune *list* to forge — the server computes the retire set
+itself; the attack shape is a `prune: true` request with a minimal payload,
+and the server's own orphan rule plus the `declared_keys` requirement bound
+what that can reach.)
+
+The ping key's exclusives are narrower, but **not transient, and an earlier draft
+of this section was wrong to say so.** A forged success on a monitor that is down
+runs `CheckIn#recover`, which calls `Incident#resolve!` — and that begins
+`return if resolved_at.present?`, so a later genuine recovery **cannot correct
+it**. The result is a permanently wrong `resolved_at`, permanently overstated
+uptime, and a "recovered" email for a job that never recovered. A forged failure
+likewise opens an `Incident` carrying attacker text, which the data model keeps
+deliberately so it outlives ping pruning. And `first_ping_at ||= received_at` is
+documented as never moving afterwards.
+
+This does not weaken the case for the split — the API key holds every capability
+the ping key does, plus enumeration and durable rewrites. It does mean §9.3's
+investigability work is under-scoped.
+
+### The axis the earlier draft never considered
+
+It reasoned about where credentials are *stored* and never about how often they
+are *transmitted*. `gem/lib/stablemate/configuration.rb:6` states the property
+being given up:
+
+```ruby
+# The sm_live_… API key (used for /api/v1 registration; NOT on the ping hot path).
+```
+
+Today the management key crosses the wire **once per deploy**. Under §3.2 it would
+ride an `Authorization` header on **every job completion, from every worker,
+forever** — through every egress proxy, tracing tool and retry buffer on the
+highest-volume path in the system. Storage co-location and transmission frequency
+are different exposure surfaces, and only the second one changes here.
+
+So the ping key is the ordinary least-privilege answer: the credential on the hot
+path cannot read your monitors, cannot rewrite them, and cannot silence them.
+
+### What it costs, and what stays true from the earlier draft
+
+Roughly 450–500 lines mirroring `ApiKey` — model, issuance, controller, views,
+project-page wiring, migration, tests, docs — plus §9.4's mismatch guard, which
+exists only because there are two.
+
+Two of the earlier draft's observations survive and are worth keeping:
+
+- **The two original objections to reusing the API key really are dead.** The
+  `last_used_at` write is coarsened for `ApiKey` regardless (§5.2), and the
+  120/min project-wide limiter is a property of inheriting the API base
+  controller, not of the credential — Rails resolves a limiter's scope from
+  `controller_path` at filter time, so any separate controller gets separate
+  buckets, inherited or not. Neither was ever an argument about credentials.
+- **Nothing about this is a one-way door.** No credential enters the domain model,
+  so the decision could be reversed in either direction later without a backfill.
+
+### Storage: hashed and shown once
+
+Same as `ApiKey` — SHA-256 digest plus `token_last4` for a masked list, raw value
+shown once at creation. Nothing needs to reconstruct it: the command prints
+ready-to-paste `curl` lines from the host's own config (§6.6 — install only,
+never sync, whose stdout is deploy logs), so the web
+interface never *re*-displays it after creation — §7's setup panel, which
+renders both keys inside the install command exactly once, *is* the creation
+moment.
+
+**This must not be a "type" column on `api_keys`.** Authentication looks a token
+up across the whole table, so one table means a ping key authenticates the
+management API unless every lookup remembers to filter — and forgetting is silent
+and permissive. Two tables make the mistake impossible rather than discouraged.
+
+**Rotation needs more than one live key**, which is why this is a table rather
+than a column on `projects`. The procedure is: issue a second key, deploy it,
+watch the first key's `last_used_at` stop moving, revoke it. Because you add
+before you remove, nothing breaks in between — and that is also what makes
+shown-once affordable, since a lost key has a cheap remedy. §9.4's guard must
+account for the window where two are live.
+
+**Share the hashing, not the lookup.** Extract `digest(raw)` only. If the shared
+module also owns the lookup and anyone writes `ApiKey.find_by(...)` inside it —
+the natural thing to type while moving code *out of* `ApiKey` — both models
+authenticate against `api_keys` and the separation silently collapses. Each model
+keeps its own three-line `authenticating`.
+
+## 5 · Server design
+
+### 5.1 The route
+
+```ruby
+namespace :api do
+  namespace :v1 do
+    resources :monitors, only: %i[index show] do
+      collection { post :sync, to: "monitors/syncs#create" }   # unchanged — §3.1 needs it
+    end
+    post "monitors/:registration_key/pings", to: "monitors/pings#create",
+         constraints: { registration_key: %r{[^/]+} }, format: false, as: :monitor_pings
+  end
+end
+```
+
+**Declare it standalone.** Nesting inside `resources :monitors, param:
+:registration_key` is wrong three ways, all verified: it silently retargets
+`show`, so `GET /api/v1/monitors/42` arrives as a registration key while
+`find_monitor` still reads `params[:id]`; Rails prefixes the nested parent's
+parameter to `:monitor_registration_key`, so the constraint names a segment that
+does not exist; and with the constraint inert, dotted task names break.
+
+The constraint and `format: false` are both required — Rails excludes dots from
+dynamic segments and treats a trailing `.foo` as a format. Verified:
+
+```
+GET  /api/v1/monitors/42                        => show,   id: "42"          (unchanged)
+POST /api/v1/monitors/reports.daily/pings       => create, registration_key: "reports.daily"
+POST /api/v1/monitors/%E6%97%A5%E6%9C%AC/pings  => create, registration_key: "日本"
+POST /api/v1/monitors//pings                    => RoutingError
+```
+
+Two traps. `recognize_path` resolves the controller class, so these all raise
+`RoutingError` until the controller exists — which reads exactly like a broken
+route. Run this before the route ships, since task names become part of a URL:
+
+```sql
+SELECT count(*) FROM monitors WHERE registration_key IS NULL;
+SELECT id, project_id, registration_key FROM monitors
+WHERE registration_key ~ '[^A-Za-z0-9_.\-]';
+```
+
+It will not catch everything: the `/` constraint is defensive, not preventive —
+`%2F` routes fine and decodes to a slash-bearing key (verified). Treat the query
+as a sizing exercise for the §8 backfill, not a guarantee.
+
+### 5.2 The controller, authentication and tenancy
+
+`Api::V1::Monitors::PingsController` **must not inherit `Api::V1::BaseController`**,
+because that base authenticates an `ApiKey` and this endpoint authenticates a
+`PingKey`. That is a structural reason, and it is the right kind — an inherited
+`before_action :authenticate_api_key!` would have to be suppressed, and
+suppression can be forgotten.
+
+Note it is *not* a rate-limiting reason, contrary to an earlier draft. Rails
+resolves a limiter's scope from `controller_path` at filter time, so a subclass
+gets its own buckets whether it inherits or not; measured — 122 requests to
+`monitors#index` returned 429 while the same token on `syncs#create` returned 200.
+Inheritance was never what isolated the counters.
+
+Inherit `ActionController::API`, which has no forgery protection to forget;
+`ActionController::Base` would reintroduce the trap `pings_controller.rb:5-10`
+documents, invisible in the test environment. What must be reimplemented rather
+than inherited: `rescue_from ActiveRecord::RecordNotFound`, the `{"error": …}`
+response shape, bearer-token extraction, and — the one an implementer will miss —
+**the rate-limit responder**. Duplicate them deliberately and keep the shapes
+identical to `/api/v1`.
+
+That last one is the same class of bug as the `rescue_from` below, and it is
+reached by *omitting* code rather than writing it. `Api::V1::BaseController:48`
+holds `RATE_LIMITED = -> { render json: { error: "rate_limited" }, status:
+:too_many_requests }`, which is what makes §5.4's `429` row true; a controller
+that does not inherit `BaseController` does not have it. §5.3 specifies `by:`, the
+two ceilings and the store but no `with:`, and **Rails 8.1's default `with:` is
+`-> { raise TooManyRequests }`, not a render** — verified at
+`actionpack-8.1.3.1/lib/action_controller/metal/rate_limiting.rb:66`. An unhandled
+raise leaves the controller entirely and is dressed by `ActionDispatch::ShowExceptions`
+→ `PublicExceptions`, which answers by *request format*: a JSON request gets
+`{"status":429,"error":"Too Many Requests"}` — right status, wrong body — and a
+form-encoded request with no `Accept` header falls to `render_html`, finds no
+`public/429.html`, and returns **`429 text/html` with an empty body** (verified;
+`show_exceptions.rb:83-86`). §6.4 sends the check-in form-encoded, so that second
+branch is the one the gem actually hits. Give this controller its own copy of the
+lambda.
+
+It resolves the project from the key and reaches the monitor only through it:
+
+```ruby
+monitor = current_project.monitors.find_by(registration_key: params[:registration_key])
+return render_not_found unless monitor
+```
+
+Use `find_by` and an explicit guard, not `find_by!`. The contract below promises
+`404 {"error": "not_found"}`, and a bang method raises `RecordNotFound` — which,
+with no inherited `rescue_from`, is an HTML page, not that.
+
+**That scoping is now the only thing keeping tenants apart.** The old ping token
+was unique across the whole database, so isolation was a property of the schema.
+Task names are ordinary words — `daily_digest`, `nightly_backup` — unique only
+within a project. A test proving the same task name in two projects never crosses
+is mandatory, and it should assert on the **class graph** too
+(`assert_not …PingsController.ancestors.include?(BaseController)`), because a
+behavioural test is a snapshot and this controller will sit in a directory where
+every sibling inherits the thing it must not.
+
+**Coarsen `last_used_at`.** Write it only when the stored value is more than five
+minutes old — on the check-in path an unconditional write would queue a tenant's
+concurrent check-ins behind one row. Apply the same to `ApiKey`; its only reader
+is a "Last used" column.
+
+What moves across from the public controller: the oversized-duration guard, the
+array-shaped-parameter guard, and the success-or-failure rule. What does not: the
+deliberately uninformative 404s and their reasoning.
+
+**It needs its own `rescue_from`, and this is a correctness bug if omitted.**
+`Api::V1::BaseController` has one; this controller cannot inherit it. Without it,
+an `ActionController::API` controller answers a full HTML Rails error page —
+measured: a monitor with a NULL `expected_interval_seconds` (the column is
+nullable) reaches `save!` inside `check_in!` and returns **422 with
+`text/html`**. The gem classifies 422 as transient, absorbs it in the grace
+period, and the monitor then goes down with an email saying it *missed its
+check-in* — §9.1's exact complaint, manufactured by an unhandled exception.
+Mandate `rescue_from` for at least `RecordInvalid` and `RecordNotFound`,
+rendering JSON.
+
+**But be clear about what that does and does not fix.** It corrects the content
+type; on its own it would not stop the misleading alert, because the harm comes
+from the *status* — an absorbing classifier treats a JSON 422 exactly as it
+treated an HTML one. That is why §6.5 makes an unexpected `4xx` loud rather than
+transient. Both halves are needed, and neither substitutes for the other.
+
+**Name the whole response contract**, since none of it can be inherited:
+
+| Case | Response |
+|---|---|
+| success | `200 {"ok": true}` |
+| missing / unknown / revoked key | `401 {"error": "unauthorized"}` |
+| valid key, unknown task | `404 {"error": "not_found"}` |
+| over either rate limit | `429 {"error": "rate_limited"}` |
+| unhandled | JSON, never HTML |
+
+Do **not** carry over the old endpoint's opaque-404 throttle handler. It existed
+because 200-versus-404 was the token oracle; now every auth failure is an
+identical 401, so a 429 discloses nothing — and a fake 404 would send the gem
+down the "not registered" branch instead of the transient one.
+
+Two smaller omissions: `source_ip` comes from `request.remote_ip`, and its meaning
+now depends on `trusted_proxies` because the endpoint sits behind kamal-proxy
+rather than being public — which matters because §9.3 proposes making leaks
+investigable from that column. And the request body may be form-encoded or JSON;
+pick one and state it. Path parameters win over body parameters, so a body-supplied
+`registration_key` cannot override the path — that is worth a test rather than
+luck.
+
+### 5.3 Rate limiting
+
+Two layers, and **the order matters in the opposite direction to the obvious
+one.** Declare **per-monitor first, then per-IP.**
+
+Each layer increments its own counter unconditionally, but the over-limit
+responder **halts the filter chain** — so the layer that fires first is the only
+one that charges.
+
+Be precise about *why* it halts, because it is the responder's own doing and not
+something `rate_limit` arranges. `rate_limiting` calls `with:` and returns
+(`rate_limiting.rb:72-90`); nothing after that stops the request. Rails 8.1's
+default `with:` halts by raising `TooManyRequests`; this app's `RATE_LIMITED`
+halts by rendering. **A `with:` that neither renders nor raises does not halt** —
+a logging-only lambda would let the request through *while over the limit*, and
+charge both counters on the way. Since §5.2 requires writing a custom `with:`
+here, that is a reachable way to silently disable both layers, and the §12 test
+that asserts a `429` is what catches it. Put per-IP first and a runaway task's rejections
+are charged to the shared host-wide bucket; put per-monitor first and they stop
+at the runaway's own bucket.
+
+Measured, one runaway task and one healthy task under the same key: per-monitor
+first, the healthy task got 200 and the per-IP counter reached 4; per-IP first,
+the healthy task got 429 and the per-IP counter reached 11.
+
+A per-IP layer is still required, because without it there is no
+pre-authentication bound at all: the per-monitor key is attacker-chosen on both
+halves, so an anonymous flood mints a fresh bucket per request and never trips.
+Measured: 50 anonymous requests produced 50 distinct buckets and zero throttling,
+each costing an indexed database query. The same flood against today's `/api/v1`
+hits 429 after 300, and self-hosters have no Cloudflare in front.
+
+The cost of putting per-monitor first is that per-IP no longer caps how many
+buckets a flood can mint (400 versus 300 in a probe). That is bounded by the
+store's own pruning, and by digesting and length-bounding the task-name half of
+the key — do both.
+
+The per-monitor layer is keyed on values readable before authentication:
+
+```ruby
+by: -> {
+  credential = Digest::SHA256.hexdigest(request.authorization.to_s.presence || request.remote_ip)
+  "#{credential}|#{Digest::SHA256.hexdigest(params[:registration_key].to_s)}"
+}
+```
+
+**Digest it.** Rails emits `by:` and the cache key into an
+`ActiveSupport::Notifications` payload on every throttle, and the value is also
+the literal cache key written to the store — so an undigested key puts live
+credentials into any broadly-subscribed monitoring tool, and into Postgres if the
+store ever moves to Solid Cache. `Api::V1::BaseController:51` has this defect
+today; fix it there in the same change rather than reproducing it.
+
+Two ways to get the lambda wrong, both measured. `by: -> { @current_ping_key }`
+reads an ivar that does not exist yet at filter time; Rails builds the key with
+`.compact`, which **drops the nil rather than distinguishing it**, collapsing the
+entire controller to one counter. The interpolated form
+`"#{@current_ping_key}|#{params[...]}"` collapses to one counter per task name
+instead — narrower, still wrong.
+
+**The numbers, stated rather than implied:** per-monitor 30/minute, per-IP
+300/minute, both in a dedicated `ActiveSupport::Cache::MemoryStore` — the test
+environment uses `null_store`, so a shared store silently disables both layers in
+tests. Measured at these values: 40 tasks checking in twice a minute under one key
+pass unthrottled; the per-monitor bound, not the per-IP one, is what a
+small-job-count app meets first.
+
+**Two things a Kamal operator needs to know.** The app and its job workers sit
+behind one proxy, so **the whole host shares a single per-IP bucket** — 300/minute
+is the machine's total check-in budget, not one process's.
+
+And **behind Cloudflare, `request.remote_ip` is a Cloudflare edge address** unless
+`STABLEMATE_BEHIND_CLOUDFLARE` is set so the trusted-proxy list is configured. If
+it is not, the per-IP layer — the *only* pre-authentication bound — collapses to a
+handful of buckets shared across every tenant, and one noisy client throttles
+everyone. Setting it is a prerequisite of this design, not an optimisation.
+
+The per-monitor ceiling also bounds the alert-flood in §9.3. Put it on the controller, alongside
+`PingsController::PER_TOKEN_LIMIT` and `Api::V1::BaseController::PER_KEY_LIMIT` —
+that is where every rate-limit constant in this app already lives. (Not in
+`config/initializers/stablemate.rb`: this server's file of that name holds the
+money and cost-control constants and no rate limits. Note the **host app** has an
+unrelated file at the same path holding `Stablemate.configure` — §4 and §6 mean
+that one.)
+
+### 5.4 Responses
+
+Authenticated, so the existing API conventions apply: `401` for a missing,
+unknown or revoked key; `404` for a valid key with an unknown task name.
+
+**Be honest about what that discloses.** A ping key holder cannot call
+`GET /api/v1/monitors`, so the 200/404 split hands them a capability they
+otherwise lack: enumerating every task name in the project. Job names leak
+business logic — `payroll_export`, `gdpr_purge` — and turn blind forgery into
+targeted forgery.
+
+We accept it, because §6.5 needs the `404` to say "run `stablemate:sync`" and
+that is the failure this design exists to make visible. State it as an accepted
+cost rather than claiming it leaks nothing.
+
+### 5.5 The verify endpoint
+
+`GET /api/v1/verify`, authenticated by the **ping key**, answering
+`200 {"ok": true}` and recording nothing. It exists for §6.6: the only way to
+prove the check-in credential end-to-end without recording a check-in — the
+honest fragment carved out of the rejected preview ping (§11).
+
+- **`GET` is correct here, and §3.2's POST-only rule does not apply.** That rule
+  exists because a check-in has side effects a link-prefetch must not trigger;
+  verify has none, and the credential rides the header, so nothing secret enters
+  a URL.
+- **It is its own controller, a sibling of the check-in controller** — sharing
+  the `PingKey` authentication concern, not inheriting `Api::V1::BaseController`
+  (§5.2's structural rule), and duplicating the same JSON contract,
+  `rescue_from`, and rate-limit responder. "Sibling" is pinned deliberately,
+  because the two readings diverge: on a *shared* controller §5.3's per-monitor
+  lambda would run on verify and collapse into one `digest("")` bucket per
+  credential, while a separate controller gets its own `controller_path`-scoped
+  buckets (§5.2's measured fact). So: **its own per-IP declaration at the same
+  300/minute ceiling**, no per-monitor layer (there is no task key to read),
+  and its rejections cannot consume the check-in controller's budget.
+- **An API key is rejected with the opaque `401`.** This endpoint is the
+  deliberate, sole exception to §1/§4's check-in-only statement — both of which
+  now carry the qualifier — and §12's credential-separation test names it in
+  both directions.
+- It may touch the key's `last_used_at` under §5.2's five-minute coarsening;
+  nothing else. No monitor is read, no event written.
+- API-*key* verification needs no new surface — `GET /api/v1/monitors` already
+  proves that credential, and §6.6 uses exactly that.
+
+## 6 · Gem design
+
+### 6.1 The command
+
+`bin/rails stablemate:sync` is now the management surface for monitor config —
+§3.1 makes it the only writer — so its output is product, not plumbing. It gains
+six things.
+
+**It must exit non-zero when it registers nothing.** Today it exits 0 four ways,
+two without making an HTTP request at all: `recurring.yml` missing, the
+environment section yielding no registerable tasks, the server refusing every
+entry, and a transport failure (which prints via `warn`, setting no status). On a
+free plan capped at five, declaring six jobs prints `synced 0` and exits 0. Under
+CLI-only registration, "the command exited 0" is the entire evidence a deploy has
+that anything is monitored.
+
+**It must refuse to run outside its configured environment**, with a `FORCE=1`
+override. `enabled_in?` exists only in the railtie — the rake task never consults
+it. Run locally, it registers the *development* section into the production
+project and exits 0. That was a nuisance when boot sync corrected it; now
+whatever the last hand-run wrote is the entire monitor set.
+
+**It must hold both credentials.** The API key registers; the ping key is what it
+prints in the ready-to-paste `curl` lines. Both live in the same
+`Stablemate.configure` block, which is what makes §4's shown-once storage
+affordable — the place that needs a finished command already holds the credential.
+
+**It must report what the server refused.** `sync!` currently returns the
+process-wide address cache, and the rake task prints `cache.size` — which has
+never been a per-run count. Return a result carrying both a count and the
+`skipped` reasons, since §12 requires printing them. Two traps: `{}` is truthy, so
+a `nil`-returning replacement flips "synced 0" into a failure message; and
+`0.size` is `8`, so `.size` must be removed, not just re-pointed.
+
+**Over-cap refusals are a persistent state, not a log line — decided after the
+persona review.** A `limit_reached` skip exits 0 (a billing limit must not fail
+deploys), which means the only trace of "two of your jobs are unmonitored" is a
+line scrolling past in a deploy log nobody reads while CI stays green. So the
+project **stores the keys the last sync refused for cap** — replaced wholesale
+on every run, and revive-at-cap refusals (the prune bullet above) join the same
+set — and while the set is non-empty the dashboard shows a persistent banner:
+*"N jobs are not monitored — over your plan's limit."* **One email** is sent
+when a key first enters the set (deduplicated until it leaves), because the
+moment a job silently loses monitoring is exactly the moment this product
+exists to make loud. The set clears itself: a later sync that registers the
+key, or no longer sends it, removes it.
+
+**It must show its derivation, per task.** The interval is computed from the
+schedule by a rule (§3.1's largest-gap) that surprises exactly when it matters.
+One line per task, naming the number *and where it came from*, makes the
+72-hour weekday window visible at the moment the user can still fix it — half
+the overrides people need become obvious the moment they see this line:
+
+```
+✓ reports.daily      every 24h  (derived from '0 9 * * *')
+✓ weekday_report     every 26h  (override — derived 72h from '0 9 * * 1-5')
+✓ pg_backup          every 24h  (declared in c.monitors)
+✗ db_backup          skipped: command task, no class: to observe
+!  2 monitors on the server match no task here: old_report, legacy_sync
+   (kept, state untouched — retire them with PRUNE=1, or restore the task)
+
+synced 3 for environment 'production'.
+```
+
+The shape is binding, the glyphs are not. Success lines carry the derivation,
+skips carry the server's or registrar's reason, **orphan and retirement lines
+name each monitor and its remedy**, and the run ends with the §12 count. A run
+applying overrides names them inline rather than in a separate block, so the
+line a user scans for a task is the whole story for that task.
+
+**Sync never prints a credential — its stdout is deploy logs.** An earlier
+revision put the ready-to-paste `c.monitors` `curl` block (which embeds the
+live ping key) in this output; sync runs from the post-deploy hook (§6.2), so
+that printed a live credential into every CI run's log, forever — the
+accompanying "don't pipe this into logs" warning was the product advising
+against its own design. The `curl` block lives in §6.6's install output
+instead: an interactive dev-machine run whose invocation already carries the
+keys, so it adds no exposure class. §4's "prints ready-to-paste `curl` lines"
+promise is kept by install, not by sync.
+
+**It must report orphans, and must not delete them.** An orphan is a monitor the
+sync's own project holds that matches no task in this run — the task was renamed
+or removed from `recurring.yml`. The server computes the list (it is the only
+party that sees both sides) and returns it as **`orphaned:` — an array of
+`registration_key` strings — in the sync response envelope**, beside `monitors`,
+`skipped` and `ping_key_last4`; the CLI prints it as above. Four boundaries,
+each load-bearing:
+
+- **Orphan candidates are `source: "gem"` rows whose `last_synced_app` matches
+  this run's `app` and whose `registration_key` is not in the payload.** The app
+  match is what stops two apps syncing distinct task sets into one project from
+  orphaning each other's monitors on every run; the source check keeps the §8
+  `manual-<id>` backfill rows out permanently (which is why §3.3 keeps the
+  column).
+- **Both sides of the app match must be present.** A row with `NULL`
+  `last_synced_app` (old gems didn't always send `app` — the server merges it
+  with `.compact`) is never a candidate: it cannot be attributed to any app, so
+  no run may claim it. And a payload arriving with no `app` reports no orphans
+  at all — nil-matches-nil would hand every unattributed row to whichever app
+  syncs first.
+- **Reported by default; retired on `PRUNE=1`; destroyed never.** An earlier
+  revision said no pruning in V1, on two objections — it would need a delete
+  route, and auto-prune's failure mode (a broken parse deletes everything) is
+  the incident again. Both dissolve once the verb changes: **prune retires, it
+  does not delete**, and the guard below makes the broken-parse case
+  unreachable. A run without the flag reports orphans and touches nothing —
+  one that was live keeps monitoring, and its pings stopping and it going down
+  is *correct*: the job stopped existing. (One still `pending` will instead
+  meet §9.1's never-checked-in alert, whose copy must therefore allow "or the
+  task was removed", not just "check your setup".)
+
+  **What retiring means.** `retired` joins the status vocabulary beside
+  `suspended`. Retiring is a transition out of the monitored world, and it
+  follows the two precedents that already exist for that, plus one rule of its
+  own:
+
+  - **It resolves the open incident first, without an alert** — exactly what
+    `pause!` and `Suspension#suspend!` both do, for the reason their comments
+    give (WU-2): a stranded open incident on a not-monitored monitor corrupts
+    the rollup. Measured: retired mid-outage with the incident left open, the
+    outage day scores 100% up; resolved at retire, the real downtime survives.
+  - **It remembers, like suspension does.** `status_before_retirement` mirrors
+    `status_before_suspension`, so pruning a user-paused monitor whose task
+    was removed does not destroy the pause — the revive restores it.
+  - **Not-monitored must be enumerated, not assumed.** The rollup side is
+    automatic (it keys off `monitored?`), but `compute_live_today_stat`
+    (`uptime.rb:210`) lists `paused?/suspended?/pending?` explicitly and would
+    score a retired monitor's today as phantom-100%; the choose-N downgrade
+    picker lists all monitors and would offer retired ones as keepers a pick
+    cannot revive. Both sites gain `retired`. Excluded from detection and the
+    cap (`counting_toward_cap`), listed apart on the dashboard like suspended.
+  - **A stray ping must not resurrect it — and there are two ping arms, not
+    one.** `CheckIn` guards paused/suspended in its transition case, and
+    `FailureReport` has its *own copy* of that case: a retired monitor must be
+    added to both, or a failure ping (`kind: "failure"` — a still-running cron
+    with status reporting) falls into `FailureReport`'s else-branch, flips the
+    monitor to `down`, opens an incident, emails a false outage and re-occupies
+    a cap slot. Measured. Both arms: record the event, never transition, never
+    alert.
+
+  **Sync revives it — and revive is not `reactivate_heartbeat!`.** An earlier
+  version of this bullet routed revive through it, and that ships a false
+  alert: the retirement window has no pings *by construction* (the task was
+  declared absent), so `next_due_at` is stale on virtually every revive, and
+  `reactivate_heartbeat!`'s overdue arm would call `flag_missed!` — down
+  status, an incident, and a down email fired *during the deploy that restores
+  the task*, before the restored job could possibly have run. Measured.
+  Pause-resume's overdue genuinely means missed runs of a live job; retire's
+  overdue is an artifact of the declared-absent window. So revive is its own
+  small operation: restore `status_before_retirement` when it was `paused`;
+  otherwise set `up` and **re-arm the clock** — `next_due_at` = revive time +
+  the effective interval, a fresh window, no alert. If the restored job then
+  fails to run, detection fires after interval + grace with a *true* down
+  alert.
+
+  **A revive re-enters the cap**, and the mechanism must be named because no
+  existing check can fire: `within_monitor_cap` validates `on: :create` only,
+  and the sync's find-then-update path is deliberately "always allowed at the
+  cap" — so the revive needs its own explicit branch in `Project::MonitorSync`,
+  *before* `persist_update`, that at the cap refuses with
+  `skipped: limit_reached` and leaves the monitor retired. (Otherwise: retire
+  one, fill the freed slot, restore the first — silently over cap.)
+
+  So a wrong prune costs one deploy of not-monitoring and is fully reversed,
+  with history intact, by the next sync that includes the task. Hard delete
+  remains the UI's delete button only (§3.3).
+
+  **The absent-versus-skipped guard, which only the CLI can supply.** An
+  orphan is not always a removed task: a task still *in* `recurring.yml`
+  whose `class:` line was deleted or whose schedule no longer parses is
+  *skipped* by the registrar, stops matching its monitor, and would read as an
+  orphan — auto-retiring it turns a YAML typo into monitoring-off for a live
+  job. Only the CLI sees the raw file, so the sync payload gains
+  **`declared_keys`** — every task key *this run's registrar can see* before
+  its skips: the current environment's `recurring.yml` section under Solid
+  Queue's own resolution rule (the section when present, the whole file
+  otherwise), plus every `c.monitors` key. The environment scoping must be
+  spelled out — "every key in `recurring.yml`" read literally would also
+  protect a key that exists only under another environment's section, and the
+  two readings retire different monitors. On a `PRUNE=1` run the server
+  retires only orphan candidates **absent from `declared_keys`**; a candidate
+  present in it is reported as *present but not registerable* and never
+  retired. **There is no client-supplied list of keys to retire** — the
+  server computes the retire set itself and applies its own orphan rule
+  (`source: "gem"`, the two-sided app match) to every retirement, so even a
+  malicious `prune: true` request with a minimal payload cannot reach a
+  `manual-<id>` backfill or another app's monitors, and what it can reach is
+  reversible (§4). **Prune requires `declared_keys`:** a request carrying the
+  flag but no key list — every pre-0.2.0 gem — retires nothing. The response
+  envelope gains **`retired:`** beside `orphaned:`, and the CLI prints each
+  retirement with its remedy. Retiring is a successful outcome — exit 0.
+
+  **Full convergence is a policy you declare, not a mood.** A team that wants
+  every run to provision exactly the declared set bakes `PRUNE=1` into
+  `.kamal/hooks/post-deploy` — itself a repo-owned file, so the convergence
+  policy is config-as-code too. One honest limit: a rename plus prune retires
+  the old monitor *with* its history and starts the new key fresh — history
+  does not follow a rename.
+
+  (The two parse-empty register-nothing paths — `recurring.yml` missing, no
+  registerable tasks — exit non-zero before any request, so an empty parse
+  can't even *report* orphans, let alone retire them. Of the other two, a
+  transport failure returns nothing, but a run the server refuses wholesale —
+  every entry `limit_reached` or `invalid` — completes and its envelope does
+  carry `orphaned:`. That is safe by construction rather than by absence:
+  refused entries were still *sent*, so their monitors match this run and are
+  not candidates, and the retire set is bounded by `declared_keys` either
+  way.)
+- **Renames look like an add plus an orphan**, because the key is the identity.
+  The output above makes that legible without special-casing it.
+
+### 6.2 Where it runs
+
+**Kamal hooks execute on the deploying machine, not in the container.** A bare
+`bin/rails stablemate:sync` in a hook runs on the laptop or CI runner with
+`RAILS_ENV` unset — i.e. development, i.e. the trap above. The correct form is
+`kamal app exec --reuse "bin/rails stablemate:sync"` in a **post-deploy** hook.
+`pre-deploy` is wrong and looks right: it runs before `app:boot`, so `--reuse`
+execs in the *old* container against the old image's `recurring.yml`, and the
+newly added job is never registered.
+
+Note there is no `.kamal/hooks/` directory in this repo, and `config/deploy.yml`
+references a `.github/workflows/deploy.yml` that does not exist. "Put it in your
+deploy script" currently has nowhere to go — creating that hook is part of this
+work.
+
+`app exec` fans out across hosts in parallel. That is safe: `Project::MonitorSync`
+holds the user row lock across the run, isolates each insert in a savepoint, and
+rescues `RecordNotUnique` into an idempotent update. Its comment blaming "the
+railtie's `after_initialize` sync" needs rewriting — multi-host `app exec` is the
+live reason now.
+
+### 6.3 Which tasks may report
+
+Today, when a job class is not in `recurring.yml`, the gem falls back to the class
+name — but only if the server had given it an address. **The cache is quietly
+acting as a server-approved allow-list.** Remove it and an address is
+constructible for any string, so the gem would report after every successful run
+of every job class in the host app.
+
+**Each tuple gains a `schedule` field — the raw string from `recurring.yml`,
+carried but not yet acted on.** Decided after the persona review: the gem
+already parses the cron expression with Fugit and then throws the
+expressiveness away, sending only the derived interval — which is why weekday
+jobs are inexpressible (§3.1). The server stores it in a new `schedule` column,
+written by the sync like any other setting; V1 detection ignores it entirely.
+`c.monitors` entries declared with a bare `interval:` have no schedule and send
+none — the column is nullable and means "the string the schedule was derived
+from", never a promise. What this buys: cron-aware detection later needs no gem
+release and no wire change, and §3.3's read-only panel may now show the real
+cron ("every 24h, from `0 9 * * *`") instead of being forbidden to claim it
+(§11's provenance bound is relaxed accordingly).
+
+The registrar builds two structures, and **both are needed**: `class_to_keys` maps
+job class to task keys, while `tuples` is an array carrying no class name at all —
+so the class→key direction is unobtainable from `tuples` alone. `tuples` is the
+narrower set, skipping tasks with no schedule, command-only tasks, and schedules
+whose interval cannot be derived. Intersect them:
+
+```ruby
+registerable = registrar.tuples.map { |t| t[:registration_key] }.to_set
+reportable   = registrar.class_to_keys
+                        .transform_values { |ks| ks.select { |k| registerable.include?(k) } }
+                        .reject { |_, ks| ks.empty? }
+```
+
+**Whichever file computes this must `require "set"`** — the same trap as §6.4's
+`require "erb"`, one file over, and with a worse ending. The gemspec sets
+`required_ruby_version = ">= 3.1"` and dev-depends on `activesupport >= 7.0`, so a
+Rails 7 host on Ruby 3.1 is a supported target — and **`Set` is only autoloaded
+from Ruby 3.2**. Measured across the three interpreters installed here: `[1,2].to_set`
+raises `NoMethodError` on 3.1.6 and works on 3.2.6 and 3.3.6.
+
+The ending is worse than §6.4's because §6.5 puts this call inside the railtie's
+`after_initialize`, whose `rescue StandardError` catches `NoMethodError` — so on
+Ruby 3.1 the gem logs `boot wiring skipped`, never attaches the subscriber, and
+**every check-in is disabled**. That is the incident this document exists to fix,
+reproduced on the gem's own oldest supported Ruby, differing only in that this
+time there is a log line. `execution/subscriber.rb:3` already requires `set`; the
+railtie requires only `rails/railtie`, and §6.5 moves the map-building there.
+
+Treat this as the general rule, not one more special case: **the gem's floor is
+Ruby 3.1, so no stdlib that 3.2+ merely autoloads may be used unrequired.**
+
+**`c.monitors` keys must never enter this map.** They have no job class by
+definition, and the keys are arbitrary user strings — so a key matching a host job
+class name binds them, and an unrelated Rails job advances the shell script's
+monitor. The monitor reads green while the backup has been failing, which is
+precisely the failure this product exists to prevent. Keep two sets: *may-register*
+(tuples + `c.monitors`) and *may-report-by-class-name* (tuples only).
+
+**Say what happens to the class-name fallback.** `resolve_keys` currently falls
+back to the job class name when a class is not in the map, using the address cache
+as the test for "does a monitor exist with this name?" With no cache that test is
+gone, and the fallback would report for every job class in the host app. **Delete
+the fallback.** The reportable map is now the complete answer, and
+`docs/integrating.md`'s "manual fallback" section — which documents creating a
+monitor by hand whose registration key equals a job class name — describes
+something the interface can no longer do anyway (§3.3). Remove both.
+`test_unmapped_perform_does_not_ping` is the invariant that must stay green.
+
+**Three shipped tests die with it**: `subscriber_test.rb:147`
+(`test_manual_fallback_pings_by_job_class_name`) and `:313`
+(`test_handle_discard_manual_fallback_by_job_class_name` — the discard path has
+its own copy of the fallback, `resolve_keys` from `handle_discard`) are deleted
+outright, and `:163` (`test_subscribes_to_real_active_job_notifications`) uses
+the fallback as its vehicle and needs a different one rather than deletion.
+
+**Say where the union happens.** "May-register" is `recurring.yml` tasks plus
+`c.monitors`, but the intersection snippet reads `registrar.tuples`. If
+`c.monitors` is folded into the registrar — the natural place — then
+`registrar.tuples` is contaminated and the snippet's own allow-list is wrong.
+**The registrar stays `recurring.yml`-only; `Registration#sync!` merges the two.**
+
+**Add a fixture.** On every shipped fixture the intersection is a no-op —
+`reportable == class_to_keys` exactly, because none of them has a task with a
+`class:` and an underivable schedule. §12 requires a test for precisely that case,
+so it needs a fifth fixture to exist at all.
+
+**`c.monitors` also needs translating.** The server's entry struct reads
+`registration_key` / `name` / `expected_interval_seconds` / `grace_period_seconds`;
+`{ interval:, grace: }` matches none of them and has no key field, so untranslated
+entries are **silently dropped** — sync reports success and every check-in 404s
+forever. Durations survive JSON as numeric strings and the server casts them, so
+only the field names need mapping. A key colliding with a `recurring.yml` task is
+currently resolved last-wins with no warning; reject or report it.
+
+Default `grace` the way the registrar already does — `max(interval * 0.15,
+5.minutes)` — so a `c.monitors` entry that omits it behaves like a `recurring.yml`
+task rather than getting zero grace. Document seconds as the canonical unit, since
+`1.day` requires ActiveSupport and the gem supports a plain-Ruby host.
+
+### 6.4 How a check-in is sent
+
+§6 previously specified only the edges — which tasks may report, when the command
+exits non-zero, where it runs, what gets logged — and never the middle. This is
+the middle.
+
+`Client#ping` and `#report_failure` stop taking a URL and take a task key:
+
+```ruby
+def ping(registration_key)
+  classify(post_check_in(registration_key, {}))
+end
+
+def report_failure(registration_key, message:)
+  classify(post_check_in(registration_key,
+                         status: 1, message: message.to_s[0, ERROR_MESSAGE_LIMIT]))
+end
+
+# Client has no post_form today; report_failure builds its own request inline
+# (client.rb:78-81). Extract that shape rather than inventing a new helper.
+def post_check_in(registration_key, params)
+  uri = check_in_uri(registration_key)
+  http_for(uri).post(uri.request_uri,
+                     URI.encode_www_form(params),
+                     "Content-Type" => "application/x-www-form-urlencoded",
+                     "Authorization" => "Bearer #{config.ping_key}")
+end
+
+def check_in_uri(registration_key)
+  URI.join(config.endpoint, "/api/v1/monitors/#{ERB::Util.url_encode(registration_key)}/pings")
+end
+```
+
+`ping` and `report_failure` keep their existing `rescue StandardError` — it is
+what makes the whole path fire-and-forget, and the encoder note below depends on
+it being there.
+
+Three things to pin down, because each has a wrong-looking-right answer:
+
+- **The encoder is `ERB::Util.url_encode`, and `client.rb` must `require "erb"`.**
+  It requires only `net/http`, `json` and `uri` today, and the gem supports a
+  plain-Ruby host. Without the require, `ERB` is an uninitialized constant —
+  `NameError`, which is a `StandardError`, which `Client#ping`'s rescue swallows
+  and reports as `:error`, which §6.5 classifies as transient. Every check-in
+  would be dropped with no `401` or `404` logged, and the monitor would go down
+  saying it missed its check-in. Verified: the bare require set raises. `CGI.escape` and
+  `URI.encode_www_form_component` turn a space into `+`, which decodes as a
+  literal `+` in a path segment — so a task named `"my task"` would 404 forever
+  while §5.1's route table passed, since none of its examples contain a space.
+- **The body stays form-encoded**, as `report_failure` already sends it, so
+  `status` and `message` keep working unchanged.
+- **Response classification lives in `Client#classify`**, not in
+  `Subscriber#deliver`. `classify` already owns this split; the change is which
+  states it distinguishes — §6.5 defines four. `Subscriber#deliver` keeps only "act on what the client
+  said", and loses `trigger_resync` entirely.
+
+`Subscriber` also sheds more than the address lookup: the `ping_urls:`, `resync:`
+and `resync_interval:` keywords, `@resync_mutex`, `@last_resync_at`, `url_for`,
+and the `:stale` branch of `deliver`. `dispatch` stops resolving a URL and passes
+the key through.
+
+### 6.5 Reading the response, and boot
+
+- `401` — the key is wrong or revoked. Log **once**, loudly.
+- `404` — this task is not registered. Log **once per task name**, naming the
+  remedy: run `bin/rails stablemate:sync`.
+- Any other `4xx` — the server is refusing this check-in for a reason that will
+  not resolve itself. Log **once per task name**, as for a `404`. Absorbing it is
+  how a server-side fault reaches the user as their job missing a check-in (§5.2).
+- `5xx`, a timeout, or a transport failure — transient, absorbed by the grace
+  period.
+
+**Route these through `Rails.logger` when Rails is defined.** The gem's logger is
+`config.logger || Logger.new($stderr)`, and nothing in the gem ever assigns
+`Rails.logger` — so the default is the stderr channel the original boot-sync
+warning went to, which is why nobody saw it. Since boot now does nothing else,
+this line is the *only* signal a misconfigured deploy produces; leaving it on
+stderr bypasses the host's formatter, level and tags.
+
+So `Stablemate.logger` must prefer `Rails.logger` when Rails is loaded, or
+`Configuration#logger` must default to it. The snippets below write
+`Stablemate.logger.error` assuming that change lands first — without it they are
+the very channel this paragraph condemns. There is no `log_error` helper —
+`Logging` provides only `log_warn`/`log_info` — so one is needed to keep the
+`[stablemate]` prefix and the raising-logger guard.
+
+"Once" is per-process state written from background dispatch threads, so it needs
+a guard. Note the real risk is not `Set#add?` — 19.2M contended operations
+produced zero double-adds — but the `check → log → add` shape people actually
+write, where the logging IO releases the GVL. That races about 1% of the time.
+
+**Boot attaches the listener and does nothing else:**
+
+```ruby
+config.after_initialize do
+  # Log first, so a developer booting locally is told even when the environment
+  # allow-list will stop us wiring anything up.
+  Stablemate.logger.error("[stablemate] no ping_key configured — check-ins are DISABLED …") if
+    Stablemate.config.ping_key.presence.nil?
+
+  next unless Stablemate.config.enabled_in?
+  next unless Stablemate.config.ping_key.presence
+
+  registrar = Registrars::SolidQueueRecurring.new   # local YAML only, no network
+  Execution::Subscriber.new(class_to_keys: reportable_map(registrar)).subscribe!.subscribe_discards!
+rescue StandardError => e
+  Stablemate.logger.error("[stablemate] boot wiring skipped: #{e.class}: #{e.message}")
+end
+```
+
+Five things this gets right, four of which an earlier draft got wrong:
+
+- **It keeps the rescue.** `Psych::SyntaxError` is a `StandardError`, so dropping
+  it turns a broken `recurring.yml` from "monitoring off" into "the app will not
+  boot" — strictly worse than the bug being fixed.
+- **`.presence`, not truthiness.** A set-but-empty environment variable is `""`,
+  which is truthy — the gate would pass, the error would never print, and every
+  request would carry `Authorization: "Bearer "` for a permanent 401.
+  `Configuration#default_environment` already guards against exactly this for
+  `RAILS_ENV`.
+- **It keeps `enabled_in?`.** The environment allow-list is production-only by
+  default and must survive, or a developer's laptop checks in to production
+  monitors and masks a real outage. An earlier draft's snippet omitted the line
+  while its own prose claimed to keep it.
+- **It logs above that gate**, which is the whole reason the log line and the
+  gate are separate statements.
+- **It uses the real constructor keyword.** `Subscriber.new` takes
+  `class_to_keys:`; there is no `reportable:` parameter. §6.3's intersection
+  produces a map of the same shape, so it substitutes directly.
+
+**On logging at error level.** There is no `log_error` helper — `Logging` provides
+only `log_warn`/`log_info` — and adding one does not by itself make
+`Stablemate.log_error` work: `Stablemate.singleton_class.include?(Logging)` is
+`false`, so the module has no such method to call. Either add `log_error` to
+`Logging` and invoke it from an object that includes the module, or call
+`Stablemate.logger.error` directly with an explicit `[stablemate]` prefix, as the
+snippet above does — but only once `Stablemate.logger` prefers `Rails.logger`, per
+the paragraph above. The railtie already uses the latter shape.
+
+`handle_event` also needs a rescue. It is the only public handler without one —
+`handle_retry` and `handle_discard` both have one — and an exception raised in a
+`perform.active_job` subscriber propagates into `perform_now`, **failing the
+host's job**. The gem's "nothing may propagate into the host" guarantee is
+currently enforced only on the dispatch side.
+
+### 6.6 The install command
+
+The reference standard, set by the tools this audience already loves: paste two
+commands, watch something real happen in the terminal *and* the dashboard,
+inside two minutes, without a deploy — and without faking the one thing this
+product exists to be truthful about. `bin/rails stablemate:install` is that
+first two minutes, and it is **dry-run by design**.
+
+```
+$ bin/rails stablemate:install STABLEMATE_API_KEY=sm_live_… STABLEMATE_PING_KEY=sm_ping_…
+writing config/initializers/stablemate.rb
+reading config/recurring.yml (production section) — this is what will be monitored:
+  reports.daily      every 24h   (derived from '0 9 * * *')
+  weekday_report     every 72h   (derived from '0 9 * * 1-5' — Fri→Mon gap;
+                                  tighten with c.overrides for a snugger window)
+✗ db_backup          skipped: command task, no class: to observe
+verifying credentials… ✓ API key valid   ✓ ping key valid
+writing .kamal/hooks/post-deploy (kamal detected) — registration runs there
+
+check in pg_backup from its own cron (this embeds your live ping key):
+  curl -X POST -H "Authorization: Bearer sm_ping_…" \
+    https://stablemate.example/api/v1/monitors/pg_backup/pings
+
+next: add both keys to your production secrets (.kamal/secrets or credentials)
+      — the sync runs in the container, and your local .env doesn't ship.
+then deploy, and watch: https://stablemate.example/projects/siftbox
+```
+
+The preview lines reuse §6.1's grammar; there is no synced count because
+nothing syncs. The rules, each with a wrong-looking-right alternative:
+
+- **The preview reads the `production` section, explicitly, and says so.** This
+  is the trap the transcript hides: the registrar resolves `recurring.yml`'s
+  section from the *current* environment, and install runs on a dev machine —
+  so an unpinned preview shows the development resolution, which for the
+  standard production-sectioned layout is **zero tasks** (measured). "What will
+  be monitored" means what *production* will register, so install passes the
+  registrar `environment: "production"` (a read-only parse; no guard applies),
+  prints which section it consulted, and accepts an override for unusual
+  layouts. A present file that resolves to zero tasks under that section is
+  reported by name — "no tasks under 'production' in recurring.yml" — which is
+  a different message from the missing-file note below.
+- **Keys arrive as env-style arguments named for the gem's existing convention**
+  — `STABLEMATE_API_KEY` / `STABLEMATE_PING_KEY`, beside the shipped
+  `STABLEMATE_ENDPOINT` — and **the same names are the ones the initializer
+  skeleton reads and the `.env` append writes.** One name everywhere, or a
+  green install boots the host into §6.5's "no ping_key configured" with no
+  hint why. Ugly to type, and nobody types it: §7's setup panel renders the
+  whole line, and that render is the §4 shown-once moment.
+- **The pasted line lands in shell history and `ps` output, and that is an
+  accepted cost, stated** (§5.4's standard). `FORCE=1` borrows fine from rake
+  idiom because its value isn't secret; these values are. The alternatives —
+  an interactive prompt, or reading back from `.env` — break the
+  paste-one-line flow the panel exists for, and the remedy for an exposed key
+  is already cheap: revoke and regenerate from the panel (§7).
+- **It registers nothing, and the environment guard is untouched.** Onboarding
+  is exactly the pressure that would erode §6.1's guard ("just `FORCE=1` the
+  first time") — dry-run-by-design removes the temptation. Everything it shows
+  immediately is real: config written, derivations computed (the 72-hour
+  weekday surprise surfaces *before* the first deploy, a moment none of the
+  UI-first competitors have), credentials proven end-to-end.
+- **Verification is two calls made with the argument keys**: the ping key
+  against §5.5, the API key against `GET /api/v1/monitors`. Server responses
+  stay opaque; the CLI knows which request failed and names the key. Either
+  failure exits non-zero.
+- **Secrets never land in committed files.** The skeleton reads
+  `ENV["STABLEMATE_API_KEY"].presence || Rails.application.credentials.dig(:stablemate, :api_key)`
+  (ping key likewise) — the ENV-first shape is borrowed deliberately from the
+  *server's* documented credentials pattern, since the host-side docs today
+  show credentials-only and the fallback keeps that path working. Keys persist
+  by appending to an existing `.env`; with no `.env`, it prints the
+  `bin/rails credentials:edit` lines instead. Writing keys into the
+  initializer would be committing credentials to git.
+- **A missing `recurring.yml` is a note, not an error** — the app may simply
+  not have recurring jobs yet; print "none found yet", still verify. (Unlike
+  sync, where registering nothing is a failure — §6.1.)
+- **It writes the deploy hook, because the whole flow dies without it.** The
+  dashboard's "waiting for your first sync" waits forever if nothing runs the
+  sync on deploy — and an install that ends "deploy, then watch" while
+  silently depending on a hook the user must discover in another section is a
+  guaranteed 11pm debugging session. With a `.kamal/` directory present,
+  install writes `hooks/post-deploy` (repo config, not a secret) unless one
+  exists; without Kamal, it prints the line for the user's own CI. The
+  transcript names what it wrote.
+- **The `curl` block for `c.monitors` entries prints here — and only here.**
+  Install is an interactive dev-machine run whose own invocation already
+  carries the keys, so embedding the ping key adds no new exposure; sync must
+  never print it (§6.1 — deploy stdout is logs).
+- **It names the keys-to-production step, because the local `.env` doesn't
+  ship.** The sync runs inside the production container (§6.2); the `.env`
+  append serves the dev machine only. Install's closing lines say exactly
+  where the two variables go (`.kamal/secrets` or production credentials) —
+  leaving that implicit is the vaguest step gating the entire flow.
+- **Idempotent for code, rotating for secrets.** With the initializer already
+  present it refuses to clobber the code — but a re-run with keys **updates the
+  `.env` values**, because that is the lost-key recovery loop: regenerate from
+  the panel (§7), paste the new line, done. Refusing the `.env` update too
+  would dead-end that loop with a green-looking run still carrying dead keys.
+  Prints "already configured — updating keys", verifies, previews, exits 0.
+
+Sequencing: the §5.5 endpoint ships in phase 1; this command ships with gem
+0.2.0 in phase 2, and §7's setup panel alongside it.
+
+## 7 · What the user journey becomes
+
+**There is no browser-only path to seeing the product work.** Sign up, and the
+next step is: add the gem, deploy, run the command, wait for a job to fire. This
+is the largest product cost and it is accepted deliberately.
+
+Three surfaces currently promise what will no longer exist, and all three must be
+rewritten in the same change:
+
+- **`projects/show.html.erb:20-27`** — *"No monitors in this project yet. Add one
+  manually, or connect the gem…"* with an **Add a monitor** button. This is the
+  page a brand-new user lands on immediately after creating their first project.
+- **`monitors/index.html.erb`, the `data-testid="project-empty-hint"` block** —
+  cited by its testid because the line range has already moved once — *"No
+  monitors yet — connect the gem or add
+  one."*
+- **`projects/_first_run.html.erb:36`** — links to the gem guide with a
+  placeholder `"#"`. Worse, this card renders only when the user has **no
+  projects**, so the moment they create one it becomes unreachable — taking the
+  only gem-guide link in the signed-in product with it. The real instructions have
+  to live on a page a user with a project can still see.
+
+`stablemate_docs_url` already exists and is used on the marketing pages.
+
+**What replaces all three is a setup panel that watches the same moment the
+terminal does.** The empty-project state becomes: `bundle add stablemate`, then
+a "Generate setup command" button that issues **both** keys and renders the
+full §6.6 install line **once** — that render is the §4 creation moment. A
+reload shows the command with both keys masked plus a regenerate affordance,
+because nothing can re-display a hashed key. **Regenerate must not silently
+accumulate live pairs**: it revokes the pair it supersedes *when those keys
+have never been used* (`last_used_at` still `NULL` — never verified, never
+synced), which is the onboarding case; keys that have been used stay live and
+the panel says so, because at that point the user is in §4's add-before-remove
+rotation, not a do-over. Without this rule every click mints another
+permanently-valid pair, and §9.4's mismatch guard — which warns only when the
+configured key matches *no* live key — stays silent by design. Below it, a milestone ladder
+driven by the live-update machinery the dashboard already uses, each state
+naming the *next* milestone and when to expect it:
+
+1. **"Waiting for your first sync"** — flips when a sync registers monitors.
+   One addition is needed for the flip: `Project::MonitorSync` does not
+   broadcast today, so newly-registered monitors appear only on reload; the
+   run must broadcast once when it commits.
+2. **"N monitors registered — waiting for first check-ins"** — each row then
+   flips green on its first real ping, which is machinery that already exists.
+
+The ladder never claims a job ran (§11's preview-ping rule stands). The first
+real check-in is the demo; the panel's job is to make the wait legible, not to
+shorten it dishonestly.
+
+**`db/seeds.rb` creates a manual monitor with no task name and prints a ping URL
+for a deleted route.** It is the documented walking-skeleton path, so it must
+become: create a project, issue **both** an API key and a ping key, and print
+the §6.6 install line (which embeds both) alongside a ready-to-paste check-in
+command. Issuing
+only the API key would seed a skeleton that can register a monitor and never check
+one in — the permanently-grey-row failure this same section warns about.
+
+**The monitor detail page** loses the ping-URL card entirely — that is the whole
+of `_ping_setup.html.erb`, rendered for every monitor, not only ones awaiting
+setup. What replaces it is a short "how this monitor reports" block naming the
+task key and the command.
+
+**The silent state gets worse before §9.1 fixes it.** Detection only considers
+monitors marked `up`, so one that is registered but never checked in is invisible
+forever — no alert, no error, a permanently grey row. Today that state is
+transient because the setup card tells you exactly what to paste. After this it
+becomes the steady state of a mis-registered monitor, and both surfaces that
+explained it are being deleted. **§9.1's never-checked-in alert should ship with
+this work, not after it.**
+
+## 8 · Change inventory
+
+Measured, not estimated.
+
+| Area | Scale |
+|---|---|
+| Create path (controller, view, six references, form selector) | ~110 lines |
+| Edit path (`#edit`/`#update`, `monitor_params`, `edit.html.erb` 7 + `_form` 42 + `_preset_field` 26, show-page link, route narrowing) | ~90 |
+| Sync arbitration deletion (`gem_may_write?`, `GEM_SETTINGS`, `gem_settings` — `monitor_sync.rb:157-218` — three columns + drop migration) | ~70 removed |
+| Read-only config panel replacing the form on `show` | ~15 |
+| Transfer cascade | ~92 |
+| Provenance chip removal (`_gem_chip` 20 lines + 2 render sites; `source` and its predicates stay — §3.3) | ~22 |
+| Ping-token surface (`_ping_setup`, both rotation controllers, the concern, `PingsController`, helpers, routes, serializers) | ~250 |
+| `registration_key` backfill migration | ~40 |
+| `PingKey` model, issuance, controller, views, migration, project-page wiring | ~200 |
+| Never-checked-in alert: scope, job, mailer, notification cause, copy (§9.1) | ~120 |
+| Orphan computation in the sync response (§6.1) | ~25 |
+| `retired` status: vocabulary + cap scope + **both** ping arms (`CheckIn` and `FailureReport`) + resolve-incident-at-retire + `status_before_retirement` + the revive operation (re-arm, restore-paused, explicit cap branch in `MonitorSync`) + live-today stat + dashboard partition + choose-N picker exclusion (§6.1) | ~85 |
+| Prune: `declared_keys` + `prune` in the sync payload, retire/refuse split, `retired:` envelope (§6.1) | ~50 |
+| Verify endpoint (§5.5): controller, route, per-IP limit | ~25 |
+| Setup panel (§7): both-keys issuance, shown-once render, masked reload, milestone ladder + the `MonitorSync` commit broadcast | ~110 |
+| `schedule` column: stored by sync, shown by the panel, unused by detection (§6.3) | ~15 |
+| Over-cap state: refused-keys storage, banner, first-entry email (§6.1) | ~60 |
+| Close-the-loop emails: "started checking in" + project's first check-in (§9.1) | ~40 |
+| Free cap 5 → 10: constant, pricing copy, re-pinned tests (§10) | ~5 |
+| **Server subtotal** | **~1,424** |
+| Gem deletions (§3.2) | ~100 |
+| Gem additions: `c.overrides` (validation, application to tuples) + derivation/orphan output + `PRUNE=1`/`declared_keys` + the tuple's `schedule` field (§6.1, §6.3) | ~95 |
+| Gem: `stablemate:install` (§6.6) — arg parsing, initializer writer, `.env` append / credentials instructions, derivation preview, two verification calls | ~130 |
+| **Tests broken by UI removal** | ~393 across 15 files, 4 deleted whole |
+| **Tests broken by the edit/arbitration removal** | 2 of 30 in `monitors_controller_test.rb` (both cross-tenant guards at `:60`/`:66` — the protection they pin moves to the routes not existing), the edit half of `monitor_edit_delete_test.rb`, the arbitration tests in `monitor_sync_test.rb:279-431` less the one survivor, plus the upsert test at `:154-160` (§3.1) |
+| **Tests broken by the check-in move** | ~647 across 9 files, 3 deleted whole |
+| **Gem suite** | 48 of 94 tests error under the deletions |
+
+Two things the totals hide:
+
+**Capybara cannot set an `Authorization` header.** Eight call sites across
+`outage_recovery_test.rb`, `uptime_history_test.rb` and `error_notices_test.rb`
+drive check-ins with `visit ping_path(...)`. Each must become a direct
+`monitor.check_in!` or an in-test HTTP call — weakening them from "the real
+endpoint drove this" to "we called the model". Given `CLAUDE.md`'s system-test
+rule, decide consciously which flows keep true end-to-end coverage.
+
+**Three assertions stop testing anything rather than failing** — `refute_link "New
+monitor"` in three system tests will stay green while proving nothing. Delete them
+deliberately.
+
+**Leave `registration_key` nullable for now.** `NOT NULL` costs ~215 test fixes
+(95 `monitors.create` call sites pass no key; 3 of 4 fixtures have none) and buys
+little while `Project::MonitorSync` is the only *ongoing* writer — the backfill
+below is a one-shot migration, not a second write path, which is the sense in
+which §0 calls it a second writer. Backfill so every existing
+monitor is addressable. **The algorithm is `manual-<id>`; see §8.1 for why
+deriving from the name is unsafe.**
+
+Two guards it still needs. Check for a collision before assigning — a
+`recurring.yml` task key may literally be `manual-7`, and the partial unique index
+would otherwise raise `RecordNotUnique`, roll back the wrapping transaction and
+fail the deploy. And run the backfill and any later `NOT NULL` in one migration,
+since the constraint cannot be added while nulls remain.
+
+### 8.1 Cutover: this must ship in three phases
+
+**Shipping all of this in one deploy takes every healthy monitor dark and emails a
+false outage for each one.** The server and the gem are separate repositories with
+separate deploys, and the ping key can only be issued from the server interface
+*after* the server deploy — so there is necessarily a window where a new server
+faces an old gem. Traced end to end, that window is not benign:
+
+1. The old gem's cached address is `…/ping/<token>`; the route is gone → 404.
+2. `Client#classify` reads 404 as "address rejected" and triggers a re-sync.
+3. The re-sync hits `SyncsController#create`, which calls `ping_url_for(monitor)`
+   → `ping_url(monitor.ping_token)`. Helper and column are both deleted → **500**.
+4. `sync!` rescues, returns nil, and the dead addresses stay cached. Re-sync is
+   throttled to once a minute.
+5. Every check-in is then dropped at `subscriber.rb:258` — `return unless url` —
+   **the exact line §2 quotes as the incident this document exists to fix.**
+6. `DetectMissedPingsJob` sweeps and `flag_missed!` opens an incident and sends a
+   `down` email per monitor.
+
+The casualties are precisely the healthy ones: `detectable` is
+`where(status: "up")`, so paused, suspended, pending and already-down monitors are
+untouched. For a 15-minute job the grace is `max(interval × 0.15, 5.minutes)` =
+5 minutes, so the whole window to beat is 20 minutes — server deploy, copy a ping
+key from the UI, edit host credentials, redeploy the host. That does not fit.
+
+**Three phases, and the split is free** — the new route does not collide with
+`match "/ping/:ping_token"`, and `ping_keys` can be created while `ping_token`
+still exists:
+
+- **Phase 1 — additive, server only.** Add `PingKey`, the new endpoint, the route,
+  the rate limiters, the `registration_key` backfill, the verify endpoint
+  (§5.5) — and the server half of
+  prune (§6.1): the `retired` status with its sites, and the
+  `declared_keys`/`prune` handling in the sync path. All of it is inert until a
+  0.2.0 gem sends the new fields, which is what makes it phase-1-safe: a
+  pre-0.2.0 gem sends neither, and prune without `declared_keys` retires
+  nothing. Change nothing else. The old ping endpoint, `ping_token`, the
+  rotation controllers and `ping_url` in the sync response all keep working.
+  (The gem half of prune — `PRUNE=1`, sending `declared_keys` — ships with gem
+  0.2.0 in phase 2; baking `PRUNE=1` into the deploy hook is a phase-2-or-later
+  act.)
+
+  **The backfill is the one part of phase 1 that is not inert, and it needs a
+  namespace.** `registration_key` is not just an address — it is the upsert
+  identity in `Project::MonitorSync`. Derive a backfilled key from the monitor's
+  name and a hand-created monitor called `daily_digest` acquires the key
+  `daily_digest`; the next `stablemate:sync` then **adopts it** instead of
+  creating its own. Reproduced: what is two monitors today becomes one, fed by
+  both a shell cron and a Rails job — so killing the shell script leaves the
+  monitor green, which is exactly the failure §6.3 forbids elsewhere. (When this
+  was reproduced, `gem_may_write?` also made the adopted monitor keep its manual
+  interval; under §3.1's always-write the sync overwrites it instead. The
+  interval detail flips, the load-bearing hazard doesn't — either way one monitor
+  now describes the Rails job, and the shell cron it was created to watch is
+  unmonitored.)
+
+  So **backfill into a namespace the gem does not derive from job names** —
+  `manual-<id>` — rather than deriving from the name. A name-derived key is only
+  checked against what exists at migration time; this is the collision that
+  arrives afterwards, when the gem next syncs. (This narrows the collision to one
+  a *human* has to author deliberately — a literal `manual-7` typed into
+  `recurring.yml` or `c.monitors` — which is why §8 still guards the migration
+  rather than treating the namespace as sufficient.)
+- **Phase 2 — the host cuts over.** Issue a ping key, add it to the host's
+  credentials, deploy gem `0.2.0`, run `stablemate:sync`, and **verify a real
+  check-in has landed** before continuing.
+- **Phase 3 — subtractive, server only.** Now delete the ping endpoint,
+  `ping_token`, both rotation controllers, `ping_url` from the serializers, and the
+  monitor-creation path.
+
+§6.2's care about `pre-deploy` versus `post-deploy` hooks is wasted if this
+larger ordering is left implicit.
+
+## 9 · What this does not fix
+
+### 9.1 Alerts still point at the wrong system
+
+A wrong key, DNS failure, blocked egress, a rate limit — in every case the server
+sees silence and the email says the job "missed its check-in". Three signals,
+cheapest first:
+
+- **The API key already records when it was last used**, on every registration.
+  Today the only reader is a "Last used" column in the project view; nothing acts
+  on it. *"This app registered within the hour but no monitor has reported for
+  longer"* is a positive statement with no false positives. Phrase the threshold
+  in hours, not minutes — §5.2 coarsens that write to five-minute granularity.
+- **Alert on monitors that have never checked in. This one is IN scope** — see
+  §7 for why, §8 for its budget and §12 for its test. It sits here because it
+  belongs with its siblings, not because it is deferred. The threshold must be
+  relative to the monitor's own interval, it must fire once, and it needs its own
+  wording pointing at setup docs — wording that must also allow "or the task was
+  removed from your config", because a still-`pending` monitor whose task is
+  deleted but not pruned stays in this state deliberately (§6.1), and "check
+  your setup" is the wrong instruction for it.
+
+  **Decided: it creates a `Notification` only, never an `Incident`.** Incidents
+  feed the uptime rollup and the incident history, and `pending` is an
+  explicitly not-measured state — a monitor that has never run has no downtime
+  to record. The incident-backed alternative would also have the first real
+  ping "resolve" the incident and email *"is back up"* for a monitor that was
+  never up. Instead, **two small close-the-loop emails** ship with the alert:
+  a monitor that was alerted as never-checked-in sends *"started checking
+  in"* when its first real ping lands (resolving the alert's story without
+  faking a recovery), and a project's **first-ever check-in** sends one
+  onboarding email — the §7 milestone ladder's final state, delivered to the
+  inbox for the user who closed the tab after deploying.
+
+  **Two things it must specify that an implementer cannot read off the model,
+  because on this monitor every obvious answer is `nil`.**
+
+  *What the threshold is measured from.* `persist_create` sets `status: "pending"`
+  and **no `next_due_at`** (`project/monitor_sync.rb:234-245`), so on a monitor
+  that has never checked in `last_ping_at` is nil, `next_due_at` is nil,
+  `due_with_grace_at` returns nil and `overdue_now?` is false. None of the
+  existing detection machinery applies. The anchor is **`created_at`**, which
+  under §3.1 is the moment `stablemate:sync` registered it — state that, because
+  the tempting alternative is to set `next_due_at` in `persist_create` and reuse
+  the `overdue` scope, and that quietly changes what the UI shows (`next_check_upcoming?`
+  starts reporting a due time for a monitor that has never run).
+
+  *That the first sweep after deploy is not a broadcast.* Every monitor already
+  sitting `pending` is instantly past any threshold measured from `created_at`, so
+  the job's first run emails for all of them at once — and under §7 `pending` is
+  the *normal* state for a newly-registered app, so this is a real population, not
+  an edge case. Either bound the first sweep to monitors created after the feature
+  ships, or backfill the alert as already-sent. §12's "does not alert twice" does
+  not cover "does not alert forty times on the first run".
+- **Notice a whole project going quiet** — the most recent check-in anywhere in
+  the project older than the shortest interval-plus-grace in it. Needs a
+  project-level incident record.
+
+**Say what was observed, never what it means.** *"No monitor in project Foo has
+reported since 14:02"* is true whether the cause is a firewall, a crashing worker
+or a deliberate shutdown.
+
+### 9.2 The catch-all around gem startup
+
+§6.5 makes this loud — the rescue now logs — but it does not make it recoverable:
+a broken `recurring.yml` still leaves the listener unattached for the life of the
+process. Narrowing the rescue so the failure is contained, rather than taking the
+listener with it, is the remaining work. It must still catch `Psych::SyntaxError`,
+or the app stops booting.
+
+### 9.3 A leaked key pages you at will
+
+A leaked ping key can forge check-ins and failure reports for every monitor in the
+project. **Two requests produce one email** carrying up to `ERROR_MESSAGE_LIMIT`
+characters of attacker-controlled text from your sending domain. The rate-limit
+ceiling in §5.3 is what bounds this; pick it with that in mind.
+
+**One required fix, which is a live bug today.** An earlier draft of this section
+said content handling was "clean — truncation is unconditional in the model
+layer… Checked, not assumed." That is true of `error` and **false of `name`**:
+
+```ruby
+# app/mailers/monitor_mailer.rb — all three subjects interpolate the name
+subject = "#{monitor.name} reported an error"      # :22
+subject = "#{monitor.name} missed its check-in"    # :29
+subject: "#{monitor.name} is back up"              # :42
+```
+
+`validates :name, presence: true` is the only name validation and the column is an
+unbounded `varchar`, so any API key holder can put arbitrary, unbounded text in an
+email subject line. The mailer's own comment states the assumption being violated:
+*"The subject carries only the monitor name, never the error (headers stay
+injection-proof, lock-screen previews clean)."*
+
+**Fix it in the mailer, by truncating what reaches the subject.** That alone
+closes it, and it is independent of the credential split. It wants one private
+helper used at all three interpolations, not a fix at the two `down` sites — the
+`recovered` subject at `:42` is built inline and is the one an implementer reading
+only the first code block above would miss.
+
+**Do not simply add a length validation** — an earlier draft said to, and it is
+worse than the bug. `CheckIn#check_in!` and `MissedPing#flag_missed!` both `save!`
+the whole record, so a validation on `name` gates every check-in and every
+down-transition, not just renames. And `ApplicationJob#each_record` rescues only
+`RecordNotFound`, so `DetectMissedPingsJob` **aborts on the first over-length
+row** — leaving every monitor after it in the sweep, across all tenants, `up` with
+no incident and no email, on that run and every subsequent one. Reproduced: one
+long-named monitor left a second, genuinely overdue monitor un-flagged.
+
+That turns one API-key request into a fleet-wide alerting outage, which is a worse
+version of the capability §4 is measuring. If a validation is wanted as well, it
+needs `on: :create`/`on: :update` scoping plus a truncating backfill — **and**
+`each_record` must rescue `RecordInvalid` per record and log, which is a
+pre-existing fragility this would be the first thing to expose.
+
+Everything else in the content path checks out: `error` is truncated
+unconditionally in the model layer, every render escapes, and header injection via
+the name is Q-encoded by the mail gem.
+
+Worth adding cheaply: `ping_events` records `source_ip` but nothing about which
+key was used. A nullable key reference makes a suspected leak investigable — and
+per §4 it must reach `incidents` and `notifications` too, since a forged recovery
+is permanent and those rows are what outlive ping pruning.
+
+### 9.4 Two credentials that can disagree
+
+Nothing forces the API key and the ping key to name the same project. Use project
+A's API key with project B's ping key and registration writes to A while check-ins
+go to B; A's monitors go down permanently and every symptom reads "your job is
+down". This mistake is impossible with one credential and permanent with two, so
+it needs a permanent guard.
+
+Registration returns the last four characters of **every live ping key** for the
+project, and **`bin/rails stablemate:sync` warns loudly** when the configured ping
+key matches none of them.
+
+**Not at startup.** §3.1 and §6.5 make boot do no network call at all, so a
+booting worker has no registration response to compare against. Putting this check
+at boot would re-add exactly the startup HTTP call §2 is about. The command is the
+only process that holds the response, so the check belongs there. No escalation —
+an API key can already list every monitor in its project.
+
+**A set, not a value** — §4's rotation procedure deliberately keeps two keys live
+at once, so a guard comparing against a single key would fire a false alarm during
+exactly the operation it is meant to support.
+
+### 9.5 A pre-existing bug in the sync path
+
+An `expected_interval_seconds` above the `int4` ceiling raises an unrescued
+`ActiveModel::RangeError` that escapes `Project::MonitorSync` and 500s the whole
+request — rolling back the valid entries alongside the bad one. That violates the
+"never raises / never leaves the payload half-applied" contract stated twice in
+that same file. Found while testing §4's interval-rewrite claim; fix it in the
+same change, since §4 relies on that path behaving as documented.
+
+### 9.6 An unrelated bug found while verifying
+
+`Execution::Subscriber.install_discard_hook` installs its callback **twice**, so
+every terminal failure reports twice. `defined?(::ActiveJob::Base)` does not force
+the autoload but `.respond_to?` does, which re-enters the railtie's
+`on_load(:active_job)` hook while `@discard_hook` is still nil. Reproduced:
+`after_discard_procs.size == 2`.
+
+The one-line fix has a side effect worth knowing: assigning `@discard_hook` before
+touching `::ActiveJob::Base` leaves it set on hosts without `after_discard`
+(Rails < 7.1), and `remove_discard_hook` then raises. Use a separate re-entrancy
+flag, or clear it on the capability bail-out.
+
+## 10 · The largest V1 question, not decided here
+
+One piece of it **is** now decided: **the free tier's monitor cap rises from 5
+to 10.** The persona review made the case concrete — a modest single app had 7
+recurring tasks and hit the wall *during onboarding*, before seeing any value,
+while the obvious comparison's free tier is 20. Ten covers a typical
+`recurring.yml` with headroom and keeps the upgrade reason for multi-app
+estates. The change is a constant, the pricing-page copy, and the tests that
+pin 5. Pro pricing itself remains open below.
+
+Simplifying the product holistically surfaces something bigger than anything
+above, and it is a product call rather than an engineering one.
+
+**Billing is 3,488 lines — 21% of the codebase and 23% of the test suite — for a
+capability with no customers and no price.** Two facts, both verified:
+
+- `config/deploy.yml:86` sets `STABLEMATE_SIGNUP_ACCOUNT_CAP: 1`. Production has
+  room for exactly one account, and it is the maintainer's.
+- `pages/pricing.html.erb:69` renders the Pro price as **"TBC"** with the note
+  *"Placeholder — final Pro pricing hasn't been signed off yet."*
+  `launch-readiness.md` lists chunks 1–4 as **NOT STARTED**.
+
+It also propagates. Billing is why `Monitor` has a fifth status (`suspended`),
+requiring special handling in the uptime rollup, the live-day stat, the check-in
+transition and the cap scope; why `Notifications::Dispatch` needs
+`after_all_transactions_commit`; and why both the monitor create path and
+`Project::MonitorSync` hold a **user** row lock purely for slot accounting.
+
+Removing it is high-reversibility — the code is well-factored and recoverable from
+git — but the judgement inside `User::Subscription` (the terminal-versus-unbillable
+status distinction, the double-billing guard, the livemode gate) is expensive to
+re-derive. If it goes, delete it from `main`, tag the commit, and reference the tag
+here. A dormant billing system still costs CI time, dependabot noise, security
+scanning surface, and that fifth monitor status.
+
+A smaller adjacent candidate: the waitlist, signup cap and two Slack alerts,
+~660 lines, including the app's only Postgres advisory lock.
+
+**Not proposed here — flagged for a decision.** If it goes, it belongs in this V1
+scope; if it stays, it should be because the price is about to be set.
+
+## 11 · Decisions an implementer would otherwise have to guess
+
+A build-through of this document produced 45 open questions. Most are safely the
+implementer's; these are the ones where guessing wrong causes a defect.
+
+**The API surface after the ping token goes.** Four payloads carry `ping_url`;
+**two** literal keys need deleting by hand: `monitor_json` has one, the sync
+response has its own, `monitor_detail_json` inherits it by `merge`-ing
+`monitor_json` rather than declaring it, and the rotate response's literal
+(`ping_tokens_controller.rb:10`) vanishes with its controller — so a `grep` for
+`ping_url:` finds three literals, of which one dies with its file.
+`ping_url_for` then has no callers and goes too. There is no URL to serve once the address is derived from the task key.
+Keep `registration_key` in those payloads, since it is now the address. `POST /api/v1/monitors/:id/rotate` goes with the token; answer
+it **410 Gone**, not 404, so an old client can tell "removed" from "wrong id".
+
+**`register_on_boot` becomes a deprecated no-op — do not remove the accessor.**
+An earlier draft of this section said the opposite and had the reasoning exactly
+backwards. It is documented public configuration in `gem/README.md`'s options
+table and in the sample initializer in `docs/integrating.md`, so hosts have it in
+`config/initializers/stablemate.rb`. Deleting `attr_accessor :register_on_boot`
+means `c.register_on_boot = false` raises `NoMethodError` *inside the host's
+initializer* — **the host app does not boot.** Verified. Keep the accessor, ignore
+the value, and log once that it no longer does anything.
+
+`Stablemate.ping_urls` is the opposite case. It is *not* documented
+anywhere a host copies from, so it can simply go. If it is kept for safety, keep
+`EMPTY_PING_URLS` with it: the body is `@ping_urls || EMPTY_PING_URLS`, and with
+the writers gone `@ping_urls` is always nil, so retaining the method while
+deleting the constant raises `NameError` on every call — the same crash class as
+the paragraph above.
+
+`merge_ping_urls`, `MERGE_LOCK`, `Registration#refresh_ping_urls!` and the cache
+line in `reset!` are internal and go outright; §3.2's table implies them without
+naming them.
+
+**"Registered but never checked in"** is `pending? && !ever_pinged?`. §3.3 deletes
+`awaiting_setup?`, but §7's replacement copy and §9.1's alert both need the
+concept, and it must not be quietly reinvented in two places with different
+meaning.
+
+**`_move.html.erb` keeps its non-manual branch**, described that way rather than
+as line numbers — the literal ranges an earlier draft gave would strand an `else`
+and drop a closing tag. The retained copy ("Managed by the gem — re-point its API
+key…") needs a reread with the §8 backfill in mind: it becomes the text every
+monitor shows, and for a backfilled `manual-<id>` row both halves are false — no
+gem manages it and no API key syncs it. Branch it on `source` like §3.3's panel,
+or reword to something true of both populations.
+
+**The backfilled `manual-<id>` population is frozen config, and that is
+accepted.** After §3.3 those rows have no config writer at all: no edit form, no
+sync entry (their keys are deliberately outside the gem's namespace), and
+`Monitor::Transfer` — the one capability that was theirs alone — is deleted with
+the rest of the manual path. The remedy for a frozen row whose settings need to
+change is delete-and-redeclare: remove it in the dashboard and declare the same
+work in `c.monitors`, which also moves it onto a repo-owned key. State this in
+the panel copy (§3.3) rather than leaving the owner of a pre-CLI monitor to
+discover it. Accepted because the population is small, bounded, and shrinks to
+zero — nothing can ever create another row in it.
+
+**Registration requires the Rails host — the plain-Ruby support is narrower than
+it sounds, and V1 accepts that too.** The spec leans on plain-Ruby hosts for
+`require "erb"`, `require "set"` and integer seconds; all of that concerns the
+*check-in client*. `stablemate:sync` is a rake task on `:environment` — a
+non-Rails system has no registration path of its own and is monitored by
+declaring it in the Rails app's `c.monitors` (§3.1). A standalone registration
+CLI for gem-only hosts is V2 scope at the earliest.
+
+**The `PingKey` mirror is exact unless stated otherwise.** Token length and
+alphabet, `masked` format, default key name, revoke-by-destroy, indexes and
+foreign key: whatever `ApiKey` does. The three deliberate differences are the
+`sm_ping_` prefix, no `last_used_at` write on the check-in path beyond the
+five-minute coarsening, and **more than one live key per project**, which rotation
+requires.
+
+**§9.4's wire field** is `ping_key_last4`, an array of strings, in the sync
+response envelope alongside `monitors`, `skipped`, `orphaned` and — on a prune
+run — `retired` (§6.1). The request side gains `declared_keys` and the `prune`
+flag; nothing else in the envelope changes.
+
+**The docs that describe removed surfaces** are not optional follow-up. The ones
+that will 404: `docs/api.md` (the ping endpoint, `ping_url` in two payloads,
+rotate), `docs/install.md`'s "Create a monitor and send a ping",
+`docs/integrating.md`'s manual-path section and its manual-fallback note, and
+`docs/deploy-hetzner-cloudflare.md`'s verification `curl`. And the ones that
+describe deleted *behaviour*, which an earlier revision of this list missed
+entirely: `docs/integrating.md`'s "Who wins when you edit a synced monitor" box
+(it documents `gem_may_write?`, deleted by §3.1), its "tighten it later in the
+monitor's settings" advice (the edit form, deleted by §3.3 — the replacement is
+`c.overrides`), and its "Registration happens automatically on boot" section
+(§3.1); plus **`gem/README.md`**, which documents the manual fallback (§6.3
+deletes it), boot registration, and a functional `register_on_boot` — the very
+options-table row §11 cites as the reason the accessor survives as a no-op must
+itself be rewritten to say so.
+
+**What the show page's provenance note may claim.** An earlier revision forbade
+the panel from showing the cron string, because the server never received it.
+§6.3's `schedule` field changes that: the panel may render "every 24h, from
+`0 9 * * 1-5`" when the column is present, and falls back to the mechanism line
+("registered by `stablemate:sync` from <app>") when it is `NULL` — a
+`c.monitors` interval declaration, or a §8 backfilled row. What it still must
+not do is *promise* from the string: detection is interval-based in V1, so the
+panel never says "next expected Friday 09:00" off the cron — that claim waits
+for cron-aware detection.
+
+**Two fast-follows, decided, both landing before any user-acquisition push.**
+First, **Slack**: the V1 channel layer stays email-only, and a Slack
+incoming-webhook channel ships immediately after V1 lands. The three-tier
+ownership line (job facts → repo, audience facts → UI, operational state → UI)
+makes it a `NotificationChannel` record with UI CRUD behind the existing
+`Channel#deliver` contract; the one new plumbing item is Active Record
+Encryption for the webhook URL, which the app does not yet configure. Second,
+**cron-aware detection**: the stored `schedule` strings (§6.3) get their
+algorithm — next-due computed as the cron's next occurrence rather than
+last-ping-plus-interval — turning §3.1's weekday-job trade into a solved
+problem, server-side only. Verified feasible: the whole algorithm is
+`Fugit::Cron#next_time`, fugit is already in the server bundle *via Solid
+Queue itself*, and sharing the scheduler's own parser means expectation and
+execution can never disagree about what a schedule means (a separate cron
+library would be a second interpretation that drifts — rejected). The
+timezone question has a known answer rather than an open one: Solid Queue
+resolves TZ-less schedules by appending the app's default time zone before
+parsing (`recurring_task.rb:184`), and the gem will do the same, sending the
+schedule pre-qualified so server prediction is definitionally identical to
+scheduler behaviour. It still sequences after Slack: enabling it is a
+deliberate behaviour change, which §12 pins as on-purpose-only.
+
+**A deploy-time "preview ping" was considered and rejected — do not resurrect it
+as a quick onboarding win.** Sending a synthetic check-in per monitor after sync
+would assert the job ran when it never has: it flips `pending → up` (a green
+dashboard for a job that may be broken from day one), erases the never-checked-in
+state §9.1's alert exists to catch, and — run against a monitor that is down —
+executes `CheckIn#recover`, closing a real incident and emailing "back up"
+(`incident.rb:28` makes that permanent). It also proves the wrong path: §6.2's
+hooks run on the deploying machine, so a preview exercises the laptop's network,
+not the worker's. The honest versions of the two needs it serves are no longer
+suggestions — both are now specified: the verify endpoint is §5.5, and
+`pending` rendered as a designed state is §7's milestone ladder, with §9.1 as
+the safety net. The first real ping is the demo.
+
+**§10 does not block starting.** An earlier draft said to settle the billing
+question first. It overstates the dependency: the `suspended` status and its
+special cases in the uptime rollup, the live-day stat, the check-in transition and
+the cap scope are untouched by anything in §§3–8. The overlap is that both would
+edit `docs/specs/README.md`'s data model, which is a merge conflict rather than a
+design dependency. Decide §10 when convenient; do not stop for it.
+
+## 12 · Test plan
+
+- **Browser: the monitor lifecycle without a form.** A registered monitor can be
+  paused and deleted; the create and edit routes are both gone; the detail page
+  shows interval and grace read-only with their source named (§3.3).
+- **Config round-trips through sync alone.** Change an interval in the payload,
+  sync, the monitor has it — then send the original, sync, it's back. This is
+  the always-write behaviour that replaces the arbitration tests
+  (`monitor_sync_test.rb:279-431`, less the §3.1 survivor), and it is also the §3.1 recovery property:
+  removing an override must restore the derived value on the next sync, with no
+  refusing branch.
+- **An unknown override key aborts the run** — exit non-zero, nothing synced, the
+  key named — and an override on a `c.monitors` key is the same config error
+  (§3.1).
+- **Orphans are reported by default, retired only on `PRUNE=1`, destroyed never
+  (§6.1).** Remove a task, sync: the monitor is named in the output and still
+  monitored. Two apps syncing disjoint task sets into one project must not
+  orphan each other (the `last_synced_app` match), and a backfilled
+  `manual-<id>` monitor never appears (the `source` check).
+- **Prune, ten ways (§6.1).** `PRUNE=1` retires a truly-absent task's monitor,
+  and a present-but-skipped task (delete its `class:` line) is reported and
+  **not** retired. A malicious `prune: true` with a minimal payload retires
+  neither a `manual-<id>` backfill nor another app's monitors (the server
+  re-checks its own orphan rule), and a prune request with no `declared_keys`
+  — a pre-0.2.0 gem — retires nothing at all. **Retiring a monitor that is
+  down resolves its incident without an alert**, and the outage day's rollup
+  keeps the real pre-retire downtime. **Reviving fires no alert**: restore the
+  task after longer than interval + grace, and the revive sets a fresh window
+  rather than routing through `flag_missed!` — assert no down email and no
+  incident at revive, then that detection *does* fire one honest interval +
+  grace later if the restored job never runs. A paused monitor round-trips:
+  paused → retired → revived-as-paused, no alert anywhere. A **failure** ping
+  (`kind: "failure"`) to a retired monitor is recorded and resurrects nothing —
+  this is the `FailureReport` arm, and a success-ping-only test passes a broken
+  implementation. A revive at the cap is refused as `limit_reached` and the
+  monitor stays retired. A retired monitor's live today stat reads no-data,
+  not phantom-100%. And the rename case: rename + `PRUNE=1` leaves the old
+  monitor retired with its history and the new key fresh.
+- **The detection sweep survives one bad record (§9.3).** A monitor that fails
+  validation must not stop `DetectMissedPingsJob` flagging the monitors after it.
+- **Backfilled keys cannot be adopted by the gem (§8.1).** A hand-created monitor
+  named after a `recurring.yml` task must remain a separate monitor after
+  `stablemate:sync` runs.
+- **Cutover (§8.1).** After phase 1 and before phase 2, a monitor still checking
+  in through the old ping-token URL keeps working and does not go overdue. This is
+  the test that proves the phases are separable.
+- **Backfill collision (§8).** A `recurring.yml` task key that literally equals a
+  generated `manual-<id>` must not make the migration raise.
+- **Gem on a plain-Ruby host (§6.4).** A check-in with a space in the task name
+  succeeds without Rails loaded, which fails if `erb` is not required.
+- **Gem on Ruby 3.1 (§6.3).** The listener attaches and a check-in lands on the
+  gemspec's oldest supported interpreter. `Set` is not autoloaded before 3.2, and
+  the boot rescue converts the resulting `NoMethodError` into a silently
+  disabled gem — so this must run on 3.1 in CI, not be argued about. The gem's CI
+  has no Ruby matrix today; a test that only ever runs on 3.3 cannot catch it.
+- **Never-checked-in alert (§9.1).** A monitor registered and never checked in
+  alerts once, after its own interval rather than a fixed delay, with copy
+  distinct from a missed check-in — and does not alert twice. **It creates no
+  `Incident`** (assert the count), and its later first ping sends "started
+  checking in", never "is back up".
+- **Close-the-loop emails (§9.1).** A project's first-ever check-in emails
+  once — and only once, not per monitor; a second monitor's first ping sends
+  nothing project-level.
+- **The schedule string rides along and does nothing (§6.3).** A synced cron
+  task stores its string; a `c.monitors` interval entry stores `NULL`; and
+  detection timing is identical with the column populated or empty — pinned so
+  cron-aware detection later is a behaviour change made on purpose.
+- **Over-cap is loud (§6.1).** Sync six tasks into a five-slot plan: banner
+  appears naming the refused key, exactly one email is sent, a re-sync while
+  still over cap sends no second email, and registering the key (cap raised or
+  slot freed) clears both. Measured from
+  `created_at`, since `next_due_at` and `last_ping_at` are both nil on such a
+  monitor. **And the first sweep after deploy does not alert for a backlog of
+  pre-existing `pending` monitors** — seed several, run the job, assert on the
+  delivery count, not just on one monitor's behaviour.
+- **Browser: onboarding.** A brand-new user reaches real instructions from the
+  page they land on, and no surface offers monitor creation (§7).
+- **Tenant isolation.** The same task name in two projects; checked in with project
+  A's key, project B's monitor untouched.
+- **Credential separation.** A ping key must be rejected by every management
+  `/api/v1` endpoint, and an API key by the check-in endpoint — with §5.5 as the
+  named exception in both directions: verify must *accept* the ping key and
+  *reject* the API key. Assert on the class
+  graph too — `assert_not …PingsController.ancestors.include?(BaseController)` —
+  because a behavioural test is a snapshot and this controller sits in a directory
+  where every sibling inherits the thing it must not.
+- **Verify endpoint (§5.5).** Ping key → `200 {"ok": true}` with no monitor
+  state or event written — the §5.2-coarsened `last_used_at` write is permitted
+  and *will* fire on a fresh key's first verify, so don't assert "no writes at
+  all"; API key and anonymous → opaque `401`; bounded by its own per-IP limit.
+- **Install command (§6.6).** Registers nothing (assert the project is empty
+  after a run); writes the initializer once and refuses to clobber on re-run; a
+  bad credential names *which* key and exits non-zero; a missing
+  `recurring.yml` is a note and verification still runs; keys land in `.env`
+  or as printed instructions, never in a committed file.
+- **Browser: the setup panel (§7).** Generate the setup command, see both keys
+  once, reload → masked with a regenerate affordance; **regenerate an unused
+  pair and the superseded keys are revoked, regenerate after a verify and they
+  survive** (the `last_used_at` rule); then drive the
+  waiting-for-sync flip by performing a sync server-side (Capybara cannot set
+  the `Authorization` header) and assert the panel updates without a reload.
+- **Install re-run rotates secrets (§6.6).** With the initializer present, a
+  second run with new keys leaves the code untouched and updates the `.env`
+  values — and the preview names the section it read, with a
+  production-sectioned file previewing correctly from a development machine.
+  Install writes the Kamal hook when `.kamal/` exists and refuses to clobber
+  an existing one; **and no sync output line ever contains `sm_ping_` or
+  `sm_live_`** — grep the captured output, since the credential-in-deploy-logs
+  regression is one refactor away from returning.
+- **Browser: ping keys.** Issue one from the project page, see it once, see it
+  masked afterwards, revoke it.
+- **The mismatch guard fires on a real mismatch and stays silent during a
+  rotation** with two live keys (§9.4).
+- **An oversized monitor name cannot reach an email subject** (§9.3) — asserted on
+  all three subjects, including `recovered`; truncated in the mailer, *not*
+  rejected by a validation, which would abort the sweep.
+- **An out-of-range `expected_interval_seconds` in a sync payload is reported as
+  skipped, not raised**, and leaves the other entries applied (§9.5).
+- **Rate limiting, three ways.** Two task names under one key must not share a
+  counter; two keys on one task name must not share one (this is what catches a
+  lambda reading post-authentication state, and the first case alone would pass a
+  broken implementation); and **one throttled monitor must not consume another
+  monitor's budget** — the layer-order bug in §5.3. Plus: an unauthenticated flood
+  is bounded. And **assert the over-limit body**, form-encoded as §6.4 sends it —
+  `429 {"error": "rate_limited"}`, not the framework default's empty `text/html`
+  (§5.2). Asserting only on the status passes a controller with no `with:` at all.
+- **Routing.** A dotted task name arrives intact, and a body-supplied
+  `registration_key` cannot override the path parameter.
+- **Every response is JSON**, including a monitor that fails validation during
+  check-in (§5.2). Note this is a hygiene test, not the fix for the misleading
+  alert — that is the next one.
+- **An unexpected `4xx` is logged, not absorbed** (§5.2, §6.5). A check-in that
+  the server refuses for a reason that will not fix itself must not be reported to
+  the user as their job missing a check-in.
+- **Gem: the URL encoder round-trips.** A task name containing a space must reach
+  the server intact, which `CGI.escape` would not achieve (§6.4).
+- **Backfill.** Every monitor without a task name gets a distinct, usable,
+  slash-free one, and none of them is a name the gem *derives* from a
+  `recurring.yml` job class. (A hand-authored literal `manual-7` is still
+  possible, which is the separate collision bullet above.)
+- **Command.** Exits non-zero on all four register-nothing paths, prints the
+  per-run synced count (not a cache size — §6.1's trap) and the server's
+  reasons, and refuses to run outside its configured environment.
+- **Gem: unlisted job classes never report**, and a task with an underivable
+  schedule never reports.
+- **Gem: a `c.monitors` key matching a host job class name never binds to it.**
+- **Gem: boot with no ping key** — one error line, listener not attached, app
+  still boots. **With a ping key and no API key** — listener *is* attached and
+  check-ins work, since boot no longer needs the API key (§6.5). **With a broken
+  `recurring.yml`** — one error line, app still boots.
+- **Gem: `401` and `404` handled differently**, each logged once.
