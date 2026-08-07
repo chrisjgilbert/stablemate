@@ -1,4 +1,11 @@
-# V1 scope — one way in, one way to check in
+# V1 scope — the engineering reference
+
+> **Read [`v1-proposal.md`](v1-proposal.md) first.** That is the proposal —
+> the architecture and the plan in reading order, without history. This
+> document is the reference behind it: every pinned decision, edge case, trap,
+> and required test, accumulated across eleven adversarial review rounds. It
+> is written for the implementer of a specific phase, consulted per section —
+> not read front to back.
 
 Status: **proposed**, not yet built. Supersedes the draft that lived at
 `ping-architecture.md`, which covered only the incident fix.
