@@ -136,6 +136,18 @@ so it ships in the same change:
 c.overrides = { "weekday_report" => { interval: 26.hours } }
 ```
 
+**Be honest about what that override buys, because the two sentences above are
+otherwise in tension:** 26 hours closes the Tuesday blind spot *by trading it
+for a false down every Saturday morning* (Friday 09:00 + 26h). V1's interval
+model cannot express "weekdays at 9am" — no interval can — and a user with
+weekday-only jobs must choose between the blind window and the weekly cry-wolf,
+with the docs saying so plainly. This is why **the sync payload carries each
+task's raw schedule string from day one** (decided; see §6.3): V1 detection
+stays interval-based, but the server stores the cron expression, so cron-aware
+detection — the real fix — later becomes a server-only upgrade with no gem
+release and no wire cutover, which is exactly the migration shape this project
+exists to avoid repeating.
+
 The rules, each of which has a wrong-looking-right alternative. Overrides accept
 `interval:` and `grace:` — **an unknown key inside the hash is the same config
 error as an unknown task key**, or `intervall:` gets the silent-typo treatment
@@ -748,6 +760,19 @@ never been a per-run count. Return a result carrying both a count and the
 a `nil`-returning replacement flips "synced 0" into a failure message; and
 `0.size` is `8`, so `.size` must be removed, not just re-pointed.
 
+**Over-cap refusals are a persistent state, not a log line — decided after the
+persona review.** A `limit_reached` skip exits 0 (a billing limit must not fail
+deploys), which means the only trace of "two of your jobs are unmonitored" is a
+line scrolling past in a deploy log nobody reads while CI stays green. So the
+project **stores the keys the last sync refused for cap** — replaced wholesale
+on every run, and revive-at-cap refusals (the prune bullet above) join the same
+set — and while the set is non-empty the dashboard shows a persistent banner:
+*"N jobs are not monitored — over your plan's limit."* **One email** is sent
+when a key first enters the set (deduplicated until it leaves), because the
+moment a job silently loses monitoring is exactly the moment this product
+exists to make loud. The set clears itself: a later sync that registers the
+key, or no longer sends it, removes it.
+
 **It must show its derivation, per task.** The interval is computed from the
 schedule by a rule (§3.1's largest-gap) that surprises exactly when it matters.
 One line per task, naming the number *and where it came from*, makes the
@@ -940,6 +965,19 @@ name — but only if the server had given it an address. **The cache is quietly
 acting as a server-approved allow-list.** Remove it and an address is
 constructible for any string, so the gem would report after every successful run
 of every job class in the host app.
+
+**Each tuple gains a `schedule` field — the raw string from `recurring.yml`,
+carried but not yet acted on.** Decided after the persona review: the gem
+already parses the cron expression with Fugit and then throws the
+expressiveness away, sending only the derived interval — which is why weekday
+jobs are inexpressible (§3.1). The server stores it in a new `schedule` column,
+written by the sync like any other setting; V1 detection ignores it entirely.
+`c.monitors` entries declared with a bare `interval:` have no schedule and send
+none — the column is nullable and means "the string the schedule was derived
+from", never a promise. What this buys: cron-aware detection later needs no gem
+release and no wire change, and §3.3's read-only panel may now show the real
+cron ("every 24h, from `0 9 * * *`") instead of being forbidden to claim it
+(§11's provenance bound is relaxed accordingly).
 
 The registrar builds two structures, and **both are needed**: `class_to_keys` maps
 job class to task keys, while `tuples` is an array carrying no class name at all —
@@ -1361,9 +1399,13 @@ Measured, not estimated.
 | Prune: `declared_keys` + `prune` in the sync payload, retire/refuse split, `retired:` envelope (§6.1) | ~50 |
 | Verify endpoint (§5.5): controller, route, per-IP limit | ~25 |
 | Setup panel (§7): both-keys issuance, shown-once render, masked reload, milestone ladder + the `MonitorSync` commit broadcast | ~110 |
-| **Server subtotal** | **~1,304** |
+| `schedule` column: stored by sync, shown by the panel, unused by detection (§6.3) | ~15 |
+| Over-cap state: refused-keys storage, banner, first-entry email (§6.1) | ~60 |
+| Close-the-loop emails: "started checking in" + project's first check-in (§9.1) | ~40 |
+| Free cap 5 → 10: constant, pricing copy, re-pinned tests (§10) | ~5 |
+| **Server subtotal** | **~1,424** |
 | Gem deletions (§3.2) | ~100 |
-| Gem additions: `c.overrides` (validation, application to tuples) + derivation/orphan output + `PRUNE=1`/`declared_keys` (§6.1) | ~90 |
+| Gem additions: `c.overrides` (validation, application to tuples) + derivation/orphan output + `PRUNE=1`/`declared_keys` + the tuple's `schedule` field (§6.1, §6.3) | ~95 |
 | Gem: `stablemate:install` (§6.6) — arg parsing, initializer writer, `.env` append / credentials instructions, derivation preview, two verification calls | ~130 |
 | **Tests broken by UI removal** | ~393 across 15 files, 4 deleted whole |
 | **Tests broken by the edit/arbitration removal** | 2 of 30 in `monitors_controller_test.rb` (both cross-tenant guards at `:60`/`:66` — the protection they pin moves to the routes not existing), the edit half of `monitor_edit_delete_test.rb`, the arbitration tests in `monitor_sync_test.rb:279-431` less the one survivor, plus the upsert test at `:154-160` (§3.1) |
@@ -1491,6 +1533,18 @@ cheapest first:
   removed from your config", because a still-`pending` monitor whose task is
   deleted but not pruned stays in this state deliberately (§6.1), and "check
   your setup" is the wrong instruction for it.
+
+  **Decided: it creates a `Notification` only, never an `Incident`.** Incidents
+  feed the uptime rollup and the incident history, and `pending` is an
+  explicitly not-measured state — a monitor that has never run has no downtime
+  to record. The incident-backed alternative would also have the first real
+  ping "resolve" the incident and email *"is back up"* for a monitor that was
+  never up. Instead, **two small close-the-loop emails** ship with the alert:
+  a monitor that was alerted as never-checked-in sends *"started checking
+  in"* when its first real ping lands (resolving the alert's story without
+  faking a recovery), and a project's **first-ever check-in** sends one
+  onboarding email — the §7 milestone ladder's final state, delivered to the
+  inbox for the user who closed the tab after deploying.
 
   **Two things it must specify that an implementer cannot read off the model,
   because on this monitor every obvious answer is `nil`.**
@@ -1628,6 +1682,14 @@ flag, or clear it on the capability bail-out.
 
 ## 10 · The largest V1 question, not decided here
 
+One piece of it **is** now decided: **the free tier's monitor cap rises from 5
+to 10.** The persona review made the case concrete — a modest single app had 7
+recurring tasks and hit the wall *during onboarding*, before seeing any value,
+while the obvious comparison's free tier is 20. Ten covers a typical
+`recurring.yml` with headroom and keeps the upgrade reason for multi-app
+estates. The change is a constant, the pricing-page copy, and the tests that
+pin 5. Pro pricing itself remains open below.
+
 Simplifying the product holistically surfaces something bigger than anything
 above, and it is a product call rather than an engineering one.
 
@@ -1753,13 +1815,23 @@ deletes it), boot registration, and a functional `register_on_boot` — the very
 options-table row §11 cites as the reason the accessor survives as a no-op must
 itself be rewritten to say so.
 
-**What the show page's provenance note may claim.** §3.3's read-only panel says
-"defined in your repo" — it must not try to say *where* in the repo. The server
-receives derived interval seconds, never the schedule string, so it cannot
-render "derived from `0 9 * * *`" without a new payload field and column bought
-for a caption. The cron-string provenance lives in the CLI output (§6.1), which
-has the string; the UI names the mechanism (`stablemate:sync`, the syncing app —
-`last_synced_app` is already stored) and stops there.
+**What the show page's provenance note may claim.** An earlier revision forbade
+the panel from showing the cron string, because the server never received it.
+§6.3's `schedule` field changes that: the panel may render "every 24h, from
+`0 9 * * 1-5`" when the column is present, and falls back to the mechanism line
+("registered by `stablemate:sync` from <app>") when it is `NULL` — a
+`c.monitors` interval declaration, or a §8 backfilled row. What it still must
+not do is *promise* from the string: detection is interval-based in V1, so the
+panel never says "next expected Friday 09:00" off the cron — that claim waits
+for cron-aware detection.
+
+**Slack is fast-follow, decided.** The V1 channel layer stays email-only, and a
+Slack incoming-webhook channel ships immediately after V1 lands — before any
+user-acquisition push. The three-tier ownership line (job facts → repo,
+audience facts → UI, operational state → UI) makes it a `NotificationChannel`
+record with UI CRUD behind the existing `Channel#deliver` contract; the one new
+plumbing item is Active Record Encryption for the webhook URL, which the app
+does not yet configure.
 
 **A deploy-time "preview ping" was considered and rejected — do not resurrect it
 as a quick onboarding win.** Sending a synthetic check-in per monitor after sync
@@ -1838,7 +1910,20 @@ design dependency. Decide §10 when convenient; do not stop for it.
   has no Ruby matrix today; a test that only ever runs on 3.3 cannot catch it.
 - **Never-checked-in alert (§9.1).** A monitor registered and never checked in
   alerts once, after its own interval rather than a fixed delay, with copy
-  distinct from a missed check-in — and does not alert twice. Measured from
+  distinct from a missed check-in — and does not alert twice. **It creates no
+  `Incident`** (assert the count), and its later first ping sends "started
+  checking in", never "is back up".
+- **Close-the-loop emails (§9.1).** A project's first-ever check-in emails
+  once — and only once, not per monitor; a second monitor's first ping sends
+  nothing project-level.
+- **The schedule string rides along and does nothing (§6.3).** A synced cron
+  task stores its string; a `c.monitors` interval entry stores `NULL`; and
+  detection timing is identical with the column populated or empty — pinned so
+  cron-aware detection later is a behaviour change made on purpose.
+- **Over-cap is loud (§6.1).** Sync six tasks into a five-slot plan: banner
+  appears naming the refused key, exactly one email is sent, a re-sync while
+  still over cap sends no second email, and registering the key (cap raised or
+  slot freed) clears both. Measured from
   `created_at`, since `next_due_at` and `last_ping_at` are both nil on such a
   monitor. **And the first sweep after deploy does not alert for a backlog of
   pre-existing `pending` monitors** — seed several, run the job, assert on the
