@@ -405,7 +405,8 @@ Two of the earlier draft's observations survive and are worth keeping:
 
 Same as `ApiKey` — SHA-256 digest plus `token_last4` for a masked list, raw value
 shown once at creation. Nothing needs to reconstruct it: the command prints
-ready-to-paste `curl` lines from the host's own config (§6.1), so the web
+ready-to-paste `curl` lines from the host's own config (§6.6 — install only,
+never sync, whose stdout is deploy logs), so the web
 interface never *re*-displays it after creation — §7's setup panel, which
 renders both keys inside the install command exactly once, *is* the creation
 moment.
@@ -761,10 +762,6 @@ the overrides people need become obvious the moment they see this line:
 !  2 monitors on the server match no task here: old_report, legacy_sync
    (kept, state untouched — retire them with PRUNE=1, or restore the task)
 
-check in pg_backup from its own cron:
-  curl -X POST -H "Authorization: Bearer sm_ping_…" \
-    https://stablemate.example/api/v1/monitors/pg_backup/pings
-
 synced 3 for environment 'production'.
 ```
 
@@ -773,13 +770,16 @@ skips carry the server's or registrar's reason, **orphan and retirement lines
 name each monitor and its remedy**, and the run ends with the §12 count. A run
 applying overrides names them inline rather than in a separate block, so the
 line a user scans for a task is the whole story for that task.
-The `curl` block prints for every `c.monitors` entry — those are the monitors
-checked in from outside the gem, and this is where §4's "the command prints
-ready-to-paste `curl` lines" promise is kept; without a slot in the binding
-shape, that promise would be silently unimplementable. It prints the real key —
-no reconstruction involved, the command reads it from the same config the gem
-does, which is §4's whole argument for shown-once being affordable — so the
-output is sensitive, and says so whenever a `c.monitors` entry exists.
+
+**Sync never prints a credential — its stdout is deploy logs.** An earlier
+revision put the ready-to-paste `c.monitors` `curl` block (which embeds the
+live ping key) in this output; sync runs from the post-deploy hook (§6.2), so
+that printed a live credential into every CI run's log, forever — the
+accompanying "don't pipe this into logs" warning was the product advising
+against its own design. The `curl` block lives in §6.6's install output
+instead: an interactive dev-machine run whose invocation already carries the
+keys, so it adds no exposure class. §4's "prints ready-to-paste `curl` lines"
+promise is kept by install, not by sync.
 
 **It must report orphans, and must not delete them.** An orphan is a monitor the
 sync's own project holds that matches no task in this run — the task was renamed
@@ -1182,8 +1182,15 @@ reading config/recurring.yml (production section) — this is what will be monit
                                   tighten with c.overrides for a snugger window)
 ✗ db_backup          skipped: command task, no class: to observe
 verifying credentials… ✓ API key valid   ✓ ping key valid
-nothing registered yet — registration runs on deploy (§6.2's hook).
-deploy, then watch: https://stablemate.example/projects/siftbox
+writing .kamal/hooks/post-deploy (kamal detected) — registration runs there
+
+check in pg_backup from its own cron (this embeds your live ping key):
+  curl -X POST -H "Authorization: Bearer sm_ping_…" \
+    https://stablemate.example/api/v1/monitors/pg_backup/pings
+
+next: add both keys to your production secrets (.kamal/secrets or credentials)
+      — the sync runs in the container, and your local .env doesn't ship.
+then deploy, and watch: https://stablemate.example/projects/siftbox
 ```
 
 The preview lines reuse §6.1's grammar; there is no synced count because
@@ -1234,6 +1241,23 @@ nothing syncs. The rules, each with a wrong-looking-right alternative:
 - **A missing `recurring.yml` is a note, not an error** — the app may simply
   not have recurring jobs yet; print "none found yet", still verify. (Unlike
   sync, where registering nothing is a failure — §6.1.)
+- **It writes the deploy hook, because the whole flow dies without it.** The
+  dashboard's "waiting for your first sync" waits forever if nothing runs the
+  sync on deploy — and an install that ends "deploy, then watch" while
+  silently depending on a hook the user must discover in another section is a
+  guaranteed 11pm debugging session. With a `.kamal/` directory present,
+  install writes `hooks/post-deploy` (repo config, not a secret) unless one
+  exists; without Kamal, it prints the line for the user's own CI. The
+  transcript names what it wrote.
+- **The `curl` block for `c.monitors` entries prints here — and only here.**
+  Install is an interactive dev-machine run whose own invocation already
+  carries the keys, so embedding the ping key adds no new exposure; sync must
+  never print it (§6.1 — deploy stdout is logs).
+- **It names the keys-to-production step, because the local `.env` doesn't
+  ship.** The sync runs inside the production container (§6.2); the `.env`
+  append serves the dev machine only. Install's closing lines say exactly
+  where the two variables go (`.kamal/secrets` or production credentials) —
+  leaving that implicit is the vaguest step gating the entire flow.
 - **Idempotent for code, rotating for secrets.** With the initializer already
   present it refuses to clobber the code — but a re-run with keys **updates the
   `.env` values**, because that is the lost-key recovery loop: regenerate from
@@ -1849,6 +1873,10 @@ design dependency. Decide §10 when convenient; do not stop for it.
   second run with new keys leaves the code untouched and updates the `.env`
   values — and the preview names the section it read, with a
   production-sectioned file previewing correctly from a development machine.
+  Install writes the Kamal hook when `.kamal/` exists and refuses to clobber
+  an existing one; **and no sync output line ever contains `sm_ping_` or
+  `sm_live_`** — grep the captured output, since the credential-in-deploy-logs
+  regression is one refactor away from returning.
 - **Browser: ping keys.** Issue one from the project page, see it once, see it
   masked afterwards, revoke it.
 - **The mismatch guard fires on a real mismatch and stays silent during a
