@@ -19,6 +19,10 @@ Rails.application.routes.draw do
   # issuance/revoke are a nested sub-resource.
   resources :projects do
     resources :api_keys, only: %i[create destroy], module: :projects
+    # The check-in credential. A separate resource because it is a separate
+    # table — that is what makes a ping key authenticating the management API
+    # impossible rather than discouraged.
+    resources :ping_keys, only: %i[create destroy], module: :projects
   end
 
   # CRUD plus the sub-resource controllers that replace custom verbs.

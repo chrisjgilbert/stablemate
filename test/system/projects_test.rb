@@ -53,12 +53,14 @@ class ProjectsTest < ApplicationSystemTestCase
   test "the delete confirmation states the blast radius with counts" do
     project = @alice.projects.sole
     ApiKey.issue(project: project, name: "CI")
+    PingKey.issue(project: project, name: "Production")
     sign_in @alice
     visit edit_project_path(project)
 
+    # Both credentials go with the project, so the blast radius counts both.
     within "[data-testid='danger-zone']" do
       assert_text "#{project.monitors.count} monitor"
-      assert_text "#{project.api_keys.count} API key"
+      assert_text "2 keys"
     end
   end
 end

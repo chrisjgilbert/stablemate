@@ -9,6 +9,7 @@ module Projects
 
     def create
       @api_key, @raw_token = ApiKey.issue(project: @project, name: key_name)
+      @raw_token_label = "API key"
       load_project_show_data # after issue, so the new key shows in the masked list
       # Re-render the project page with the generate-once modal open (@raw_token).
       render "projects/show", status: :created
