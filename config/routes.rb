@@ -63,6 +63,27 @@ Rails.application.routes.draw do
           post :rotate, to: "monitors/ping_tokens#update"
         end
       end
+
+      # The V1 check-in endpoint, addressed by task key. DECLARED STANDALONE, not
+      # nested inside `resources :monitors, param: :registration_key`, which is
+      # wrong three ways: it silently retargets `show` (so GET /api/v1/monitors/42
+      # arrives as a registration key while find_monitor still reads params[:id]),
+      # Rails prefixes the nested parent's parameter so the constraint would name
+      # a segment that does not exist, and with the constraint inert dotted task
+      # names break.
+      #
+      # The constraint and format: false are both required: Rails excludes dots
+      # from dynamic segments and treats a trailing `.foo` as a format, and task
+      # names like `reports.daily` are ordinary. POST only — a check-in resolves
+      # incidents and emails "recovered", so anything that follows a link must not
+      # be able to fire one.
+      post "monitors/:registration_key/pings", to: "monitors/pings#create",
+           constraints: { registration_key: %r{[^/]+} }, format: false, as: :monitor_pings
+
+      # Proves the check-in credential end-to-end without recording a check-in.
+      # GET is correct here and the POST-only rule above does not apply: this has
+      # no side effects, and the credential rides the header.
+      get "verify", to: "verifications#show", as: :verify
     end
   end
 
