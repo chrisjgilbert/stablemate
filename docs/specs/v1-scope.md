@@ -1842,10 +1842,17 @@ Encryption for the webhook URL, which the app does not yet configure. Second,
 **cron-aware detection**: the stored `schedule` strings (§6.3) get their
 algorithm — next-due computed as the cron's next occurrence rather than
 last-ping-plus-interval — turning §3.1's weekday-job trade into a solved
-problem, server-side only. It sequences after Slack because it carries one
-open design item (a cron string alone doesn't pin occurrence times — the sync
-will likely need to carry the app's timezone once) and a deliberate behaviour
-change to enabling it, which §12 pins as on-purpose-only.
+problem, server-side only. Verified feasible: the whole algorithm is
+`Fugit::Cron#next_time`, fugit is already in the server bundle *via Solid
+Queue itself*, and sharing the scheduler's own parser means expectation and
+execution can never disagree about what a schedule means (a separate cron
+library would be a second interpretation that drifts — rejected). The
+timezone question has a known answer rather than an open one: Solid Queue
+resolves TZ-less schedules by appending the app's default time zone before
+parsing (`recurring_task.rb:184`), and the gem will do the same, sending the
+schedule pre-qualified so server prediction is definitionally identical to
+scheduler behaviour. It still sequences after Slack: enabling it is a
+deliberate behaviour change, which §12 pins as on-purpose-only.
 
 **A deploy-time "preview ping" was considered and rejected — do not resurrect it
 as a quick onboarding win.** Sending a synthetic check-in per monitor after sync
