@@ -6,12 +6,19 @@ class SubscriberTest < StablemateTest
   # A stand-in for an ActiveJob instance — #class.name and #job_id are read.
   # job_id is unique per fake (like the real thing), so failed-attempt markers
   # can never bleed between unrelated fakes/tests.
+  #
+  # The fake is a real INSTANCE of the anonymous class, so #class answers
+  # honestly. (It used to be an Object with #class patched to return the class —
+  # which lied to anything that asked: an is_a?, an error message, a debugger.)
+  # Naming the anonymous class is the one piece of reflection left, and there is
+  # no other way to give an anonymous Ruby class an arbitrary .name — which is
+  # exactly what the subscriber keys on.
   def job(class_name)
-    klass = Class.new { define_singleton_method(:name) { class_name } }
-    Object.new.tap do |o|
-      o.define_singleton_method(:class) { klass }
-      o.define_singleton_method(:job_id) { "fake-job-#{object_id}" }
+    klass = Class.new do
+      def job_id = @job_id ||= "fake-job-#{object_id}"
     end
+    klass.define_singleton_method(:name) { class_name }
+    klass.new
   end
 
   # A stand-in ActiveSupport::Notifications event: only #payload is read.
@@ -84,9 +91,8 @@ class SubscriberTest < StablemateTest
   # and logged — an escaped exception would spew via report_on_exception and,
   # under a host's Thread.abort_on_exception = true, kill the worker process.
   def test_raising_client_on_the_default_dispatcher_is_swallowed_and_logged
-    require "timeout"
-    logged = Queue.new
-    Stablemate.config.logger = Object.new.tap { |l| l.define_singleton_method(:warn) { |m| logged << m } }
+    logger = Stablemate::RecordingLogger.new
+    Stablemate.config.logger = logger
 
     client = Stablemate::FakeClient.new(ping_error: SocketError.new("no network"))
     sub = Stablemate::Execution::Subscriber.new(
@@ -97,8 +103,7 @@ class SubscriberTest < StablemateTest
 
     sub.handle_event(event("J"))
 
-    message = Timeout.timeout(5) { logged.pop }
-    assert_match(/ping thread failed/, message)
+    assert_match(/ping thread failed/, logger.next_warning)
     assert_empty client.pinged
   end
 
@@ -127,8 +132,8 @@ class SubscriberTest < StablemateTest
   # Scenario 26 — two tasks sharing a job class -> both pinged + a warning logged.
   def test_shared_class_pings_all_and_warns
     client = Stablemate::FakeClient.new
-    logged = []
-    Stablemate.config.logger = Object.new.tap { |l| l.define_singleton_method(:warn) { |m| logged << m } }
+    logger = Stablemate::RecordingLogger.new
+    Stablemate.config.logger = logger
 
     sub = subscriber(
       class_to_keys: { "ReportJob" => %w[morning_report evening_report] },
@@ -139,7 +144,7 @@ class SubscriberTest < StablemateTest
     sub.handle_event(event("ReportJob"))
 
     assert_equal %w[https://sm.test/ping/m https://sm.test/ping/e].sort, client.pinged.sort
-    assert(logged.any? { |m| m.include?("ReportJob") && m.include?("multiple") })
+    assert(logger.warnings.any? { |m| m.include?("ReportJob") && m.include?("multiple") })
   end
 
   # Scenario 28 — manual fallback: a monitor whose registration_key IS the job
@@ -182,14 +187,12 @@ class SubscriberTest < StablemateTest
 
   # The production default (no injected dispatcher) is fire-and-forget: the ping
   # runs on a background thread, not inline in the worker. Pins decision #4.
-  # The Queue blocks until the ping lands — deterministic, no polling.
+  # FakeClient#ping_threads is a Queue, so #pop blocks until the ping lands —
+  # deterministic, no polling. (It used to be a #ping patched onto the instance,
+  # which meant the double under test was not the double the other tests use.)
   def test_default_dispatcher_pings_on_a_background_thread
     require "timeout"
     client = Stablemate::FakeClient.new
-    pings = Queue.new
-    client.define_singleton_method(:ping) do |url|
-      super(url).tap { pings << Thread.current }
-    end
 
     sub = Stablemate::Execution::Subscriber.new(
       class_to_keys: { "J" => [ "k" ] },
@@ -198,7 +201,7 @@ class SubscriberTest < StablemateTest
     )
     sub.handle_event(event("J"))
 
-    pinging_thread = Timeout.timeout(5) { pings.pop }
+    pinging_thread = Timeout.timeout(5) { client.ping_threads.pop }
     assert_equal [ "https://sm.test/ping/k" ], client.pinged
     refute_equal Thread.current, pinging_thread, "ping ran inline instead of on a background thread"
   end
@@ -208,9 +211,7 @@ class SubscriberTest < StablemateTest
   # escape into the host job — the rescues that call log_warn are exactly the
   # paths that exist to guarantee that.
   def test_a_raising_logger_cannot_escape_into_the_host_job
-    Stablemate.config.logger = Object.new.tap do |l|
-      l.define_singleton_method(:warn) { |_m| raise IOError, "closed stream" }
-    end
+    Stablemate.config.logger = Stablemate::RaisingLogger.new(IOError.new("closed stream"))
     client = Stablemate::FakeClient.new(ping_error: SocketError.new("no network"))
     sub = subscriber(
       class_to_keys: { "ReportJob" => %w[a b] }, # ambiguous -> warn on the in-job path too
@@ -339,8 +340,8 @@ class SubscriberTest < StablemateTest
   # Ambiguity: same rule as handle_event — report all mapped tasks and warn.
   def test_handle_discard_shared_class_reports_all_and_warns
     client = Stablemate::FakeClient.new
-    logged = []
-    Stablemate.config.logger = Object.new.tap { |l| l.define_singleton_method(:warn) { |m| logged << m } }
+    logger = Stablemate::RecordingLogger.new
+    Stablemate.config.logger = logger
 
     sub = subscriber(
       class_to_keys: { "ReportJob" => %w[morning_report evening_report] },
@@ -351,7 +352,7 @@ class SubscriberTest < StablemateTest
     sub.handle_discard(job("ReportJob"), RuntimeError.new("boom"))
 
     assert_equal %w[https://sm.test/ping/m https://sm.test/ping/e].sort, client.reported.map { |r| r[:url] }.sort
-    assert(logged.any? { |m| m.include?("ReportJob") && m.include?("multiple") })
+    assert(logger.warnings.any? { |m| m.include?("ReportJob") && m.include?("multiple") })
   end
 
   def test_ping_on_failure_false_suppresses_failure_reports
@@ -462,9 +463,8 @@ class SubscriberTest < StablemateTest
   # A failure-report drop must be greppable as such, not disguised as a "ping"
   # failure.
   def test_failure_report_drops_log_with_their_own_label
-    require "timeout"
-    logged = Queue.new
-    Stablemate.config.logger = Object.new.tap { |l| l.define_singleton_method(:warn) { |m| logged << m } }
+    logger = Stablemate::RecordingLogger.new
+    Stablemate.config.logger = logger
     client = Stablemate::FakeClient.new(ping_error: SocketError.new("no network"))
     sub = subscriber(
       class_to_keys: { "J" => [ "k" ] },
@@ -474,7 +474,7 @@ class SubscriberTest < StablemateTest
 
     sub.handle_discard(job("J"), RuntimeError.new("boom"))
 
-    message = Timeout.timeout(5) { logged.pop }
+    message = logger.next_warning
     assert_match(/failure report thread failed/, message)
   end
 

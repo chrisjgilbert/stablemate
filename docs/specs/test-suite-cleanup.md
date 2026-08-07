@@ -1,6 +1,6 @@
 # Test suite cleanup — retiring the smells
 
-Status: **DONE** — all nine chunks merged. Author: Claude (session), 2026-08-04. Owner: @chrisjgilbert.
+Status: **IN PROGRESS** — chunks 1–9 merged, chunk 10 in review. Author: Claude (session), 2026-08-04. Owner: @chrisjgilbert.
 No product change; this is a **test-quality punch list**. It removes the smells
 found in the 2026-08-04 review of `test/`, using the catalog from Gerard
 Meszaros' *xUnit Test Patterns*, thoughtbot's *Let's Not* and Sandi Metz's
@@ -34,6 +34,7 @@ Actions is green → tick the boxes here → next chunk.
 | 7 | The system suite's load sensitivity — an Erratic Test | #8 | **MERGED** | #91 |
 | 8 | Stop testing config and booting; test behaviour | #9 | **MERGED** | #93 |
 | 9 | Tests that test implementation, not behaviour | follow-up | **MERGED** | #95 |
+| 10 | The gem suite's reflection — the one `test/` dir the sweep missed | follow-up | **IN REVIEW** | — |
 
 ### The measurements this work is against (taken on `b2b3fbb`)
 
@@ -497,3 +498,69 @@ chunk already touched: two mailer tests read the very config they were
 checking (`assert_equal ApplicationMailer.default[:from], mail.from`, and the
 same shape for the link host). Both pass for *any* value, including a From
 address that fails SPF and a link host taken from the request.
+
+---
+
+## 10 · The gem suite — the `test/` directory every earlier chunk missed
+
+Chunks 1–9 measured, swept and linted **`test/`**. The companion gem has its own
+suite in **`gem/test/`**, run by `bin/ci` and gated in CI exactly like the app's
+— and no chunk had ever looked at it. Every baseline number in this ledger is
+app-only. That was the gap, not a clean bill of health.
+
+Asked the same three questions of it (ivars, `define_singleton_method`, `send`):
+
+| | `test/` | `gem/test/` before | after |
+|---|---|---|---|
+| `instance_variable_get`/`set` | 0 | 0 | 0 |
+| `define_singleton_method` etc. | 0 | 13 | **3** |
+| `send(:private_method)` | 0 | 1 | **0** |
+
+They were not all one smell, and the three survivors are deliberate.
+
+- [x] **A private method under test.** `client_test.rb` called
+      `client.send(:classify, response)` with five cases hanging off it.
+      Classification is now asserted through **`#ping`**, the public entry point
+      it exists to serve. That is not just tidier — it reaches further:
+      **mutation-checked**, a `#ping` that stopped consulting `classify`
+      altogether fails four of the five, and could not have failed the old ones,
+      which called `classify` directly.
+- [x] **A private method patched onto the object under test.**
+      `c.define_singleton_method(:http_for) { |_uri| fake_http }` — the comment
+      called it "the private `http_for` seam". That is **Hard-to-Test Code**: the
+      client had no way to be given a transport, so the test installed one behind
+      its back. Fixed on the **production** side — `Client.new` now takes an
+      optional `http_factory:` callable (the default is unchanged, so every
+      existing caller is untouched), and the test injects a small `RecordingHttp`
+      through it.
+- [x] **A fake that lied about its own class.** The stand-in ActiveJob instance
+      was an `Object` with `#class` patched to return an anonymous class — a lie
+      to anything that asked: an `is_a?`, an error message, a debugger. It is now
+      a real **instance** of that class.
+- [x] **A double patched instead of extended.** The background-thread test
+      patched `#ping` onto a `FakeClient` instance to record which thread it ran
+      on, so the double under test was not the double every other test uses.
+      `FakeClient` now records `ping_threads` itself — a `Queue`, so the test
+      blocks until the ping lands rather than polling. **Mutation-checked:**
+      making the default dispatcher run inline still fails it.
+- [x] **Four hand-rolled loggers.** `Object.new.tap { |l| l.define_singleton_method(:warn) … }`,
+      in four near-identical copies with two different collection strategies
+      (`Array` inline, `Queue` cross-thread). Replaced by one
+      `Stablemate::RecordingLogger` that does both correctly — a mutex-guarded
+      snapshot for inline assertions, `#next_warning` for cross-thread ones —
+      and a `RaisingLogger` for the one test that needs a broken sink.
+
+**What stays, and why.** Three `define_singleton_method` calls remain and should:
+
+- `hostile.define_singleton_method(:message) { raise … }`, twice. You cannot
+  build an exception whose `#message` raises by any other means, and *"survive a
+  hostile exception object"* is precisely the behaviour under test.
+- `klass.define_singleton_method(:name) { class_name }`, once. The subscriber
+  keys on `job.class.name`, and naming an anonymous Ruby class is the one thing
+  the language gives no other route to. It defines a **double's** identity rather
+  than patching a real object's — a different act from the four above.
+
+**Not done:** `minitest-mock` was deliberately *not* added to the gem. It is a
+published library that runs on the plain load path against open gemspec
+constraints; adding a dev dependency to tidy its tests is a trade worth making
+out loud, not silently, and none of the fixes above needed it.

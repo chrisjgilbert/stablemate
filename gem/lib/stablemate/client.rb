@@ -17,8 +17,14 @@ module Stablemate
     # the gem is standalone, so it can't share the constant; keep the two in sync.
     ERROR_MESSAGE_LIMIT = 1_000
 
-    def initialize(config = Stablemate.config)
+    # http_factory: an optional callable taking a URI and returning something
+    # that responds to #post / #request. The default builds a Net::HTTP with the
+    # configured timeouts. It exists so a caller can supply a different transport
+    # — and so the suite can assert on the request that would go on the wire
+    # without patching a private method onto the instance under test.
+    def initialize(config = Stablemate.config, http_factory: nil)
       @config = config
+      @http_factory = http_factory
     end
 
     # Raises on a non-2xx / transport error so Registration#sync! can log and
@@ -112,6 +118,8 @@ module Stablemate
       end
 
       def http_for(uri)
+        return @http_factory.call(uri) if @http_factory
+
         http = Net::HTTP.new(uri.host, uri.port)
         http.use_ssl = uri.scheme == "https"
         http.open_timeout = config.timeout

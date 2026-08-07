@@ -11,47 +11,63 @@ class ClientTest < StablemateTest
     Stablemate::Client.new(Stablemate.config)
   end
 
-  def classify(response)
-    client.send(:classify, response)
+  # Classification is asserted through #ping, the public entry point it exists to
+  # serve, rather than by reaching for the private #classify: calling the private
+  # method proves the case statement works but not that #ping consults it, so a
+  # #ping that stopped classifying at all would still have passed.
+  def ping_status(response)
+    client, captured = client_capturing_request(response)
+    status = client.ping("https://sm.test/ping/abc")
+    # #ping swallows everything and returns :error, so an :error expectation
+    # would also be satisfied by a client that blew up before it ever classified
+    # anything. Pin that the request actually reached the transport.
+    assert_equal "/ping/abc", captured[:path]
+    status
   end
 
   def test_2xx_is_ok
-    assert_equal :ok, classify(Net::HTTPOK.new("1.1", "200", "OK"))
+    assert_equal :ok, ping_status(Net::HTTPOK.new("1.1", "200", "OK"))
   end
 
   def test_404_is_stale
-    assert_equal :stale, classify(Net::HTTPNotFound.new("1.1", "404", "Not Found"))
+    assert_equal :stale, ping_status(Net::HTTPNotFound.new("1.1", "404", "Not Found"))
   end
 
   def test_410_is_stale
-    assert_equal :stale, classify(Net::HTTPGone.new("1.1", "410", "Gone"))
+    assert_equal :stale, ping_status(Net::HTTPGone.new("1.1", "410", "Gone"))
   end
 
   def test_429_is_error
-    assert_equal :error, classify(Net::HTTPTooManyRequests.new("1.1", "429", "Too Many Requests"))
+    assert_equal :error, ping_status(Net::HTTPTooManyRequests.new("1.1", "429", "Too Many Requests"))
   end
 
   def test_5xx_is_error
-    assert_equal :error, classify(Net::HTTPInternalServerError.new("1.1", "500", "Error"))
+    assert_equal :error, ping_status(Net::HTTPInternalServerError.new("1.1", "500", "Error"))
   end
 
   # --- report_failure (spec §7): POST to the SAME ping URL, form-encoded
   # status=1&message=…, same classification as #ping, never raises. ---
 
-  # Swap the private http_for seam for a recorder so the test can assert on the
-  # actual request the client would put on the wire — no real network.
+  # Inject a recording transport through the client's own http_factory seam, so
+  # the test asserts on the request that would go on the wire without patching a
+  # private method onto the instance under test — and no real network.
   def client_capturing_request(response)
     captured = {}
-    fake_http = Object.new
-    fake_http.define_singleton_method(:post) do |path, body, headers = nil|
-      captured[:path] = path
-      captured[:body] = body
-      captured[:headers] = headers
-      response
+    factory = ->(_uri) { RecordingHttp.new(response, captured) }
+    [ Stablemate::Client.new(Stablemate.config, http_factory: factory), captured ]
+  end
+
+  # Stands in for the Net::HTTP the client would otherwise build.
+  class RecordingHttp
+    def initialize(response, captured)
+      @response = response
+      @captured = captured
     end
-    c = client
-    c.define_singleton_method(:http_for) { |_uri| fake_http }
-    [ c, captured ]
+
+    def post(path, body, headers = nil)
+      @captured.merge!(path: path, body: body, headers: headers)
+      @response
+    end
   end
 
   def test_report_failure_posts_form_encoded_status_and_message_to_the_ping_url
