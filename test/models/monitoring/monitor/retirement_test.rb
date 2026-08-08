@@ -129,6 +129,27 @@ class Monitoring::Monitor::RetirementTest < ActiveSupport::TestCase
     end
   end
 
+  # The retirement window has no pings by construction, so the window it left
+  # behind is stale in EVERY branch — not just the `up` one. Restoring `paused`
+  # verbatim hands the user a monitor whose Resume immediately reads as overdue
+  # and emails a missed check-in for a window in which the task was declared
+  # absent and nothing was watching.
+  test "reviving to paused re-arms the window, so a later resume raises no false outage" do
+    @monitor.pause!
+    @monitor.retire!
+
+    revived_at = 3.days.from_now
+    travel_to(revived_at) { @monitor.revive! }
+
+    assert_equal "paused", @monitor.reload.status
+    assert_in_delta revived_at + 1.hour, @monitor.next_due_at, 1.second
+
+    travel_to(revived_at + 1.minute) do
+      assert_no_emails { @monitor.resume! }
+      assert_equal "up", @monitor.reload.status
+    end
+  end
+
   # Pruning a monitor the user had paused must not destroy the pause.
   test "a paused monitor round-trips through retirement with no alert anywhere" do
     @monitor.pause!

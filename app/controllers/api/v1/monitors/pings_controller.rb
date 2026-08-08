@@ -98,22 +98,42 @@ module Api
           # corrupt latency data — and a value outside the storable range is
           # likewise "no latency measured" rather than a reason to reject the ping:
           # the heartbeat is the payload here, the duration is a nice to have.
+          #
+          # Base 10 EXPLICITLY: Kernel#Integer honours literal prefixes, so a
+          # wrapper formatting its timing with `printf "%04d"` sends `0755` and
+          # gets 493 stored — the same silent corruption the paragraph above is
+          # about, in the direction it did not guard. A JSON client's number
+          # arrives already parsed and skips the string path entirely.
           def numeric_duration_ms
-            duration = Integer(params[:duration_ms], exception: false)
+            duration =
+              case (raw = params[:duration_ms])
+              when Integer then raw
+              when Numeric then raw.to_i
+              when String  then Integer(raw, 10, exception: false)
+              end
             duration if DURATION_MS_RANGE.cover?(duration)
           end
 
-          # First present String among aliased params. Only String values count:
-          # bracket-syntax params (?status[]=1, ?status[a]=b) arrive as
-          # Array/Parameters — those must be ignored, not stored as stringified
-          # garbage.
+          # First present scalar among aliased params.
           #
-          # These three helpers are a deliberate copy of the ones on the public
-          # PingsController rather than an extraction: that controller is deleted
-          # whole in phase 3, and phase 1 must not touch the path it is still
-          # serving.
+          # Strings AND numbers, because this endpoint accepts a JSON body and a
+          # JSON exit code is a NUMBER: `{"status": 1}` dropped for not being a
+          # String reads as a success, so a job that reported its own failure is
+          # monitored as healthy forever. Bracket-syntax params (?status[]=1,
+          # ?status[a]=b) arrive as Array/Parameters and are still ignored rather
+          # than stored as stringified garbage — that is what this guards.
+          #
+          # A deliberate copy of the public PingsController's helpers rather than
+          # an extraction: that controller is deleted whole in phase 3, and phase 1
+          # must not touch the path it is still serving. (It parses only
+          # form-encoded bodies in practice, where every value is a String, so the
+          # JSON hole above is this controller's alone.)
+          SCALAR_PARAM_TYPES = [ String, Numeric ].freeze
+
           def string_param(*names)
-            names.map { |name| params[name] }.find { |value| value.is_a?(String) && value.present? }
+            names.map { |name| params[name] }
+                 .find { |value| SCALAR_PARAM_TYPES.any? { |type| value.is_a?(type) } && value.to_s.present? }
+                 &.to_s
           end
       end
     end

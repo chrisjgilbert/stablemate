@@ -295,4 +295,63 @@ class Project::MonitorSyncPruneTest < ActiveSupport::TestCase
 
     assert_equal "0 9 * * *", monitor("reports.daily").schedule
   end
+
+  # --- Reviving out of the other not-monitored states -------------------------
+
+  # Retirement's own rule is to restore what it retired FROM, and for `suspended`
+  # that alone strands the monitor: User::Subscription#restore_suspended_monitors!
+  # is the only un-suspender, it runs solely on a plan flip, and it scopes on
+  # `status == "suspended"` — so it cannot see a monitor that was retired at the
+  # time. The sync is the one caller that knows a slot is free, so it finishes
+  # the job rather than handing back a monitor it reports as `registered` and
+  # nothing watches.
+  test "a monitor retired while suspended is reactivated by the revive, not left dark" do
+    sync(%w[daily_digest])
+    monitor("daily_digest").check_in!
+    monitor("daily_digest").suspend!
+    sync([], prune: true, declared_keys: %w[other])
+    assert_equal "retired", monitor("daily_digest").status
+
+    result = sync(%w[daily_digest])
+
+    assert_equal "up", monitor("daily_digest").status
+    assert_empty result[:skipped]
+    assert_nil monitor("daily_digest").status_before_suspension
+  end
+
+  # A revive costs a slot precisely because it ends with a monitored monitor, so
+  # the cap gate above is the honest one.
+  test "an over-cap revive is refused and leaves the monitor retired" do
+    limit = @user.monitor_limit
+    sync((1..limit).map { |i| "task_#{i}" })
+    sync((1..limit).map { |i| "task_#{i}" } - [ "task_1" ],
+         prune: true, declared_keys: (2..limit).map { |i| "task_#{i}" })
+    assert_equal "retired", monitor("task_1").status
+    @project.monitors.create!(name: "manual_filler", expected_interval_seconds: 3600,
+                              grace_period_seconds: 300, status: "pending")
+
+    result = sync((1..limit).map { |i| "task_#{i}" })
+
+    assert_equal "retired", monitor("task_1").status
+    assert_includes result[:skipped], { registration_key: "task_1", reason: "limit_reached" }
+  end
+
+  # Every other write in this operation is deliberately non-raising: a single bad
+  # row comes back under `skipped`, never as a 500 that rolls back the whole
+  # payload. Retirement was the one exception, and a legacy row that no longer
+  # passes validation is exactly what would find it — taking every OTHER task in
+  # the deploy's payload down with it.
+  test "a monitor that cannot be saved is reported, not allowed to fail the run" do
+    sync(%w[daily_digest nightly_backup])
+    monitor("nightly_backup").update_column(:expected_interval_seconds, nil)
+
+    result = nil
+    assert_nothing_raised do
+      result = sync(%w[daily_digest], prune: true, declared_keys: %w[daily_digest])
+    end
+
+    assert_equal [ "daily_digest" ], result[:registered].map(&:registration_key)
+    assert_empty result[:retired]
+    assert_equal [ "nightly_backup" ], result[:orphaned]
+  end
 end

@@ -62,7 +62,12 @@ module Monitoring
         remembered = @monitor.status_before_retirement
 
         if Monitor::NOT_MONITORED_STATUSES.include?(remembered)
-          @monitor.update!(status: remembered, status_before_retirement: nil)
+          # The fresh window is re-armed here too, not only on the `up` branch:
+          # `paused` is resumed by the USER, and reactivate_heartbeat! reads
+          # next_due_at when they do. Left at its pre-retirement value it is stale
+          # by the whole declared-absent window, so the first click of Resume
+          # flags missed and emails the outage this method exists to prevent.
+          @monitor.update!(status: remembered, status_before_retirement: nil, next_due_at: due_at(at))
         elsif !@monitor.ever_pinged?
           @monitor.update!(status: "pending", status_before_retirement: nil)
         else

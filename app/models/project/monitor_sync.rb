@@ -39,7 +39,11 @@ class Project
     # typo into monitoring-off for a live job. No declared_keys, no retirement.
     def sync_monitors(app: nil, entries: [], declared_keys: nil, prune: false)
       @app = app.presence
-      @declared_keys = Array(declared_keys)
+      # A Set, because prunable? asks it once per orphan candidate and the whole
+      # loop runs inside the user's row lock: an app declaring 300 tasks with 300
+      # orphans is ~90,000 string compares held against every other sync for that
+      # user. Set#present? reads the same as the Array's did.
+      @declared_keys = Array(declared_keys).to_set
       @prune = prune
       @registered = []
       @skipped = []
@@ -62,11 +66,19 @@ class Project
         # and telling the operator to buy a slot that existed. Retiring first
         # cannot reach anything this payload names: the orphan rule excludes every
         # key the payload carries.
-        converge(payload.map(&:registration_key))
+        payload_keys = payload.map(&:registration_key)
+        converge(payload_keys)
         @slots = @project.user.remaining_monitor_slots
 
+        # One query for the whole payload, not one per entry. The gem re-syncs on
+        # every production boot from every worker and container, so a 200-task app
+        # was doing 200 round trips inside the user's FOR UPDATE lock, serialising
+        # every other sync for that user behind them. Converge cannot have touched
+        # any of these rows — the orphan rule excludes every key the payload names.
+        existing = @project.monitors.where(registration_key: payload_keys).index_by(&:registration_key)
+
         payload.each do |entry|
-          monitor = @project.monitors.find_by(registration_key: entry.registration_key)
+          monitor = existing[entry.registration_key]
 
           if monitor&.retired?
             # The task is back. Reviving re-enters the cap, so it needs its own
@@ -106,10 +118,29 @@ class Project
         retiring, reporting = candidates.partition { |monitor| prunable?(monitor) }
 
         retiring.each do |monitor|
-          monitor.retire!
-          @retired << monitor.registration_key
+          if retire_isolated(monitor)
+            @retired << monitor.registration_key
+          else
+            reporting << monitor
+          end
         end
         @orphaned = reporting.map(&:registration_key)
+      end
+
+      # Retire in its OWN savepoint, and swallow the invalid row — the same shape
+      # as save_isolated, for the same reason. Every other write in this operation
+      # is deliberately non-raising: a bad entry comes back under `skipped` and
+      # the rest of the payload still registers. `retire!` is the one bang, so a
+      # row that no longer passes validation (a legacy monitor with a NULL
+      # interval, say) would propagate RecordInvalid out of the enclosing
+      # with_lock, 500 the request and roll back every OTHER task in the payload —
+      # one stale row silently un-registering a whole deploy. It is reported as
+      # the orphan it is instead.
+      def retire_isolated(monitor)
+        @project.user.transaction(requires_new: true) { monitor.retire! }
+        true
+      rescue ActiveRecord::RecordInvalid
+        false
       end
 
       # Four boundaries, each load-bearing:
@@ -158,7 +189,16 @@ class Project
         return unless persist_update(monitor, entry)
 
         monitor.revive!
-        @slots -= 1 unless monitor.suspended?
+        # Retirement restores what it retired FROM, and for `suspended` that alone
+        # strands the monitor: restore_suspended_monitors! is the only un-suspender,
+        # it runs solely on a plan flip, and it scopes on `status == "suspended"` —
+        # so it cannot see one that was retired at the time, and an upgrade during
+        # the retirement misses it forever. This run holds a free slot for it, so
+        # finish the job here rather than report `registered` for a monitor nothing
+        # watches. (Which is also what makes the cap gate above the honest one: a
+        # revive always ends monitored, so it always costs a slot.)
+        monitor.reactivate! if monitor.suspended?
+        @slots -= 1
       end
 
       # At most ONE entry per registration_key: it is the upsert identity, so a

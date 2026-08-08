@@ -185,6 +185,39 @@ class Api::V1::Monitors::PingsControllerTest < ActionDispatch::IntegrationTest
     assert_nil @monitor.ping_events.sole.duration_ms
   end
 
+  # The controller's own comment blesses JSON ("Rails parses a JSON body into the
+  # same params, so a JSON client works too"), and a JSON exit code is a NUMBER.
+  # Dropped, it reads as a success: the job reported that it failed and the
+  # monitor stays green forever — the one outcome this product exists to prevent.
+  test "a JSON body's numeric status is read, not silently dropped as a success" do
+    post api_v1_monitor_pings_path("daily_digest"),
+         params: { status: 1, message: "boom" }.to_json,
+         headers: auth.merge("Content-Type" => "application/json")
+
+    assert_response :success
+    assert_equal "failure", @monitor.ping_events.order(:created_at).last.kind
+    assert_equal "down", @monitor.reload.status
+  end
+
+  test "a JSON body's numeric zero status is still a success" do
+    post api_v1_monitor_pings_path("daily_digest"),
+         params: { status: 0 }.to_json,
+         headers: auth.merge("Content-Type" => "application/json")
+
+    assert_equal "success", @monitor.ping_events.order(:created_at).last.kind
+    assert_equal "up", @monitor.reload.status
+  end
+
+  # Kernel#Integer honours literal base prefixes, so a zero-padded duration is
+  # read as octal. A wrapper doing `printf "%04d"` would have every latency it
+  # reports silently rewritten, which is exactly the corruption the helper's
+  # comment says it exists to prevent (it only guarded the to_i direction).
+  test "a zero-padded duration is decimal, not octal" do
+    check_in(params: { duration_ms: "0755" })
+
+    assert_equal 755, @monitor.ping_events.order(:created_at).last.duration_ms
+  end
+
   test "bracket-syntax parameters are ignored rather than stored as garbage" do
     check_in(params: { status: [ "1" ], message: { a: "b" } })
 
