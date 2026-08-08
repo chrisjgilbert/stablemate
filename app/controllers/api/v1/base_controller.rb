@@ -31,8 +31,16 @@ module Api
 
       RATE_LIMITED = -> { render json: { error: "rate_limited" }, status: :too_many_requests }
 
+      # Digested, because `by:` is not private: Rails writes it into the store as
+      # the literal cache key and emits it into an ActiveSupport::Notifications
+      # payload on every throttle — so an undigested value puts live credentials
+      # into any broadly-subscribed monitoring tool, and into Postgres if this
+      # store ever moves to Solid Cache. The bucket identity is unchanged; only
+      # its spelling is.
       rate_limit to: PER_KEY_LIMIT, within: PER_KEY_WINDOW, name: "per-key",
-                 by: -> { request.authorization.presence || request.remote_ip },
+                 by: -> {
+                   Digest::SHA256.hexdigest(request.authorization.presence || request.remote_ip.to_s)
+                 },
                  with: RATE_LIMITED, store: RATE_LIMIT_STORE
       rate_limit to: PER_IP_LIMIT, within: PER_IP_WINDOW, name: "per-ip",
                  by: -> { request.remote_ip },

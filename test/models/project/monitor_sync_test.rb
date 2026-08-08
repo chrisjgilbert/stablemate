@@ -159,22 +159,27 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     # row is plainly there for the rescue to re-find. Blinding every lookup would
     # stage a different bug — and pass while the recovery was broken.
     #
+    # Staged on `where` because that is the lookup the operation makes: it
+    # preloads the whole payload's rows in one query and re-finds only in the
+    # rescue (which reaches the same seam, since find_by is where(...).take).
     # Keyed on the registration key rather than on call order, and backed by the
     # count assertion below, because a blind FIRST-CALL would be spent by any
-    # other find_by the operation happens to make first — after which the sync's
+    # other lookup the operation happens to make first — after which the sync's
     # own lookup finds the row, takes the update path, and every assertion here
     # still passes with the RecordNotUnique recovery deleted outright.
-    lookup = @project.monitors.method(:find_by)
+    lookup = @project.monitors.method(:where)
     racey_lookups = 0
     stale_read = lambda do |*args, **kwargs|
       conditions = kwargs.presence || args.first
-      racing = conditions.is_a?(Hash) && conditions.symbolize_keys[:registration_key] == "racey"
-      next lookup.call(*args, **kwargs) unless racing
+      racing = conditions.is_a?(Hash) &&
+        Array(conditions.symbolize_keys[:registration_key]).include?("racey")
+      relation = lookup.call(*args, **kwargs)
+      next relation unless racing
 
-      (racey_lookups += 1) == 1 ? nil : lookup.call(*args, **kwargs)
+      (racey_lookups += 1) == 1 ? relation.where.not(registration_key: "racey") : relation
     end
 
-    result = @project.monitors.stub(:find_by, stale_read) do
+    result = @project.monitors.stub(:where, stale_read) do
       @project.sync_monitors(entries: [ entry("racey", name: "Updated", interval: 7200) ])
     end
 

@@ -46,9 +46,11 @@ module Monitoring
         # Returns a `down` Notification to dispatch (up/pending -> down only), else nil.
         def apply_transition(received_at, error)
           case @monitor.status
-          when "paused", "suspended"
-            # Same rule as CheckIn: a stray ping (of either polarity) must not
-            # silently resume or alert a deliberately-unmonitored monitor.
+          when *Monitor::NOT_MONITORED_STATUSES
+            # Same rule as CheckIn, and this is a SECOND copy of it rather than a
+            # shared one: a `retired` monitor missing from here alone would let a
+            # still-running cron reporting status=1 flip it to down, open an
+            # incident, email a false outage and re-occupy a cap slot.
             nil
           when "down"
             # The event is recorded above, but the open incident keeps its original

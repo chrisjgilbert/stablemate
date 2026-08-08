@@ -27,8 +27,18 @@
   </div>
 <% end %>
 
-<%= render "projects/api_keys", project: @project, api_keys: @api_keys %>
+<%= render "projects/keys", project: @project, keys: @ping_keys, key_class: PingKey,
+      slug: "ping-keys", heading: "Ping keys", generate_label: "Generate ping key",
+      blurb: "The credential your jobs check in with. Rotate by generating a second key, deploying it, then revoking the first.",
+      empty_text: "No ping keys yet. Generate one so this app's jobs can check in.",
+      revoke_warning: "Revoke this key? Any job still checking in with it stops being monitored." %>
+
+<%= render "projects/keys", project: @project, keys: @api_keys, key_class: ApiKey,
+      slug: "api-keys", heading: "API keys", generate_label: "Generate key",
+      blurb: "Drop a key into this app's Stablemate gem to sync its monitors here, or to call the API.",
+      empty_text: "No API keys yet. Generate one to connect this app's gem or call the API.",
+      revoke_warning: "Revoke this key? Anything using it stops working immediately." %>
 
 <% if @raw_token.present? %>
-  <%= render "projects/generated_modal", raw_token: @raw_token %>
+  <%= render "projects/generated_modal", raw_token: @raw_token, label: @raw_token_label %>
 <% end %>

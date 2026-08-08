@@ -72,6 +72,19 @@ class Api::V1::MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_response :too_many_requests
   end
 
+  # `by:` is written into the store as the literal cache key and emitted into an
+  # ActiveSupport::Notifications payload on every throttle, so it must never be
+  # the credential itself (v1-scope §5.3).
+  test "the per-key limiter buckets on a digest, never on the raw credential" do
+    get api_v1_monitors_url, headers: auth
+    assert_response :success
+
+    store = Api::V1::BaseController::RATE_LIMIT_STORE
+    scope = "rate-limit:api/v1/monitors:per-key"
+    assert_equal 1, store.read("#{scope}:#{Digest::SHA256.hexdigest("Bearer #{@raw}")}")
+    assert_nil store.read("#{scope}:Bearer #{@raw}")
+  end
+
   test "index is tenant-scoped" do
     get api_v1_monitors_url, headers: auth
     body = JSON.parse(response.body)
