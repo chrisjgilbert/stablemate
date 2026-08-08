@@ -163,15 +163,42 @@ per-project. Indexes: `(user_id, name)` unique; `user_id`.
 `id`, `project_id`, `name`, `token_digest` (unique), `token_last4`, `last_used_at`
 (null), timestamps. Raw format `sm_live_<random>`; shown once. **Project-scoped**
 (the key is the gem's per-app identity — the API resolves key → project); `user`
-delegates through the project.
+delegates through the project. **Amended by
+[`v1-scope.md`](v1-scope.md) §4/§5.2:** it is no longer the credential on the
+check-in path (see `PingKey`), and `last_used_at` is written at most once every
+five minutes rather than on every request.
+
+### `PingKey`
+`id`, `project_id`, `name`, `token_digest` (unique), `token_last4`, `last_used_at`
+(null), timestamps. Raw format `sm_ping_<random>`; shown once. Added by
+[`v1-scope.md`](v1-scope.md) §4: the credential on the check-in hot path, whose
+only capabilities are recording a check-in and answering `GET /api/v1/verify`.
+A **separate table** rather than a type column on `api_keys`, because
+authentication looks a token up across a whole table — one table would let a ping
+key authenticate the management API unless every lookup remembered to filter, and
+forgetting is silent and permissive. A project may hold **more than one** live
+key at a time, which is what makes rotation gapless (add, deploy, watch the old
+key's `last_used_at` stop moving, revoke).
 
 ### `Monitor`
 `id`, `project_id`, `monitor_type` (string, default `"heartbeat"`), `name`,
 `ping_token` (unique, secret), `expected_interval_seconds` (int),
-`grace_period_seconds` (int), `status` (string: `up`/`down`/`paused`/`pending`),
-`last_ping_at` (null), `next_due_at` (null), `registration_key` (null),
+`grace_period_seconds` (int),
+`status` (string: `up`/`down`/`paused`/`pending`/`suspended`/`retired`),
+`last_ping_at` (null), `first_ping_at` (null), `next_due_at` (null),
+`registration_key` (null), `status_before_suspension` (null),
 ⊕ `source` (string: `"manual"`/`"gem"`, default `"manual"`),
-⊕ `last_synced_app` (string, null), timestamps.
+⊕ `last_synced_app` (string, null),
+⊕ `status_before_retirement` (null), ⊕ `schedule` (string, null), timestamps.
+
+**Amended by [`v1-scope.md`](v1-scope.md) §6.1/§6.3.** The status vocabulary gains
+**`retired`** — the prune state: history kept, not monitored, no cap slot, revived
+by the sync when the task returns, remembering what it retired from in
+`status_before_retirement` exactly as suspension does. `schedule` carries the raw
+cron expression a task's interval was derived from; it is stored by the sync and
+read by nothing, so cron-aware detection later needs no gem release. (This block
+also previously omitted five shipped columns; `first_ping_at` and
+`status_before_suspension` are added above with the two new ones.)
 
 - Belongs to a **project** (was `user_id`); `user` delegates through the project.
 - `registration_key` ≡ the `recurring.yml` task key (the gem's Layer 2 writes it).
