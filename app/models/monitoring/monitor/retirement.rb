@@ -77,10 +77,16 @@ module Monitoring
 
       private
         # A fresh window measured from now, never from the last (pre-retirement)
-        # ping. A monitor with no interval has nothing to arm — it will fail
-        # validation on save anyway, and inventing a due time would be worse.
+        # ping. Two monitors have nothing to arm, and for both, inventing a due
+        # time would be worse than leaving it nil:
+        #
+        # - No interval: it will fail validation on save anyway.
+        # - Never pinged: the same rule recompute_next_due_at keeps ("nothing to
+        #   measure from"). A never-pinged monitor retired from `paused` would
+        #   otherwise come back carrying a next_due_at the API publishes as a
+        #   next check for a job that has never once reported.
         def due_at(at)
-          return nil if @monitor.expected_interval_seconds.blank?
+          return nil if @monitor.expected_interval_seconds.blank? || !@monitor.ever_pinged?
 
           at + @monitor.expected_interval_seconds.seconds
         end

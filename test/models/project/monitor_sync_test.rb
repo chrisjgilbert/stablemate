@@ -25,6 +25,27 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     assert_empty result[:skipped]
   end
 
+  # The key is matched two ways — in SQL, where Active Record casts it through the
+  # column type, and in Ruby, against the payload's preloaded rows, which does
+  # not. A YAML task key like `123:` reaches the endpoint as a JSON NUMBER, and a
+  # miss on the Ruby side sends an EXISTING row down the create path. AT THE CAP
+  # that is not recoverable: the create is refused before it can conflict, so a
+  # monitor the rules say is always updatable comes back as limit_reached and
+  # keeps this deploy's stale settings.
+  test "a numeric registration key matches the row it already has, even at the cap" do
+    # bob owns one fixture monitor; this fills the rest of the free cap, so an
+    # update is the only thing that can still succeed.
+    @project.sync_monitors(entries: [ entry("123", name: "First") ])
+    @project.sync_monitors(entries: (1..3).map { |i| entry("k#{i}") })
+    assert @user.reload.at_monitor_cap?
+
+    result = @project.sync_monitors(entries: [ entry(123, name: "Renamed") ])
+
+    assert_empty result[:skipped]
+    assert_equal [ "123" ], result[:registered].map(&:registration_key)
+    assert_equal "Renamed", @project.monitors.find_by(registration_key: "123").name
+  end
+
   test "name defaults to the registration key when absent" do
     result = @project.sync_monitors(entries: [
       { registration_key: "cleanup", expected_interval_seconds: 3600, grace_period_seconds: 300 }

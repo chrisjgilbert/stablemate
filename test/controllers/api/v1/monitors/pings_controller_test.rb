@@ -208,6 +208,20 @@ class Api::V1::Monitors::PingsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "up", @monitor.reload.status
   end
 
+  # An exit code is a whole number, but a client that types it as a float sends
+  # 0.0 for a clean run. Stringified verbatim that is "0.0" != "0" — a reported
+  # SUCCESS turned into a down email and an incident, which is the false alarm
+  # this product exists to avoid.
+  test "a JSON body's integral float status is read as the whole number it is" do
+    post api_v1_monitor_pings_path("daily_digest"),
+         params: { status: 0.0 }.to_json,
+         headers: auth.merge("Content-Type" => "application/json")
+
+    assert_equal "success", @monitor.ping_events.order(:created_at).last.kind
+    assert_equal "up", @monitor.reload.status
+    assert_empty @monitor.incidents
+  end
+
   # Kernel#Integer honours literal base prefixes, so a zero-padded duration is
   # read as octal. A wrapper doing `printf "%04d"` would have every latency it
   # reports silently rewritten, which is exactly the corruption the helper's

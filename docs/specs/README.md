@@ -187,6 +187,8 @@ key's `last_used_at` stop moving, revoke).
 `status` (string: `up`/`down`/`paused`/`pending`/`suspended`/`retired`),
 `last_ping_at` (null), `first_ping_at` (null), `next_due_at` (null),
 `registration_key` (null), `status_before_suspension` (null),
+`last_synced_name` (null), `last_synced_expected_interval_seconds` (null),
+`last_synced_grace_period_seconds` (null),
 ⊕ `source` (string: `"manual"`/`"gem"`, default `"manual"`),
 ⊕ `last_synced_app` (string, null),
 ⊕ `status_before_retirement` (null), ⊕ `schedule` (string, null), timestamps.
@@ -197,8 +199,9 @@ by the sync when the task returns, remembering what it retired from in
 `status_before_retirement` exactly as suspension does. `schedule` carries the raw
 cron expression a task's interval was derived from; it is stored by the sync and
 read by nothing, so cron-aware detection later needs no gem release. (This block
-also previously omitted five shipped columns; `first_ping_at` and
-`status_before_suspension` are added above with the two new ones.)
+also previously omitted five shipped columns — `first_ping_at`,
+`status_before_suspension` and the three `last_synced_*` settings the gem-write
+rule reads; all five are listed above alongside the two new ones.)
 
 - Belongs to a **project** (was `user_id`); `user` delegates through the project.
 - `registration_key` ≡ the `recurring.yml` task key (the gem's Layer 2 writes it).

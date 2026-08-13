@@ -128,12 +128,21 @@ module Api
           # must not touch the path it is still serving. (It parses only
           # form-encoded bodies in practice, where every value is a String, so the
           # JSON hole above is this controller's alone.)
-          SCALAR_PARAM_TYPES = [ String, Numeric ].freeze
-
           def string_param(*names)
-            names.map { |name| params[name] }
-                 .find { |value| SCALAR_PARAM_TYPES.any? { |type| value.is_a?(type) } && value.to_s.present? }
-                 &.to_s
+            found = names.map { |name| params[name] }
+                         .find { |value| (value.is_a?(String) || value.is_a?(Numeric)) && value.to_s.present? }
+            scalar_to_s(found) if found
+          end
+
+          # An exit code is a WHOLE number, so an integral float renders as the
+          # integer it is. A client that types its status as a float sends
+          # `{"status": 0.0}` for a clean run, and "0.0" != "0" reads that as a
+          # failure — a down email and an incident for a job that succeeded, which
+          # is the false alarm this product exists to avoid.
+          def scalar_to_s(value)
+            return value.to_i.to_s if value.is_a?(Float) && value.finite? && value.to_i == value
+
+            value.to_s
           end
       end
     end

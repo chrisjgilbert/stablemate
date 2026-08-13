@@ -150,6 +150,23 @@ class Monitoring::Monitor::RetirementTest < ActiveSupport::TestCase
     end
   end
 
+  # Re-arming the window is measured from a ping, so a monitor that has never had
+  # one has nothing to measure — the same rule recompute_next_due_at keeps. An
+  # invented next_due_at is published by the API as a next check for a job that
+  # has never once reported.
+  test "reviving a never-pinged paused monitor invents no window" do
+    never_pinged = @project.monitors.create!(
+      name: "never", expected_interval_seconds: 3600, grace_period_seconds: 300
+    )
+    never_pinged.pause!
+    never_pinged.retire!
+
+    travel_to(3.days.from_now) { never_pinged.revive! }
+
+    assert_equal "paused", never_pinged.reload.status
+    assert_nil never_pinged.next_due_at
+  end
+
   # Pruning a monitor the user had paused must not destroy the pause.
   test "a paused monitor round-trips through retirement with no alert anywhere" do
     @monitor.pause!

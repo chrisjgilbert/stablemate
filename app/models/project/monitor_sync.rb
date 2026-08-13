@@ -19,7 +19,17 @@ class Project
       def self.from(raw)
         raw = raw.to_h.with_indifferent_access
         new(
-          raw[:registration_key].presence,
+          # Normalised to a STRING, because the key is the upsert identity and it
+          # is matched two ways: in SQL, where Active Record casts it through the
+          # column type, and in Ruby, against the preloaded `existing` hash, which
+          # does not. A payload sending a numeric key (`recurring.yml` keys are
+          # YAML keys — `123:` parses as an Integer) would miss the hash but match
+          # the column, so the run would take the CREATE path for a row that
+          # exists: at the cap that reports `limit_reached` for a monitor the rules
+          # say updates are always allowed for, and for a retired one it skips the
+          # revive branch entirely, leaving it unmonitored while reporting it back
+          # as registered.
+          raw[:registration_key].presence&.to_s,
           raw[:name].presence,
           raw[:expected_interval_seconds],
           raw[:grace_period_seconds],
@@ -190,10 +200,11 @@ class Project
 
         monitor.revive!
         # Retirement restores what it retired FROM, and for `suspended` that alone
-        # strands the monitor: restore_suspended_monitors! is the only un-suspender,
-        # it runs solely on a plan flip, and it scopes on `status == "suspended"` —
-        # so it cannot see one that was retired at the time, and an upgrade during
-        # the retirement misses it forever. This run holds a free slot for it, so
+        # strands the monitor: every un-suspender runs off a plan change and none of
+        # them can see a retired row — User::Subscription#restore_suspended_monitors!
+        # scopes on `status == "suspended"`, and Downgrade#resolve_choice! offers
+        # only `not_retired` monitors as keepers — so an upgrade during the
+        # retirement misses it forever. This run holds a free slot for it, so
         # finish the job here rather than report `registered` for a monitor nothing
         # watches. (Which is also what makes the cap gate above the honest one: a
         # revive always ends monitored, so it always costs a slot.)
