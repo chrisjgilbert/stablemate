@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_01_195746) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_07_112619) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -61,8 +61,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_195746) do
     t.string "ping_token", null: false
     t.bigint "project_id", null: false
     t.string "registration_key"
+    t.string "schedule"
     t.string "source", default: "manual", null: false
     t.string "status", default: "pending", null: false
+    t.string "status_before_retirement"
     t.string "status_before_suspension"
     t.datetime "updated_at", null: false
     t.index ["next_due_at"], name: "index_monitors_on_next_due_at"
@@ -195,6 +197,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_195746) do
     t.index ["monitor_id"], name: "index_ping_events_on_monitor_id"
   end
 
+  create_table "ping_keys", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "last_used_at"
+    t.string "name", null: false
+    t.bigint "project_id", null: false
+    t.string "token_digest", null: false
+    t.string "token_last4", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_id"], name: "index_ping_keys_on_project_id"
+    t.index ["token_digest"], name: "index_ping_keys_on_token_digest", unique: true
+  end
+
   create_table "projects", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "name", null: false
@@ -253,6 +267,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_195746) do
   add_foreign_key "pay_payment_methods", "pay_customers", column: "customer_id"
   add_foreign_key "pay_subscriptions", "pay_customers", column: "customer_id"
   add_foreign_key "ping_events", "monitors"
+  add_foreign_key "ping_keys", "projects"
   add_foreign_key "projects", "users"
   add_foreign_key "sessions", "users"
   add_foreign_key "uptime_day_stats", "monitors"

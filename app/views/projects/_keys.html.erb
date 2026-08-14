@@ -1,23 +1,28 @@
 <%#
-  Locals: project, api_keys.
+  The masked list plus generate button, shared by both project credentials
+  (v1-scope §4): the API key that registers monitors, and the ping key that rides
+  every check-in. Two tables, one shape — a table per credential rather than one
+  merged list, because the two are used in different places and revoked for
+  different reasons.
+
+  Locals: project, keys, key_class, slug, heading, blurb, generate_label,
+  empty_text, revoke_warning.
 %>
-<section class="mt-10" data-testid="project-api-keys">
+<section class="mt-10" data-testid="project-<%= slug %>">
   <div class="flex items-center justify-between mb-3">
     <div>
-      <h2 class="font-display text-base font-bold tracking-tight">API keys</h2>
-      <p class="text-[13px] text-muted mt-0.5">
-        Drop a key into this app's Stablemate gem to sync its monitors here, or to call the API.
-      </p>
+      <h2 class="font-display text-base font-bold tracking-tight"><%= heading %></h2>
+      <p class="text-[13px] text-muted mt-0.5"><%= blurb %></p>
     </div>
-    <%= form_with url: project_api_keys_path(project), method: :post do |f| %>
-      <%= f.submit "Generate key",
+    <%= form_with url: polymorphic_path([ project, key_class ]), method: :post do |f| %>
+      <%= f.submit generate_label,
             class: "inline-flex items-center h-8 px-3 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover cursor-pointer" %>
     <% end %>
   </div>
 
-  <% if api_keys.any? %>
+  <% if keys.any? %>
     <div class="rounded-xl border border-border bg-surface overflow-hidden shadow-sm">
-      <table class="w-full text-[13px]" data-testid="api-keys-table">
+      <table class="w-full text-[13px]" data-testid="<%= slug %>-table">
         <thead class="text-left text-muted border-b border-hairline">
           <tr>
             <th class="px-4 py-2.5 font-medium">Name</th>
@@ -28,15 +33,18 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-hairline">
-          <% api_keys.each do |key| %>
+          <% keys.each do |key| %>
             <tr id="<%= dom_id(key) %>">
               <td class="px-4 py-3"><%= key.name %></td>
               <td class="px-4 py-3 font-mono text-muted"><%= key.masked %></td>
               <td class="px-4 py-3 font-mono text-muted"><%= mono_timestamp(key.created_at) %></td>
+              <%# "Last used" is written at most once every five minutes: on the
+                  check-in hot path an unconditional write would queue a tenant's
+                  concurrent check-ins behind one row. %>
               <td class="px-4 py-3 font-mono text-muted"><%= mono_timestamp(key.last_used_at, blank: "never") %></td>
               <td class="px-4 py-3 text-right">
-                <%= button_to "Revoke", project_api_key_path(project, key), method: :delete,
-                      form: { data: { turbo_confirm: "Revoke this key? Anything using it stops working immediately." } },
+                <%= button_to "Revoke", [ project, key ], method: :delete,
+                      form: { data: { turbo_confirm: revoke_warning } },
                       class: "h-7 px-2.5 rounded-lg text-[12px] font-semibold text-down-text hover:bg-down-bg/60" %>
               </td>
             </tr>
@@ -45,10 +53,8 @@
       </table>
     </div>
   <% else %>
-    <div class="rounded-xl border border-border bg-surface p-8 text-center shadow-sm" data-testid="api-keys-empty">
-      <p class="text-[13px] text-muted">
-        No API keys yet. Generate one to connect this app's gem or call the API.
-      </p>
+    <div class="rounded-xl border border-border bg-surface p-8 text-center shadow-sm" data-testid="<%= slug %>-empty">
+      <p class="text-[13px] text-muted"><%= empty_text %></p>
     </div>
   <% end %>
 </section>

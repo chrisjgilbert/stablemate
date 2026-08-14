@@ -348,6 +348,44 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # Retired monitors are outside the monitored world (v1-scope §6.1), so they are
+  # listed apart from the active set exactly as suspended ones are — otherwise the
+  # "count / cap" header claims slots nothing occupies.
+  test "index lists retired monitors apart from the active ones" do
+    retired = create_monitor(status: "up", next_due_at: 50.minutes.from_now)
+    retired.update!(name: "Pruned job")
+    retired.retire!
+    sign_in @alice
+
+    get monitors_path
+    assert_response :success
+    row = "##{ActionView::RecordIdentifier.dom_id(retired, :row)}"
+    assert_select row, count: 1, message: "a retired monitor is listed once, not in both sections"
+    assert_select "[data-testid='retired-section'] #{row}"
+  end
+
+  test "a retired monitor offers no pause affordance" do
+    retired = create_monitor(status: "up", next_due_at: 50.minutes.from_now)
+    retired.retire!
+    sign_in @alice
+
+    get monitor_path(retired)
+    assert_response :success
+    assert_select "form[action=?]", monitor_pause_path(retired), false
+  end
+
+  test "a retired monitor cannot be paused or resumed through the sub-resource" do
+    retired = create_monitor(status: "up", next_due_at: 50.minutes.from_now)
+    retired.retire!
+    sign_in @alice
+
+    post monitor_pause_path(retired)
+    assert_equal "retired", retired.reload.status
+
+    delete monitor_pause_path(retired)
+    assert_equal "retired", retired.reload.status
+  end
+
   private
     # A Free account sitting exactly on the Free cap, with a Pay customer behind it
     # (a cancelled subscription from some earlier life) — the shape that makes

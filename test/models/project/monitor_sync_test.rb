@@ -25,6 +25,27 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     assert_empty result[:skipped]
   end
 
+  # The key is matched two ways — in SQL, where Active Record casts it through the
+  # column type, and in Ruby, against the payload's preloaded rows, which does
+  # not. A YAML task key like `123:` reaches the endpoint as a JSON NUMBER, and a
+  # miss on the Ruby side sends an EXISTING row down the create path. AT THE CAP
+  # that is not recoverable: the create is refused before it can conflict, so a
+  # monitor the rules say is always updatable comes back as limit_reached and
+  # keeps this deploy's stale settings.
+  test "a numeric registration key matches the row it already has, even at the cap" do
+    # bob owns one fixture monitor; this fills the rest of the free cap, so an
+    # update is the only thing that can still succeed.
+    @project.sync_monitors(entries: [ entry("123", name: "First") ])
+    @project.sync_monitors(entries: (1..3).map { |i| entry("k#{i}") })
+    assert @user.reload.at_monitor_cap?
+
+    result = @project.sync_monitors(entries: [ entry(123, name: "Renamed") ])
+
+    assert_empty result[:skipped]
+    assert_equal [ "123" ], result[:registered].map(&:registration_key)
+    assert_equal "Renamed", @project.monitors.find_by(registration_key: "123").name
+  end
+
   test "name defaults to the registration key when absent" do
     result = @project.sync_monitors(entries: [
       { registration_key: "cleanup", expected_interval_seconds: 3600, grace_period_seconds: 300 }
@@ -159,22 +180,27 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     # row is plainly there for the rescue to re-find. Blinding every lookup would
     # stage a different bug — and pass while the recovery was broken.
     #
+    # Staged on `where` because that is the lookup the operation makes: it
+    # preloads the whole payload's rows in one query and re-finds only in the
+    # rescue (which reaches the same seam, since find_by is where(...).take).
     # Keyed on the registration key rather than on call order, and backed by the
     # count assertion below, because a blind FIRST-CALL would be spent by any
-    # other find_by the operation happens to make first — after which the sync's
+    # other lookup the operation happens to make first — after which the sync's
     # own lookup finds the row, takes the update path, and every assertion here
     # still passes with the RecordNotUnique recovery deleted outright.
-    lookup = @project.monitors.method(:find_by)
+    lookup = @project.monitors.method(:where)
     racey_lookups = 0
     stale_read = lambda do |*args, **kwargs|
       conditions = kwargs.presence || args.first
-      racing = conditions.is_a?(Hash) && conditions.symbolize_keys[:registration_key] == "racey"
-      next lookup.call(*args, **kwargs) unless racing
+      racing = conditions.is_a?(Hash) &&
+        Array(conditions.symbolize_keys[:registration_key]).include?("racey")
+      relation = lookup.call(*args, **kwargs)
+      next relation unless racing
 
-      (racey_lookups += 1) == 1 ? nil : lookup.call(*args, **kwargs)
+      (racey_lookups += 1) == 1 ? relation.where.not(registration_key: "racey") : relation
     end
 
-    result = @project.monitors.stub(:find_by, stale_read) do
+    result = @project.monitors.stub(:where, stale_read) do
       @project.sync_monitors(entries: [ entry("racey", name: "Updated", interval: 7200) ])
     end
 

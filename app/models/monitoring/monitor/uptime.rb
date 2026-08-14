@@ -154,8 +154,14 @@ module Monitoring
         end
 
         # Today's measurement so far, as an UNSAVED UptimeDayStat — the current day
-        # has no persisted row until tonight's rollup. Paused/suspended/pending →
-        # 0/0, never a phantom green `up`. Down seconds come from ANY incident
+        # has no persisted row until tonight's rollup. Anything not monitored —
+        # pending, paused, suspended, retired — is 0/0, never a phantom green `up`.
+        #
+        # Derived from monitored? rather than listing those four, which is the same
+        # test UptimeRollup#measured_seconds already applies to a completed day, so
+        # the live day and the rolled-up one cannot disagree — and a status added
+        # to STATUSES later cannot silently start scoring 100% up here because
+        # nobody remembered this line. Down seconds come from ANY incident
         # overlapping today, open OR already resolved — a same-day down-then-recovery
         # must still count.
         #
@@ -168,7 +174,7 @@ module Monitoring
         def live_today_stat
           now = Time.current
 
-          return UptimeDayStat.new(up_seconds: 0, down_seconds: 0) if paused? || suspended? || pending?
+          return UptimeDayStat.new(up_seconds: 0, down_seconds: 0) unless monitored?
 
           window_start = [ created_at, first_ping_at, Date.current.to_time(:utc) ].compact.max
           return UptimeDayStat.new(up_seconds: 0, down_seconds: 0) if window_start >= now

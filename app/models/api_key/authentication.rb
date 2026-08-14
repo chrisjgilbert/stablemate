@@ -5,15 +5,18 @@ class ApiKey
   # indexed equality on the digest — the comparison happens inside Postgres on the
   # hashed value, never on the secret, and that is where the real protection lives.
   # The extra secure_compare is belt-and-braces only.
+  #
+  # `digest` and the coarsened last_used_at write come from HashedToken, shared
+  # with PingKey. The LOOKUP is deliberately not shared — see that module.
   module Authentication
     extend ActiveSupport::Concern
 
-    class_methods do
-      def digest(raw_token)
-        Digest::SHA256.hexdigest(raw_token.to_s)
-      end
+    included do
+      include HashedToken
+    end
 
-      # Touches last_used_at on a match so the UI can show recency. Opaque nil on
+    class_methods do
+      # Records use on a match so the UI can show recency. Opaque nil on
       # any miss (no distinction between unknown/blank — the caller maps that to an
       # opaque 401).
       def authenticating(raw_token)
@@ -24,7 +27,7 @@ class ApiKey
         return nil unless api_key
         return nil unless ActiveSupport::SecurityUtils.secure_compare(api_key.token_digest, presented)
 
-        api_key.touch(:last_used_at)
+        api_key.record_use!
         api_key
       end
     end

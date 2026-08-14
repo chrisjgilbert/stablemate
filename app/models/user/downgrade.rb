@@ -44,7 +44,10 @@ class User
     # below — never hold a lock across a network round trip.
     def resolve_choice!(keep_ids: [])
       keep_ids = Array(keep_ids).map(&:to_i)
-      keep = @user.monitors.where(id: keep_ids)
+      # not_retired mirrors the picker: a retired monitor is never offered as a
+      # keeper, so an id naming one fails the count check rather than silently
+      # spending a slot on a monitor this path cannot revive.
+      keep = @user.monitors.not_retired.where(id: keep_ids)
       return Result.new(false, :must_choose) unless keep.count == limit
 
       keep = keep.ids

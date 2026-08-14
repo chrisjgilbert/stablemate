@@ -158,6 +158,28 @@ class Billing::DowngradesControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # A retired monitor is not a keeper a pick can revive — only a sync that sees
+  # its task again does (v1-scope §6.1) — so the involuntary picker's "ALL
+  # monitors" must not offer one, and a forged id naming one must not be accepted.
+  test "the involuntary picker never offers a retired monitor as a keeper" do
+    with_billing_enabled do
+      monitors = build_monitors(FREE + 2)
+      @user.sync_plan_from_subscription!
+      assert @user.reload.must_choose_downgrade?
+      retired = monitors.last
+      retired.retire!
+      sign_in @user
+
+      get new_billing_downgrade_path
+      assert_select "input[type=checkbox][name='keep_ids[]']", count: FREE + 1
+      assert_select "input[type=checkbox][value=?]", retired.id.to_s, false
+
+      post billing_downgrade_path, params: { keep_ids: monitors.last(FREE).map(&:id) }
+      assert_response :unprocessable_entity
+      assert_equal "retired", retired.reload.status
+    end
+  end
+
   test "resolving the involuntary lock re-picks without any Stripe call" do
     with_billing_enabled do
       monitors = build_monitors(FREE + 2)

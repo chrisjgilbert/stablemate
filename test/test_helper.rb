@@ -36,7 +36,8 @@ module ActiveSupport
     # The rate-limit stores persist across tests within a worker; clear them so
     # ordinary per-test requests never accumulate into a spurious throttle.
     setup do
-      [ PingsController, RegistrationsController, Api::V1::BaseController, AccountCredentials ].each do |limiter|
+      [ PingsController, RegistrationsController, Api::V1::BaseController, AccountCredentials,
+        PingKeyAuthentication ].each do |limiter|
         limiter::RATE_LIMIT_STORE.clear
       end
     end

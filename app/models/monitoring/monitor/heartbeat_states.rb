@@ -7,10 +7,20 @@ module Monitoring
     # `suspended` is a plan-downgrade deactivation, distinct from user-initiated
     # `paused`: not monitored, sends no alerts, and — unlike `paused` — does NOT
     # count toward the cap.
+    #
+    # `retired` is the prune state (v1-scope §6.1): the task left the repo's
+    # config, so the sync retired the monitor. Like `suspended` it is retained,
+    # unmonitored and uncounted; unlike it, the thing that brings it back is the
+    # task reappearing in a sync, not a plan change.
     module HeartbeatStates
       extend ActiveSupport::Concern
 
-      STATUSES = %w[pending up down paused suspended].freeze
+      STATUSES = %w[pending up down paused suspended retired].freeze
+
+      # The states in which a monitor is deliberately not watched. A ping of
+      # either polarity must never transition or alert one of these, and revive
+      # restores rather than overrides them.
+      NOT_MONITORED_STATUSES = %w[paused suspended retired].freeze
 
       included do
         validates :status, inclusion: { in: STATUSES }
@@ -29,13 +39,20 @@ module Monitoring
         }
 
         # `paused` deliberately still counts (locked decision #8), `suspended`
-        # deliberately does not (PRD §3.3).
-        scope :counting_toward_cap, -> { where.not(status: "suspended") }
+        # deliberately does not (PRD §3.3), and neither does `retired` — freeing
+        # the slot is half the point of retiring rather than deleting (§6.1).
+        scope :counting_toward_cap, -> { where.not(status: %w[suspended retired]) }
 
-        # Its complement — the plan-suspended monitors, which the downgrade and
-        # re-upgrade paths restore from. Declared next to counting_toward_cap so the
-        # two halves of the cap rule are read and changed together.
+        # The two complements — the plan-suspended monitors, which the downgrade
+        # and re-upgrade paths restore from, and the pruned ones, which only a sync
+        # revives. Declared next to counting_toward_cap so the halves of the cap
+        # rule are read and changed together.
         scope :suspended, -> { where(status: "suspended") }
+        scope :retired, -> { where(status: "retired") }
+
+        # A revive is the only way back from `retired`, so a downgrade picker must
+        # never offer one as a keeper.
+        scope :not_retired, -> { where.not(status: "retired") }
 
         # next_due_at is derived from (last contact + interval), so an interval edit
         # has to re-derive it or the OLD cadence keeps driving detection: loosening
@@ -54,6 +71,7 @@ module Monitoring
       def down?      = status == "down"
       def paused?    = status == "paused"
       def suspended? = status == "suspended"
+      def retired?   = status == "retired"
 
       # Eligible for detection and uptime measurement. A `down` monitor is still
       # monitored (it's mid-outage).

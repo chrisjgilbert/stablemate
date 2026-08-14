@@ -5,10 +5,13 @@ class Project < ApplicationRecord
   belongs_to :user
   has_many :monitors, class_name: "Monitoring::Monitor", dependent: :destroy
   has_many :api_keys, dependent: :destroy
+  # A project may hold several live ping keys at once — that is what makes
+  # rotation possible without a gap (v1-scope §4).
+  has_many :ping_keys, dependent: :destroy
 
   validates :name, presence: true, uniqueness: { scope: :user_id }
 
-  def sync_monitors(app: nil, entries:)
-    MonitorSync.new(self).sync_monitors(app:, entries:)
+  def sync_monitors(app: nil, entries:, declared_keys: nil, prune: false)
+    MonitorSync.new(self).sync_monitors(app:, entries:, declared_keys:, prune:)
   end
 end

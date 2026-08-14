@@ -62,8 +62,14 @@ module Billing
       # In the involuntary lock, list ALL monitors (incl. the auto-suspended ones)
       # so the user can re-pick which N to keep; a voluntary over-cap downgrade only
       # chooses among the currently-active ones.
+      #
+      # `not_retired` on the involuntary branch, because "ALL monitors" there means
+      # all monitors a pick can bring back — and nothing here revives a retired
+      # one; only a sync that sees its task again does (v1-scope §6.1). Offering
+      # one as a keeper would spend a slot on a monitor that stays dark.
+      # counting_toward_cap already excludes them on the other branch.
       def picker_monitors
-        scope = current_user.must_choose_downgrade? ? current_user.monitors : current_user.monitors.counting_toward_cap
+        scope = current_user.must_choose_downgrade? ? current_user.monitors.not_retired : current_user.monitors.counting_toward_cap
         # Preload :project — the picker groups by it, so without this the group_by
         # would fire one SELECT per monitor.
         scope.includes(:project).order(:created_at).to_a
