@@ -20,5 +20,17 @@ module Stablemate
       rescue StandardError
         nil
       end
+
+      # For the states a deploy has to act on — a wrong ping key, an unregistered
+      # task, a refusal that will not fix itself (§6.5), a boot with no key at
+      # all. There is deliberately no Stablemate.log_error: Stablemate's singleton
+      # does not include this module, so such a call would be a NoMethodError
+      # swallowed by the boot rescue — which is why Boot is an object that
+      # includes Logging rather than a block calling Stablemate.log_error.
+      def log_error(message)
+        (config.logger || Stablemate.logger).error("[stablemate] #{message}")
+      rescue StandardError
+        nil
+      end
   end
 end

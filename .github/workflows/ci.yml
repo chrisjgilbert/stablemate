@@ -115,12 +115,59 @@ jobs:
           bin/ci
         timeout-minutes: 15
 
+  # The companion gem's floor is Ruby 3.1 (gem/stablemate.gemspec's
+  # required_ruby_version), and the `ci` job above runs on .ruby-version — 3.3.6
+  # — so nothing was ever exercising that floor. This is not a nice-to-have:
+  # `Set` is only autoloaded from 3.2, the boot path builds one, and the boot
+  # rescue converts the resulting NoMethodError into "boot wiring skipped" — the
+  # listener never attaches and EVERY check-in is silently disabled. That is the
+  # incident this whole redesign exists to fix, reproduced on the gem's own
+  # oldest supported interpreter, differing only in that this time there is a
+  # log line. v1-scope §12: "this must run on 3.1 in CI, not be argued about."
+  #
+  # The gem suite only — the app needs Rails 8, which is 3.2+. The gem runs on
+  # the plain load path against open gemspec constraints, so it needs no
+  # Gemfile.lock; the deps are installed directly.
+  gem-ruby-floor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Ruby 3.1 (the gemspec's floor)
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.1"
+
+      # The exact set the suite needs, established by running it on 3.1.6 rather
+      # than guessed: active_job is required by the subscriber's tests and is not
+      # pulled in by activesupport.
+      - name: Install the gem's test dependencies
+        working-directory: gem
+        run: gem install minitest activesupport activejob fugit --no-document
+
+      # Fails CLOSED two ways, exactly as bin/ci does: a missing dependency
+      # raises on the require, and an empty glob aborts rather than exiting 0
+      # having run nothing.
+      - name: Run the gem suite on Ruby 3.1
+        working-directory: gem
+        run: |
+          ruby -Ilib -Itest -e '
+            files = Dir["test/**/*_test.rb"]
+            abort "no gem test files matched test/**/*_test.rb" if files.empty?
+            files.each { |f| require File.expand_path(f) }
+          '
+
   # Auto-deploy to the Hetzner VM with Kamal once CI is green — the same
   # bin/kamal deploy, config/deploy.yml, and .kamal/secrets used by hand, only
   # with the values coming from repo Secrets/Variables. See
   # docs/deploy-hetzner-cloudflare.md → §8.
   deploy:
-    needs: ci
+    # Both gates, or a red Ruby-3.1 run would still ship: the gem suite failing
+    # on its floor interpreter means every check-in is disabled on that host.
+    needs: [ ci, gem-ruby-floor ]
     # Ship ONLY on a real push to main. github.ref and github.event_name are set
     # by GitHub and can't be forged: a pull request (fork or not) has
     # event_name == 'pull_request' and ref == 'refs/pull/N/merge', never

@@ -16,10 +16,20 @@ class GemspecTest < Minitest::Test
   def test_packages_every_lib_source_file
     %w[
       lib/stablemate.rb
+      lib/stablemate/boot.rb
       lib/stablemate/logging.rb
       lib/stablemate/railtie.rb
       lib/stablemate/registrars/solid_queue_recurring.rb
       lib/stablemate/execution/subscriber.rb
+      lib/stablemate/commands/sync.rb
+      lib/stablemate/commands/sync/report.rb
+      lib/stablemate/commands/task_lines.rb
+      lib/stablemate/commands/install.rb
+      lib/stablemate/commands/install/initializer.rb
+      lib/stablemate/commands/install/env_file.rb
+      lib/stablemate/commands/install/kamal_hook.rb
+      lib/stablemate/commands/install/preview.rb
+      lib/stablemate/commands/install/verification.rb
     ].each { |f| assert_includes gemspec.files, f }
   end
 end

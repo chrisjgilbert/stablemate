@@ -355,10 +355,13 @@ class Project
           @skipped << skip(entry, "invalid")
         end
       rescue ActiveRecord::RecordNotUnique
-        # Concurrent boot: multiple Puma workers / containers run the railtie's
-        # after_initialize sync at once with the SAME new keys. Treat the loser as
-        # the idempotent upsert it is — re-find the now-existing row and update it,
-        # so it lands in `registered` and the request never 500s.
+        # Concurrent sync: `kamal app exec` fans out across hosts in parallel
+        # (§6.2), so several containers post the SAME new keys at once. (It used
+        # to be the railtie's after_initialize sync racing across Puma workers;
+        # boot registers nothing now — §3.1 — but the race is live for the same
+        # reason.) Treat the loser as the idempotent upsert it is — re-find the
+        # now-existing row and update it, so it lands in `registered` and the
+        # request never 500s.
         existing = @project.monitors.find_by(registration_key: entry.registration_key)
         if existing
           persist_update(existing, entry)

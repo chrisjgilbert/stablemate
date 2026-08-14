@@ -170,7 +170,10 @@ Response:
   ],
   "skipped": [
     { "registration_key": "nightly_report", "reason": "limit_reached" }
-  ]
+  ],
+  "orphaned": [ "old_report" ],
+  "retired": [],
+  "ping_key_last4": [ "ab12", "cd34" ]
 }
 ```
 
@@ -186,6 +189,14 @@ Response:
 Treat the vocabulary as open: log an unrecognised `reason` rather than matching
 exhaustively. An entry with no `registration_key` is ignored entirely — there is
 nothing to report it under — so always send one.
+
+Three more informational keys ride along, all safe to ignore:
+
+| Key | Meaning |
+|---|---|
+| `orphaned` | `registration_key`s this project holds that matched no entry in *this app's* payload — a renamed or removed task. Reported only; nothing is deleted. |
+| `retired` | The subset actually retired, on a request carrying `prune: true` **and** a `declared_keys` list. Retiring is reversible: state and history are kept, and the next sync that includes the key revives the monitor. A prune request without `declared_keys` retires nothing. |
+| `ping_key_last4` | The last four characters of every **live** ping key in this project. A client holding both credentials can compare its configured ping key against this set and warn when the two keys name different projects — an array, because rotation keeps two keys live at once. Empty means the project has no ping key at all. |
 
 ### Rotate a ping token
 

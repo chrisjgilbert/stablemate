@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
 require "rails/railtie"
+require_relative "boot"
 
 module Stablemate
   # Wires the gem into a host Rails app with zero per-job code. Boot must never be
-  # blocked or crashed by Stablemate: Registration#sync! and the subscriber both
-  # swallow their own errors.
+  # blocked or crashed by Stablemate: Boot#wire! and the subscriber both swallow
+  # their own errors.
   class Railtie < ::Rails::Railtie
     # Install the Base-level after_discard hook EARLY, so it lands in
     # ActiveJob::Base.after_discard_procs BEFORE any of the host's job classes are
@@ -28,33 +29,10 @@ module Stablemate
       end
     end
 
-    # Gated on api_key presence AND the environment allow-list — see the rationale
-    # on Configuration#environments.
-    config.after_initialize do
-      next unless Stablemate.config.api_key
-      next unless Stablemate.config.enabled_in?
-
-      registrar = Registrars::SolidQueueRecurring.new
-      registration = Registration.new(registrar:)
-
-      # The same callable backs the stale-ping resync below, so a rotated token
-      # refreshes URLs via whichever path the host opted into — never upserting when
-      # registration is off.
-      load_ping_urls = -> {
-        Stablemate.config.register_on_boot ? registration.sync! : registration.refresh_ping_urls!
-      }
-      load_ping_urls.call
-
-      # subscribe_discards! ARMS terminal-failure reporting by assigning
-      # Stablemate.execution_subscriber, the delegation target of the Base-level
-      # hook installed by the initializer above. Guarded inside, so older hosts
-      # silently keep missed-beat-only detection.
-      Execution::Subscriber.new(
-        class_to_keys: registrar.class_to_keys,
-        resync: load_ping_urls
-      ).subscribe!.subscribe_discards!
-    rescue StandardError => e
-      Stablemate.logger.warn("[stablemate] boot wiring skipped: #{e.class}: #{e.message}")
-    end
+    # Boot attaches the check-in listener and does nothing else (§6.5): no
+    # registration, no fetch, no network. Every gate, every log line and the
+    # rescue that keeps a broken recurring.yml from taking the host's boot down
+    # live in Stablemate::Boot, which is testable without booting a Rails app.
+    config.after_initialize { Stablemate::Boot.new.wire! }
   end
 end

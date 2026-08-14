@@ -15,6 +15,7 @@ module Stablemate
     def initialize
       @lock = Mutex.new
       @warnings = []
+      @errors = []
       @arrivals = Queue.new
     end
 
@@ -23,8 +24,18 @@ module Stablemate
       @arrivals << message
     end
 
+    # §6.5 routes the four check-in states' copy through error level, so the
+    # double has to answer #error as well as #warn. Deliberately NOT pushed onto
+    # @arrivals: #next_warning is a blocking read for a specific warning, and an
+    # error line arriving first would satisfy the pop and fail the assertion.
+    def error(message)
+      @lock.synchronize { @errors << message }
+    end
+
     # A snapshot, safe to read while background threads are still logging.
     def warnings = @lock.synchronize { @warnings.dup }
+
+    def errors = @lock.synchronize { @errors.dup }
 
     # Blocks until the next warning lands, so a cross-thread test is
     # deterministic rather than timed.
@@ -41,69 +52,63 @@ module Stablemate
     def initialize(error) = @error = error
 
     def warn(_message) = raise(@error)
+
+    def error(_message) = raise(@error)
   end
 
-  # A fake client capturing sync payloads and pings — the gem's tests must make
-  # NO real network calls (CLAUDE.md environment rule).
+  # A fake client capturing sync payloads and check-ins — the gem's tests must
+  # make NO real network calls (CLAUDE.md environment rule).
   class FakeClient
-    attr_reader :synced, :pinged, :listed, :reported, :ping_threads
+    attr_reader :synced, :pinged, :reported, :ping_threads
 
     # sync_response: the parsed hash sync_monitors should return.
-    # list_response: the parsed hash list_monitors should return (register_on_boot
-    #   = false path).
     # ping_error: raise this from #ping / #report_failure to exercise the
     #   swallow-everything path.
-    def initialize(sync_response: { "monitors" => [], "skipped" => [] }, list_response: { "monitors" => [] },
-                   ping_error: nil, ping_status: :ok)
+    def initialize(sync_response: { "monitors" => [], "skipped" => [] }, ping_error: nil)
       @sync_response = sync_response
-      @list_response = list_response
       @ping_error = ping_error
-      @ping_status = ping_status
       @synced = []
-      @listed = 0
       @pinged = []
       @reported = []
-      # Which thread each ping arrived on — the default dispatcher is supposed to
-      # get them off the caller's thread, and that is only observable from in here.
-      # A Queue rather than an Array so a test can block until a ping lands
-      # instead of polling for it. Pushed LAST in #ping (see there).
+      # Which thread each check-in arrived on — the default dispatcher is supposed
+      # to get them off the caller's thread, and that is only observable from in
+      # here. A Queue rather than an Array so a test can block until a check-in
+      # lands instead of polling for it. Pushed LAST in #ping (see there).
       @ping_threads = Queue.new
-      # pings arrive from the subscriber's background threads, so the sink must be
-      # thread-safe for the concurrency test.
+      # check-ins arrive from the subscriber's background threads, so the sink must
+      # be thread-safe for the concurrency test.
       @lock = Mutex.new
     end
 
-    def sync_monitors(app:, monitors:)
-      @synced << { app:, monitors: }
+    # declared_keys / prune ride along only on a PRUNE=1 run (§6.1), so they are
+    # recorded rather than defaulted away: "a non-prune run sends neither" is an
+    # assertion the suite has to be able to make.
+    def sync_monitors(app:, monitors:, declared_keys: nil, prune: false)
+      @synced << { app:, monitors:, declared_keys:, prune: }
       @sync_response
     end
 
-    def list_monitors
-      @listed += 1
-      @list_response
-    end
-
-    # Returns the configured ping status (:ok / :stale / :error), matching the real
-    # Client's contract so the subscriber's re-sync path can be exercised.
-    def ping(ping_url)
+    # Takes the TASK KEY, like the real Client — there is no URL to resolve any
+    # more, which is why this double records keys.
+    def ping(registration_key)
       raise @ping_error if @ping_error
 
-      @lock.synchronize { @pinged << ping_url }
+      @lock.synchronize { @pinged << registration_key }
       # LAST, and after the @pinged append: a test that blocks on ping_threads.pop
       # is released by this push, so anything it then asserts about @pinged must
       # already be recorded. Pushing first leaves a window in which the popping
-      # thread runs before the background thread appends the URL.
+      # thread runs before the background thread appends the key.
       @ping_threads << Thread.current
-      @ping_status
+      :ok
     end
 
-    # Mirrors the real Client#report_failure contract (same statuses, same
-    # error-injection knob) and records the url + message for assertions.
-    def report_failure(ping_url, message:)
+    # Mirrors the real Client#report_failure contract (same argument, same
+    # error-injection knob) and records the key + message for assertions.
+    def report_failure(registration_key, message:)
       raise @ping_error if @ping_error
 
-      @lock.synchronize { @reported << { url: ping_url, message: message } }
-      @ping_status
+      @lock.synchronize { @reported << { key: registration_key, message: message } }
+      :ok
     end
   end
 end

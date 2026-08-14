@@ -21,10 +21,52 @@ class ConfigurationTest < StablemateTest
     refute config.enabled_in?("development")
   end
 
-  # Boot registration is ON by default — the gem's headline behaviour is
-  # zero-config auto-registration from recurring.yml.
-  def test_register_on_boot_defaults_true
-    assert Stablemate::Configuration.new.register_on_boot
+  # §11 — register_on_boot is a DEPRECATED NO-OP, and the accessor must survive.
+  # Hosts have `c.register_on_boot = false` in a committed initializer; deleting
+  # the accessor raises NoMethodError inside that initializer and the host app
+  # does not boot. So: assigning it is accepted, logged, and otherwise ignored.
+  # (A test asserting the old default stays green while proving nothing.)
+  def test_register_on_boot_is_a_deprecated_no_op_that_still_accepts_assignment
+    logger = Stablemate::RecordingLogger.new
+    config = Stablemate::Configuration.new
+    config.logger = logger
+
+    config.register_on_boot = false
+
+    assert_equal 1, logger.warnings.size
+    assert_match(/register_on_boot/, logger.warnings.first)
+    # Names the replacement, or the reader has no idea what to do instead.
+    assert_match(/stablemate:sync/, logger.warnings.first)
+  end
+
+  # Once per config, not once per assignment — a deprecation that prints on every
+  # line of a re-entrant initializer is noise the reader learns to skip.
+  def test_register_on_boot_is_logged_once
+    logger = Stablemate::RecordingLogger.new
+    config = Stablemate::Configuration.new
+    config.logger = logger
+
+    3.times { config.register_on_boot = false }
+
+    assert_equal 1, logger.warnings.size
+  end
+
+  # The reader is public API too (a host may branch on it), so it must not raise.
+  def test_register_on_boot_reads_back_without_raising
+    config = Stablemate::Configuration.new
+    config.logger = Stablemate::RecordingLogger.new
+
+    config.register_on_boot = false
+
+    refute config.register_on_boot
+  end
+
+  # A broken sink must not take the host's initializer down with it.
+  def test_register_on_boot_survives_a_raising_logger
+    config = Stablemate::Configuration.new
+    config.logger = Stablemate::RaisingLogger.new(IOError.new("closed"))
+
+    config.register_on_boot = false
   end
 
   # Terminal-failure reporting is ON by default, symmetric with ping_on_success.
@@ -90,6 +132,73 @@ class ConfigurationTest < StablemateTest
     config = Stablemate::Configuration.new
     config.environment = "staging"
     assert_equal "staging", config.environment
+  end
+
+  # §4 — two credentials. The API key registers; the ping key checks in. Both read
+  # from the environment under the names install writes, so one name is used
+  # everywhere (arguments, initializer skeleton, .env append).
+  def test_both_credentials_default_from_the_environment
+    with_env("STABLEMATE_API_KEY" => "sm_live_from_env", "STABLEMATE_PING_KEY" => "sm_ping_from_env") do
+      config = Stablemate::Configuration.new
+
+      assert_equal "sm_live_from_env", config.api_key
+      assert_equal "sm_ping_from_env", config.ping_key
+    end
+  end
+
+  def test_credentials_are_nil_when_unset
+    with_env("STABLEMATE_API_KEY" => nil, "STABLEMATE_PING_KEY" => nil) do
+      config = Stablemate::Configuration.new
+
+      assert_nil config.api_key
+      assert_nil config.ping_key
+    end
+  end
+
+  # A set-but-empty var is truthy in Ruby. Left as "", every check-in would carry
+  # `Authorization: Bearer ` for a permanent 401 with nothing logged — the same
+  # trap default_environment already guards for RAILS_ENV.
+  def test_a_blank_credential_env_var_counts_as_unset
+    with_env("STABLEMATE_API_KEY" => "", "STABLEMATE_PING_KEY" => "") do
+      config = Stablemate::Configuration.new
+
+      assert_nil config.api_key
+      assert_nil config.ping_key
+    end
+  end
+
+  def test_credentials_can_be_set_explicitly
+    config = Stablemate::Configuration.new
+    config.api_key = "sm_live_explicit"
+    config.ping_key = "sm_ping_explicit"
+
+    assert_equal "sm_live_explicit", config.api_key
+    assert_equal "sm_ping_explicit", config.ping_key
+  end
+
+  # §3.1 — non-Rails work is declared in config, so it registers through the same
+  # command. Seconds are canonical: 1.day needs ActiveSupport, and the gem
+  # supports a plain-Ruby host.
+  def test_monitors_defaults_to_empty_and_accepts_declarations
+    config = Stablemate::Configuration.new
+
+    assert_empty config.monitors
+
+    config.monitors = { "pg_backup" => { interval: 86_400, grace: 7_200 } }
+
+    assert_equal({ "pg_backup" => { interval: 86_400, grace: 7_200 } }, config.monitors)
+  end
+
+  # §3.1 — the only remedy for a derived interval that is correct but useless (a
+  # weekday-only cron derives 72 hours from the Friday→Monday gap).
+  def test_overrides_defaults_to_empty_and_accepts_declarations
+    config = Stablemate::Configuration.new
+
+    assert_empty config.overrides
+
+    config.overrides = { "weekday_report" => { interval: 93_600 } }
+
+    assert_equal({ "weekday_report" => { interval: 93_600 } }, config.overrides)
   end
 
   def test_enabled_in_defaults_to_the_resolved_environment
