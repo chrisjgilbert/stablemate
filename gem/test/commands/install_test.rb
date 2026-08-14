@@ -257,17 +257,30 @@ class InstallCommandTest < StablemateTest
     end
   end
 
-  # A failed verification must not persist the keys it just proved wrong.
-  def test_a_failed_verification_writes_no_keys_and_no_hook
+  # A failed verification writes no HOOK — that would wire a deploy to
+  # credentials the server just refused — but it DOES persist the keys.
+  #
+  # This assertion was inverted deliberately. Both keys are shown exactly once,
+  # by a panel that can never re-display them, and the likeliest verification
+  # failure is a briefly unreachable endpoint or a wrong c.endpoint — neither of
+  # which says anything about the keys. Discarding them there is the one outcome
+  # that is expensive to undo: the user has to regenerate the pair, invalidating
+  # the ones they already pasted. Keeping a key that later proves wrong costs
+  # nothing; the run still exits non-zero and names which key failed.
+  def test_a_failed_verification_keeps_the_shown_once_keys_but_writes_no_hook
     in_app do |root|
+      write_recurring(root)
       File.write(File.join(root, ".env"), "EXISTING=1\n")
       FileUtils.mkdir_p(File.join(root, ".kamal"))
 
       run = run_install(root:, answers: { ping: :rejected })
 
       refute run.ok
-      assert_equal "EXISTING=1\n", File.read(File.join(root, ".env"))
-      refute File.exist?(hook_path(root))
+      env = File.read(File.join(root, ".env"))
+      assert_includes env, "EXISTING=1"
+      assert_includes env, "STABLEMATE_PING_KEY=#{PING_KEY}",
+                      "a shown-once key must survive a failure that is not about the key"
+      refute File.exist?(hook_path(root)), "no hook for credentials the server refused"
     end
   end
 
@@ -394,6 +407,7 @@ class InstallCommandTest < StablemateTest
   # guaranteed 11pm debugging session.
   def test_it_writes_the_post_deploy_hook_when_kamal_is_present
     in_app do |root|
+      write_recurring(root) # something to register, or the hook is a landmine
       FileUtils.mkdir_p(File.join(root, ".kamal"))
 
       run = run_install(root:)
@@ -410,6 +424,7 @@ class InstallCommandTest < StablemateTest
 
   def test_it_refuses_to_clobber_an_existing_hook_and_says_what_to_add
     in_app do |root|
+      write_recurring(root)
       FileUtils.mkdir_p(File.join(root, ".kamal", "hooks"))
       File.write(hook_path(root), "#!/bin/sh\necho mine\n")
 

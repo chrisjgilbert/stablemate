@@ -68,9 +68,19 @@ module Stablemate
 
         write_initializer
         preview!
+
+        # Keys are persisted BEFORE the verification gate, and the ordering is
+        # the whole point. Both keys are shown exactly once — the setup panel
+        # renders them and nothing can ever re-display them — so a run that
+        # exits without writing them costs the user the pair. The most likely
+        # verification failure is the endpoint being briefly unreachable or
+        # c.endpoint being wrong, which says nothing about the keys themselves;
+        # discarding them there is the one outcome that is expensive to undo,
+        # and the failure message already promised nothing depending on the
+        # server had been written.
+        persist_keys
         return failed(*verification.failure_messages) unless verify!
 
-        persist_keys
         install_deploy_hook
         print_check_in_lines
         print_next_steps
@@ -209,7 +219,17 @@ module Stablemate
 
         # --- 5. The deploy hook, or the line for your own CI (§6.6) ---------
 
+        # Nothing declared yet means the hook would be a landmine, not a
+        # convenience: §6.1 requires `stablemate:sync` to exit NON-ZERO when it
+        # registers nothing — that exit status is the only evidence a deploy has
+        # that anything is monitored — so a hook written for an app with no
+        # recurring jobs and no c.monitors fails the very next deploy, and every
+        # one after it, until the user deletes a file they never asked for. The
+        # two rules are both right and they collide only here. Say what to do
+        # instead; install is re-runnable, which is what makes that a real
+        # instruction rather than a brush-off.
         def install_deploy_hook
+          return say_nothing_to_register unless anything_declared?
           return say_no_kamal unless hook.kamal?
 
           if hook.exist?
@@ -218,6 +238,19 @@ module Stablemate
             hook.write!
             say("writing #{hook.path} (kamal detected) — registration runs there, on every deploy")
           end
+        end
+
+        # Registerable tasks OR c.monitors declarations — the same union sync
+        # sends, so this predicate and sync's register-nothing exit agree by
+        # construction rather than by coincidence.
+        def anything_declared?
+          registrar.tuples.any? || config.monitors.any?
+        end
+
+        def say_nothing_to_register
+          say("no deploy hook written yet: there is nothing to register, and the sync command " \
+              "deliberately fails a deploy that registers nothing. Declare a recurring job (or a " \
+              "c.monitors entry), then re-run this command to wire the hook up.")
         end
 
         def say_no_kamal

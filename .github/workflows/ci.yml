@@ -132,7 +132,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -144,9 +144,19 @@ jobs:
       # The exact set the suite needs, established by running it on 3.1.6 rather
       # than guessed: active_job is required by the subscriber's tests and is not
       # pulled in by activesupport.
+      #
+      # Majors pinned, because `deploy` gates on this job: unpinned, the day
+      # Active Support raises its own required_ruby_version above 3.1 this job
+      # fails to install anything and turns the deploy red for a reason that has
+      # nothing to do with the gem. The point of the job is to make a
+      # reproducible statement about the gemspec's floor, which it cannot do if
+      # what it tests against drifts daily. The 7.x line is the gemspec's own
+      # dev-dependency floor (activesupport >= 7.0).
       - name: Install the gem's test dependencies
         working-directory: gem
-        run: gem install minitest activesupport activejob fugit --no-document
+        run: |
+          gem install --no-document \
+            minitest:~>5.25 activesupport:~>7.2 activejob:~>7.2 fugit:~>1.11
 
       # Fails CLOSED two ways, exactly as bin/ci does: a missing dependency
       # raises on the require, and an empty glob aborts rather than exiting 0
