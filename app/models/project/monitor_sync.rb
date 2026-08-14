@@ -113,6 +113,11 @@ class Project
         end
       end
 
+      # Once per run, not once per monitor: a 200-task app would otherwise queue
+      # 200 renders of one panel. Only when something actually registered —
+      # a run that changed nothing has nothing to tell a watching page.
+      @project.broadcast_setup_progress if @registered.any?
+
       { registered: @registered, skipped: @skipped, conflicts: @conflicts,
         orphaned: @orphaned, retired: @retired }
     end

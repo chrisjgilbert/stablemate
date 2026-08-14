@@ -1,0 +1,79 @@
+<%#
+  The empty-project state (v1-scope §7). There is no browser-only path to seeing
+  this product work — the next step after signing up is genuinely "add the gem,
+  deploy, run the command, wait for a job to fire" — so this panel's job is to
+  make that wait legible rather than to shorten it dishonestly.
+
+  Locals: project, setup_pair (the shown-once Result, only on the render that
+  follows generation), api_keys, ping_keys.
+%>
+<% pair = local_assigns[:setup_pair] %>
+<% has_keys = api_keys.any? || ping_keys.any? %>
+
+<section class="rounded-xl border border-border bg-surface p-8 shadow-sm" data-testid="setup-panel">
+  <h2 class="font-display text-base font-bold tracking-tight">Connect this app</h2>
+  <p class="text-[13px] text-muted mt-1 mb-5">
+    Two commands and a deploy. Your jobs check in from your own app — nothing to add by hand here.
+  </p>
+
+  <ol class="space-y-5">
+    <li>
+      <p class="text-[13px] font-semibold text-ink mb-1.5">1. Add the gem</p>
+      <%= render "shared/copyable", value: "bundle add stablemate", label: "Add the gem" %>
+    </li>
+
+    <li>
+      <p class="text-[13px] font-semibold text-ink mb-1.5">2. Run the setup command</p>
+
+      <% if pair %>
+        <%# THE shown-once moment (§4). Only SHA-256 digests are stored, so this
+            render is the only time either key is readable — which is why the
+            warning is loud rather than polite. %>
+        <div class="rounded-lg border border-pending-dot bg-pending-bg px-4 py-2.5 text-[13px] text-pending-text mb-2"
+             data-testid="setup-command-warning">
+          Copy this now — both keys are shown once and cannot be shown again.
+        </div>
+        <%= render "shared/copyable", value: setup_command(pair), dark: true, label: "Setup command" %>
+
+        <% if pair.kept_live? %>
+          <%# §4's rotation deliberately keeps more than one key live, so a key
+              already in use is never revoked from under a running deploy. %>
+          <p class="text-[12px] text-muted mt-2" data-testid="setup-keys-kept">
+            <%= pluralize(pair.kept, "key") %> already in use <%= pair.kept == 1 ? "was" : "were" %>
+            left working. Revoke <%= pair.kept == 1 ? "it" : "them" %> below once this command has run.
+          </p>
+        <% elsif pair.superseded.positive? %>
+          <p class="text-[12px] text-muted mt-2" data-testid="setup-keys-superseded">
+            The previous unused <%= pluralize(pair.superseded, "key") %> <%= pair.superseded == 1 ? "was" : "were" %> revoked.
+          </p>
+        <% end %>
+
+      <% elsif has_keys %>
+        <%# A reload. Nothing can re-display a hashed key, so the command is shown
+            masked and the only way forward is a fresh pair. %>
+        <%= render "shared/copyable", value: masked_setup_command(api_keys, ping_keys),
+              dark: true, label: "Setup command" %>
+        <p class="text-[12px] text-muted mt-2" data-testid="setup-masked-note">
+          Keys are stored hashed, so they can't be shown again. Lost them?
+        </p>
+        <%= button_to "Regenerate setup command", project_setup_command_path(project),
+              class: "mt-2 h-8 px-3 rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
+
+      <% else %>
+        <%= button_to "Generate setup command", project_setup_command_path(project),
+              class: "inline-flex items-center h-9 px-4 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover" %>
+      <% end %>
+    </li>
+
+    <li>
+      <p class="text-[13px] font-semibold text-ink mb-1.5">3. Deploy</p>
+      <p class="text-[13px] text-muted">
+        Registration runs from your deploy hook. The command above writes it and tells you where the keys go.
+        <%= link_to "Read the gem guide →", stablemate_docs_url("integrating"),
+              class: "text-brand font-medium hover:text-brand-hover" %>
+      </p>
+    </li>
+  </ol>
+
+  <%= render "projects/setup_milestones", project: project %>
+</section>

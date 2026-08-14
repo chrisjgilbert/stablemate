@@ -14,16 +14,23 @@
   </div>
 </div>
 
+<%# Subscribed so Project::MonitorSync can flip the milestone ladder the moment a
+    deploy registers monitors — the page a user is watching while the terminal
+    does the work. %>
+<%= turbo_stream_from @project %>
+
 <% if @monitors.any? %>
   <%= render "monitors/list", monitors: @monitors, mini_ticks: @mini_ticks %>
-<% else %>
-  <div class="rounded-xl border border-border bg-surface p-10 text-center shadow-sm" data-testid="project-no-monitors">
-    <p class="text-[14px] font-semibold text-ink">No monitors in this project yet</p>
-    <p class="text-[13px] text-muted mt-1 mb-4">
-      Add one manually, or connect the gem with this project's API key.
-    </p>
-    <%= link_to "Add a monitor", new_monitor_path(monitor: { project_id: @project.id }),
-          class: "inline-flex items-center h-9 px-4 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover" %>
+<% end %>
+
+<%# The setup panel replaces "Add one manually" (v1-scope §7): monitors come
+    from the repo now, so an empty project is not missing a button — it is
+    waiting for a deploy. It stays visible while the project is still waiting on
+    its first check-in, because that is exactly when the user needs the ladder. %>
+<% if @project.awaiting_first_sync? || @project.awaiting_first_check_in? %>
+  <div class="<%= "mt-6" if @monitors.any? %>">
+    <%= render "projects/setup_panel", project: @project, setup_pair: @setup_pair,
+          api_keys: @api_keys, ping_keys: @ping_keys %>
   </div>
 <% end %>
 
