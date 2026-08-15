@@ -28,6 +28,22 @@ class SolidQueueRecurringTest < StablemateTest
     assert_equal 900, sessions[:expected_interval_seconds]
   end
 
+  # §6.3 — every tuple carries the RAW schedule string, verbatim: the gem parses
+  # the cron with Fugit and then throws the expressiveness away, which is why
+  # weekday jobs are inexpressible (§3.1). Sending the string from day one makes
+  # cron-aware detection a server-only upgrade later — no gem release, no wire
+  # cutover. Verbatim, not normalised: "every day at 9am" is what the file says,
+  # and the derived interval is already carried beside it.
+  def test_tuples_carry_the_raw_schedule_string
+    digest = registrar.tuples.find { |t| t[:registration_key] == "daily_digest" }
+
+    assert_equal "every day at 9am", digest[:schedule]
+    assert_equal 86_400, digest[:expected_interval_seconds]
+
+    cron = registrar("recurring_irregular.yml").tuples.first
+    assert_equal "0 9,17 * * *", cron[:schedule]
+  end
+
   # A command:-only task runs as SolidQueue::RecurringJob, so the execution
   # subscriber (keyed by job class name) can never ping it. Registering it would
   # create a monitor that is permanently down — skip it, and log (INFO: command
@@ -163,6 +179,60 @@ class SolidQueueRecurringTest < StablemateTest
     assert_equal %w[morning_report evening_report].sort, map["ReportJob"].sort
   end
 
+  # --- §6.3, the reportable map: class_to_keys INTERSECTED with the keys this
+  # registrar actually registers. With the server-supplied address cache gone,
+  # nothing else stops the subscriber checking in for a task the server was
+  # never told about — every such run would 404 forever. ---
+
+  # class_to_keys is the wider structure: it maps every class-backed task,
+  # including ones tuples skips because their schedule can't be sized.
+  def test_reportable_drops_a_class_whose_schedule_cannot_be_sized
+    r = registrar("recurring_underivable.yml", config: logging_config(StringIO.new))
+
+    assert_equal [ "impossible_date" ], r.class_to_keys["ImpossibleDateJob"]
+    refute_includes r.tuples.map { |t| t[:registration_key] }, "impossible_date"
+
+    assert_equal({ "DailyDigestJob" => [ "daily_digest" ] }, r.reportable_class_to_keys)
+  end
+
+  # A class shared by two tasks keeps the half that registers: dropping the
+  # whole class would silence a job that IS monitored.
+  def test_reportable_keeps_the_registerable_half_of_a_shared_class
+    Tempfile.create([ "half", ".yml" ]) do |f|
+      f.write("morning_report:\n  class: ReportJob\n  schedule: every day at 8am\n" \
+              "impossible_report:\n  class: ReportJob\n  schedule: \"0 0 30 2 *\"\n")
+      f.flush
+      r = Stablemate::Registrars::SolidQueueRecurring.new(
+        recurring_path: f.path, config: logging_config(StringIO.new)
+      )
+
+      assert_equal({ "ReportJob" => [ "morning_report" ] }, r.reportable_class_to_keys)
+    end
+  end
+
+  # Where every class-backed task registers, the intersection is a no-op — it
+  # must narrow nothing by accident (true of every fixture but the one above,
+  # which is why that fixture had to exist).
+  def test_reportable_equals_class_to_keys_when_every_task_registers
+    r = registrar
+    assert_equal r.class_to_keys, r.reportable_class_to_keys
+  end
+
+  # §6.3's hard rule. c.monitors entries have no job class by definition and
+  # their keys are arbitrary user strings, so a key that happens to equal a host
+  # job class name would bind that class to the shell script's monitor: an
+  # unrelated Rails job would then advance it, and the monitor reads green while
+  # the backup has been failing. The registrar reads recurring.yml and nothing
+  # else, which is what keeps the two sets apart.
+  def test_a_c_monitors_key_matching_a_job_class_name_never_enters_the_map
+    Stablemate.config.monitors = { "DailyDigestJob" => { interval: 86_400 } }
+    r = registrar
+
+    assert_equal({ "DailyDigestJob" => [ "daily_digest" ] }, r.reportable_class_to_keys.slice("DailyDigestJob"))
+    refute_includes r.reportable_class_to_keys["DailyDigestJob"], "DailyDigestJob"
+    refute_includes r.tuples.map { |t| t[:registration_key] }, "DailyDigestJob"
+  end
+
   def test_missing_file_yields_no_tuples
     r = Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: fixture("does_not_exist.yml"))
     assert_empty r.tuples
@@ -291,6 +361,51 @@ class SolidQueueRecurringTest < StablemateTest
       File.write(f.path, "changed:\n  class: OtherJob\n  schedule: every hour\n")
       assert_equal({ "NightlyJob" => [ "nightly" ] }, r.class_to_keys)
     end
+  end
+
+  # --- §6.1: what the report prints, and what bounds a prune -------------
+
+  # The skips are DATA as well as log lines: the command prints one line per
+  # task and a skipped job is exactly the line an operator has to see, since
+  # nothing else in the run mentions it again.
+  def test_skips_carry_the_key_and_a_printable_reason
+    skips = registrar(config: logging_config(StringIO.new)).skips
+
+    assert_equal [ "db_backup" ], skips.map { |skip| skip[:registration_key] }
+    assert_match(/command task/, skips.first[:reason])
+  end
+
+  def test_an_unsizable_schedule_is_a_skip_naming_the_schedule
+    skip = registrar("recurring_underivable.yml", config: logging_config(StringIO.new)).skips.first
+
+    assert_equal "impossible_date", skip[:registration_key]
+    assert_match(/0 0 30 2 \*/, skip[:reason])
+  end
+
+  # declared_keys is the list a PRUNE=1 run sends, and the server retires
+  # exactly the orphans absent from it — so it is every key the registrar can
+  # SEE, BEFORE its skips. Built from the registerable keys instead, deleting a
+  # task's class: line would retire the monitor of a job that is still running.
+  def test_declared_keys_are_every_key_in_the_section_before_the_skips
+    assert_equal %w[clear_sessions daily_digest db_backup], registrar(config: logging_config(StringIO.new))
+      .declared_keys.sort
+  end
+
+  # "Every key in recurring.yml" read literally would also protect a key that
+  # exists only under another environment's section, and the two readings retire
+  # different monitors — so it follows Solid Queue's own resolution rule, like
+  # everything else this registrar reads.
+  def test_declared_keys_are_scoped_to_the_environments_section
+    keys = registrar("recurring_multi_env.yml").declared_keys
+
+    assert_equal [ "daily_digest" ], keys
+  end
+
+  # No file, no keys — and emphatically not a raise: §6.1 makes the missing-file
+  # run exit non-zero on its own terms, before any request, rather than by
+  # blowing up.
+  def test_declared_keys_are_empty_without_a_file
+    assert_empty Stablemate::Registrars::SolidQueueRecurring.new(recurring_path: fixture("missing.yml")).declared_keys
   end
 
   # The registrar defaults its environment to the shared Configuration#environment

@@ -60,6 +60,11 @@ class Project
       @conflicts = []
       @orphaned = []
       @retired = []
+      # Monitors ENTERING the project's monitored set — created or revived. Not
+      # @registered, which persist_update also fills: an idempotent re-sync
+      # matches every existing row and would broadcast on every deploy of every
+      # host, re-rendering a panel whose state did not move.
+      @arrived = 0
 
       # Hold the USER row lock (not the project's) across the whole run so slot
       # accounting is atomic: the cap is per-user across projects, so two syncs of
@@ -112,6 +117,12 @@ class Project
           end
         end
       end
+
+      # Once per run, not once per monitor: a 200-task app would otherwise queue
+      # 200 renders of one panel. And only when a monitor actually ARRIVED — the
+      # ladder reads "any monitors?" and "any ever pinged?", so a re-sync that
+      # merely updated existing rows cannot have moved it.
+      @project.broadcast_setup_progress if @arrived.positive?
 
       { registered: @registered, skipped: @skipped, conflicts: @conflicts,
         orphaned: @orphaned, retired: @retired }
@@ -198,6 +209,7 @@ class Project
         # to avoid.
         return unless persist_update(monitor, entry)
 
+        @arrived += 1
         monitor.revive!
         # Retirement restores what it retired FROM, and for `suspended` that alone
         # strands the monitor: every un-suspender runs off a plan change and none of
@@ -351,14 +363,18 @@ class Project
         if save_isolated(monitor)
           @slots -= 1
           @registered << monitor
+          @arrived += 1
         else
           @skipped << skip(entry, "invalid")
         end
       rescue ActiveRecord::RecordNotUnique
-        # Concurrent boot: multiple Puma workers / containers run the railtie's
-        # after_initialize sync at once with the SAME new keys. Treat the loser as
-        # the idempotent upsert it is — re-find the now-existing row and update it,
-        # so it lands in `registered` and the request never 500s.
+        # Concurrent sync: `kamal app exec` fans out across hosts in parallel
+        # (§6.2), so several containers post the SAME new keys at once. (It used
+        # to be the railtie's after_initialize sync racing across Puma workers;
+        # boot registers nothing now — §3.1 — but the race is live for the same
+        # reason.) Treat the loser as the idempotent upsert it is — re-find the
+        # now-existing row and update it, so it lands in `registered` and the
+        # request never 500s.
         existing = @project.monitors.find_by(registration_key: entry.registration_key)
         if existing
           persist_update(existing, entry)

@@ -23,6 +23,10 @@ Rails.application.routes.draw do
     # table — that is what makes a ping key authenticating the management API
     # impossible rather than discouraged.
     resources :ping_keys, only: %i[create destroy], module: :projects
+    # Generating the setup command IS creating it — the noun hiding in the verb.
+    # Create-only: it embeds both raw keys, which are readable exactly once, so
+    # there is nothing to come back and show.
+    resource :setup_command, only: :create, module: :projects
   end
 
   # CRUD plus the sub-resource controllers that replace custom verbs.

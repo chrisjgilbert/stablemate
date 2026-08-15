@@ -32,4 +32,22 @@ module ApplicationHelper
   def stablemate_docs_url(path)
     "#{stablemate_repo_url}/blob/main/docs/#{path}"
   end
+
+  # The line the user pastes into their app (v1-scope §6.6). One name for these
+  # variables everywhere — the install command reads them, the initializer
+  # skeleton reads them, and the .env it writes uses them — or a green install
+  # boots the host into "no ping_key configured" with no hint why.
+  def setup_command(pair)
+    "bin/rails stablemate:install " \
+      "STABLEMATE_API_KEY=#{pair.api_key_token} STABLEMATE_PING_KEY=#{pair.ping_key_token}"
+  end
+
+  # The same line after a reload. Only digests are stored, so the keys are shown
+  # by their last four characters — enough to tell which pair is configured
+  # somewhere, which is the only question a masked command can answer.
+  def masked_setup_command(api_key, ping_key)
+    "bin/rails stablemate:install " \
+      "STABLEMATE_API_KEY=#{api_key&.masked || "sm_live_…"} " \
+      "STABLEMATE_PING_KEY=#{ping_key&.masked || "sm_ping_…"}"
+  end
 end

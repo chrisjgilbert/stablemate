@@ -24,7 +24,22 @@ module Api
             # prints each list as-is. A pre-0.2.0 gem reads neither key and is
             # unaffected by their presence.
             orphaned: result[:orphaned],
-            retired: result[:retired]
+            retired: result[:retired],
+            # §9.4's mismatch guard. Nothing forces the API key and the ping key
+            # to name the same project, and getting that wrong is silent: the
+            # command registers into the API key's project while every check-in
+            # lands in another, so these monitors go down permanently and every
+            # symptom reads "your job is down". This command is the only process
+            # that holds a registration response, so it is the only place the two
+            # credentials can be compared.
+            #
+            # A SET, and always present even when empty: §4's rotation keeps two
+            # keys live at once, so a single value would false-alarm during the
+            # very operation the guard supports — and an empty array (a project
+            # with no ping key) has to stay distinguishable from the key being
+            # absent (a pre-0.2.0 server), which is what the gem's guard reads.
+            # Revoking destroys the row, so every row here is live.
+            ping_key_last4: current_project.ping_keys.order(:created_at).pluck(:token_last4)
           }
         end
 

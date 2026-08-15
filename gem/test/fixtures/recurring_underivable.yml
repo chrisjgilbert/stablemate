@@ -1,0 +1,14 @@
+# §6.3's fifth fixture: a task with a class: whose schedule cannot be sized, so
+# the reportable map is NARROWER than class_to_keys. On the other four fixtures
+# the intersection is a no-op, which would pass a reportable map that never
+# intersected anything at all.
+#
+# "0 0 30 2 *" is February 30th — a valid cron expression with no occurrences
+# ever, so Fugit parses it and no interval can be derived from it.
+production:
+  daily_digest:
+    class: DailyDigestJob
+    schedule: every day at 9am
+  impossible_date:
+    class: ImpossibleDateJob
+    schedule: "0 0 30 2 *"

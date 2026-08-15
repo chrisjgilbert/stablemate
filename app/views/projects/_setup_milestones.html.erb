@@ -1,0 +1,44 @@
+<%#
+  The milestone ladder (v1-scope §7). Each state names the NEXT milestone and
+  when to expect it, and none of them ever claims a job ran — §11 rejects the
+  deploy-time "preview ping" precisely because a green row for a job that has
+  never reported is the lie this product exists not to tell. The first real
+  check-in is the demo.
+
+  Wrapped in its own dom_id so Project::MonitorSync can replace it over Turbo
+  when a sync commits: without that broadcast, newly-registered monitors appear
+  only on reload and the user watching this page sees nothing happen at the exact
+  moment it did.
+
+  Locals: project.
+%>
+<div id="<%= dom_id(project, :setup_milestones) %>" class="mt-6 pt-5 border-t border-hairline"
+     data-testid="setup-milestones">
+  <% if project.awaiting_first_sync? %>
+    <p class="flex items-center gap-2 text-[13px] font-semibold text-ink">
+      <span class="w-1.5 h-1.5 rounded-full bg-pending-dot"></span>
+      Waiting for your first sync
+    </p>
+    <p class="text-[12px] text-muted mt-1 ml-3.5">
+      Your jobs appear here the moment a deploy runs the command — usually within seconds of it finishing.
+    </p>
+
+  <% elsif project.awaiting_first_check_in? %>
+    <p class="flex items-center gap-2 text-[13px] font-semibold text-ink" data-testid="milestone-registered">
+      <span class="w-1.5 h-1.5 rounded-full bg-pending-dot"></span>
+      <%= pluralize(project.monitors.size, "monitor") %> registered — waiting for first check-ins
+    </p>
+    <p class="text-[12px] text-muted mt-1 ml-3.5">
+      Each one turns green the first time that job actually runs. Nothing is wrong until a job misses its window.
+    </p>
+
+  <% else %>
+    <p class="flex items-center gap-2 text-[13px] font-semibold text-up-text" data-testid="milestone-checked-in">
+      <span class="w-1.5 h-1.5 rounded-full bg-up-dot"></span>
+      Checking in
+    </p>
+    <p class="text-[12px] text-muted mt-1 ml-3.5">
+      This project is live. You'll get an email if a job stops reporting.
+    </p>
+  <% end %>
+</div>

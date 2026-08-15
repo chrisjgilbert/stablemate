@@ -92,12 +92,10 @@ class AfterDiscardWiringTest < ActiveSupport::TestCase
                TrackedChildJob ].freeze
 
   def key_for(job_class) = "task_#{job_class.name.demodulize.underscore}"
-  def url_for(job_class) = "https://sm.test/ping/#{job_class.name.demodulize.underscore}"
 
   def build_subscriber(client)
     Stablemate::Execution::Subscriber.new(
       class_to_keys: ALL_JOBS.to_h { |job| [ job.name, [ key_for(job) ] ] },
-      ping_urls: ALL_JOBS.to_h { |job| [ key_for(job), url_for(job) ] },
       client:, config: Stablemate.config, dispatcher: StablemateTest::SYNC_DISPATCHER
     )
   end
@@ -141,7 +139,7 @@ class AfterDiscardWiringTest < ActiveSupport::TestCase
 
     assert_equal 1, @client.reported.size
     report = @client.reported.first
-    assert_equal "https://sm.test/ping/no_handler_job", report[:url]
+    assert_equal key_for(NoHandlerJob), report[:key]
     assert_equal "AfterDiscardWiringTest::Boom: no handler", report[:message]
     assert_empty @client.pinged
   end
@@ -163,7 +161,7 @@ class AfterDiscardWiringTest < ActiveSupport::TestCase
 
     assert_equal 2, RecoversJob.runs, "expected the job to run twice (one retry)"
     assert_empty @client.reported
-    assert_equal [ url_for(RecoversJob) ], @client.pinged, "only the successful attempt may ping"
+    assert_equal [ key_for(RecoversJob) ], @client.pinged, "only the successful attempt may ping"
   end
 
   def test_retry_on_exhausted_reports_exactly_once_and_never_success_pings
@@ -190,7 +188,7 @@ class AfterDiscardWiringTest < ActiveSupport::TestCase
     perform_enqueued_jobs { SucceedsJob.perform_later }
 
     assert_empty @client.reported
-    assert_equal [ url_for(SucceedsJob) ], @client.pinged
+    assert_equal [ key_for(SucceedsJob) ], @client.pinged
   end
 
   # The wired callback runs inside ActiveJob's run_after_discard_procs, which
@@ -243,6 +241,46 @@ class AfterDiscardWiringTest < ActiveSupport::TestCase
     # Drop the parent-level shadow so repeated registrations can't pile up
     # if more tests ever touch this hierarchy.
     TrackedParentJob.after_discard_procs = ActiveJob::Base.after_discard_procs
+  end
+
+  # §9.6 — install_discard_hook installed its callback TWICE, so every terminal
+  # failure reported twice (a duplicate error notice per discarded job).
+  # `defined?(::ActiveJob::Base)` does not force the autoload but `.respond_to?`
+  # does, and that load runs the on_load(:active_job) hooks — including the
+  # railtie's, which calls install_discard_hook again while @discard_hook is
+  # still nil. Reproduced here at the same seam: nested calls from inside the
+  # capability check, with the real after_discard_procs counted either side.
+  #
+  # Two nested calls, not one, because the invariant is "at most one gem hook in
+  # after_discard_procs" rather than "at most one level of nesting": the first
+  # nested call is turned away by the re-entrancy flag, the second then runs to
+  # completion and installs — and the outer frame, whose own guard was evaluated
+  # before any of that, must still not add a second.
+  def test_re_entering_install_from_the_capability_check_cannot_stack_a_second_hook
+    Stablemate::Execution::Subscriber.remove_discard_hook
+    procs_before = ActiveJob::Base.after_discard_procs
+    reentered = false
+
+    ActiveJob::Base.define_singleton_method(:respond_to?) do |*args|
+      unless reentered
+        reentered = true
+        2.times { Stablemate::Execution::Subscriber.install_discard_hook }
+      end
+      super(*args)
+    end
+
+    Stablemate::Execution::Subscriber.install_discard_hook
+
+    assert reentered, "the re-entrant call never happened — this run proves nothing"
+    assert_equal procs_before.size + 1, ActiveJob::Base.after_discard_procs.size
+  ensure
+    ActiveJob::Base.singleton_class.remove_method(:respond_to?)
+    # Restore by hand: a stacked duplicate is NOT removable through
+    # remove_discard_hook (it only knows the last proc it built), so a failing
+    # run would otherwise leak a second reporter into every later test.
+    ActiveJob::Base.after_discard_procs = procs_before
+    Stablemate::Execution::Subscriber.remove_discard_hook
+    Stablemate::Execution::Subscriber.install_discard_hook
   end
 
   # remove_discard_hook is the teardown counterpart of install_discard_hook:

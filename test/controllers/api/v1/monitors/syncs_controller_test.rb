@@ -173,6 +173,53 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "pending", @user.monitors.find_by(registration_key: "nightly_backup").status
   end
 
+  # --- The mismatch guard's wire field (v1-scope §9.4, §11) ------------------
+
+  # Nothing forces the API key and the ping key to name the same project: use
+  # A's API key with B's ping key and registration writes to A while check-ins
+  # go to B, so A's monitors go down permanently while every job runs fine. The
+  # command is the only process holding a registration response, so the envelope
+  # has to carry what it compares against.
+  #
+  # A SET, not a value: §4's rotation deliberately keeps two keys live at once,
+  # so a single-value field would false-alarm during exactly the operation the
+  # guard exists to support.
+  test "the envelope carries the last4 of every live ping key" do
+    _old, = PingKey.issue(project: @project, name: "Rotating out")
+    _new, = PingKey.issue(project: @project, name: "Rotating in")
+
+    sync([ entry("daily_digest") ])
+
+    assert_response :success
+    assert_equal @project.ping_keys.pluck(:token_last4).sort,
+                 response.parsed_body["ping_key_last4"].sort
+    assert_equal 2, response.parsed_body["ping_key_last4"].size
+  end
+
+  # Absent and empty must stay distinguishable on the wire: the gem warns when
+  # its configured key matches none of the project's, and a project with no ping
+  # key at all is a mismatch it must be able to see — not the old-server silence
+  # of a missing key.
+  test "a project with no ping keys reports an empty set rather than omitting the field" do
+    sync([ entry("daily_digest") ])
+
+    assert_response :success
+    assert_equal [], response.parsed_body["ping_key_last4"]
+  end
+
+  # Another project's keys must not appear: the guard compares the configured
+  # key against THIS project's set, so a leak across the tenancy boundary would
+  # make a real mismatch pass silently.
+  test "the set is scoped to the key's project" do
+    other = @user.projects.create!(name: "Other app")
+    PingKey.issue(project: other, name: "Elsewhere")
+    _mine, = PingKey.issue(project: @project, name: "Mine")
+
+    sync([ entry("daily_digest") ])
+
+    assert_equal @project.ping_keys.pluck(:token_last4), response.parsed_body["ping_key_last4"]
+  end
+
   test "the schedule string rides the wire and is stored" do
     post sync_api_v1_monitors_url, as: :json, headers: auth,
          params: { app: "my-app",

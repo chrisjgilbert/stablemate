@@ -5,15 +5,20 @@ require "set"
 module Stablemate
   module Execution
     # Subscribes to ActiveSupport::Notifications' `perform.active_job` and, on a
-    # SUCCESSFUL perform, fires a fire-and-forget ping to the matching monitor's
-    # cached ping URL. Its mirror is the after_discard path: a TERMINAL failure —
-    # unhandled raise, retry_on exhausted, discard_on — reports the error to the
-    # same URL. Attempts that will be retried report nothing.
+    # SUCCESSFUL perform, fires a fire-and-forget check-in for the matching task
+    # key. Its mirror is the after_discard path: a TERMINAL failure — unhandled
+    # raise, retry_on exhausted, discard_on — reports the error under the same
+    # key. Attempts that will be retried report nothing.
+    #
+    # The task key IS the address (§3.2): it is a name the gem already has, so
+    # there is nothing to resolve, fetch, cache or invalidate here — the map
+    # handed in at construction is the whole of the routing, and a class missing
+    # from it checks in nowhere (§6.3).
     #
     # Backend-agnostic: it keys off the ActiveJob notification, not Solid Queue.
     #
     # Requests are dispatched to a background thread and nothing may propagate into
-    # the host job. No API key on this path.
+    # the host job. The check-in credential lives in the Client, not here.
     class Subscriber
       include Logging
 
@@ -40,11 +45,30 @@ module Stablemate
         # On hosts without after_discard this is a silent no-op: error reporting
         # degrades to plain missed-beat detection.
         def install_discard_hook
-          return if @discard_hook
+          # @installing guards RE-ENTRY, not concurrency (§9.6). `defined?` does not
+          # force ActiveJob's autoload but `.respond_to?` does, and that load runs
+          # the on_load(:active_job) hooks — including the railtie's, which calls
+          # this method again while @discard_hook is still nil. Without the flag the
+          # inner call installs the hook, the outer call then overwrites
+          # @discard_hook and installs a SECOND one, and every terminal failure
+          # reports twice. A separate flag rather than an early @discard_hook
+          # assignment: assigning it before the capability check would leave it set
+          # on a host without after_discard (Rails < 7.1), where remove_discard_hook
+          # then raises.
+          return if @discard_hook || @installing
+
+          @installing = true
           return unless defined?(::ActiveJob::Base) && ::ActiveJob::Base.respond_to?(:after_discard)
+          # Re-check: the invariant is "at most one gem hook in
+          # after_discard_procs", not "at most one level of nesting" — a nested
+          # call that ran to completion during the line above has already
+          # installed it, and this frame's own guard was evaluated before that.
+          return if @discard_hook
 
           @discard_hook = proc { |job, exception| Stablemate.execution_subscriber&.handle_discard(job, exception) }
           ::ActiveJob::Base.after_discard(&@discard_hook)
+        ensure
+          @installing = false
         end
 
         # Subclasses that copied after_discard_procs while the hook was installed
@@ -58,29 +82,20 @@ module Stablemate
         end
       end
 
-      # @param class_to_keys [Hash{String=>Array<String>}] job class name -> task keys.
-      # @param ping_urls     [Hash{String=>String}, nil] task key -> ping URL. When
-      #   nil (the production default) URLs are resolved LIVE from the shared
-      #   Stablemate.ping_urls snapshot, so a re-sync that refreshes the cache is
-      #   picked up without rebuilding the subscriber.
-      # @param dispatcher    [#call] how a ping block is executed. The default is a
-      #   fire-and-forget background thread: a slow or down Stablemate server must
-      #   never block the host's worker. The block never raises — errors are logged
-      #   and swallowed inside it.
-      def initialize(class_to_keys:, ping_urls: nil, client: nil, config: Stablemate.config,
-                     dispatcher: ->(blk) { Thread.new(&blk) }, resync: nil, resync_interval: 60)
+      # @param class_to_keys [Hash{String=>Array<String>}] job class name -> task
+      #   keys. The REPORTABLE map (§6.3): every key in it is one the registrar
+      #   also registers, and a job class absent from it never checks in. Boot
+      #   builds it with Registrar#reportable_class_to_keys.
+      # @param dispatcher    [#call] how a check-in block is executed. The default
+      #   is a fire-and-forget background thread: a slow or down Stablemate server
+      #   must never block the host's worker. The block never raises — errors are
+      #   logged and swallowed inside it.
+      def initialize(class_to_keys:, client: nil, config: Stablemate.config,
+                     dispatcher: ->(blk) { Thread.new(&blk) })
         @class_to_keys = class_to_keys
-        @ping_urls = ping_urls
         @client = client || Client.new(config)
         @config = config
         @dispatcher = dispatcher
-        # A callable invoked when a ping comes back :stale, to refresh the cached
-        # ping URLs after a token rotation. Bounded to once per resync_interval
-        # seconds so a burst of stale pings can't storm the sync endpoint.
-        @resync = resync
-        @resync_interval = resync_interval
-        @resync_mutex = Mutex.new
-        @last_resync_at = nil
       end
 
       # The enqueue_retry subscription marks a will-retry attempt so its
@@ -116,6 +131,11 @@ module Stablemate
         Stablemate.execution_subscriber = nil if Stablemate.execution_subscriber.equal?(self)
       end
 
+      # The rescue is load-bearing (§6.5): an exception raised inside a
+      # `perform.active_job` subscriber propagates out of the instrumenter and
+      # into perform_now, so an error here would FAIL THE HOST'S JOB — the one
+      # thing the gem guarantees it can never do. The payload is the host's, and
+      # nothing about it is ours to trust.
       def handle_event(event)
         job = event.payload[:job]
         return unless job
@@ -136,6 +156,8 @@ module Stablemate
 
         warn_if_ambiguous(job.class.name, keys)
         keys.each { |key| ping(key) }
+      rescue StandardError => e
+        log_warn("perform handling failed: #{e.class}: #{e.message}")
       end
 
       # The attempt failed but the job will run again, so this cycle is neither a
@@ -196,17 +218,12 @@ module Stablemate
           exception.class.to_s
         end
 
-        def url_for(key)
-          (@ping_urls || Stablemate.ping_urls)[key]
-        end
-
+        # The map is the complete answer (§6.3). There is deliberately no fallback
+        # to the job class name: with no server-supplied address cache to ask "does
+        # a monitor exist with this name?", such a fallback would check in for every
+        # job class in the host app.
         def resolve_keys(class_name)
-          # Layer 2 mapping first; otherwise the manual fallback: a manually-created
-          # monitor whose registration_key IS the job class name.
-          keys = @class_to_keys[class_name]
-          return keys if keys && !keys.empty?
-
-          url_for(class_name) ? [ class_name ] : []
+          @class_to_keys[class_name] || []
         end
 
         def warn_if_ambiguous(class_name, keys)
@@ -216,20 +233,17 @@ module Stablemate
         end
 
         def ping(key)
-          dispatch(key, label: "ping") { |url| @client.ping(url) }
+          dispatch(key, label: "ping") { |k| @client.ping(k) }
         end
 
         def report_failure(key, message)
-          dispatch(key, label: "failure report") { |url| @client.report_failure(url, message: message) }
+          dispatch(key, label: "failure report") { |k| @client.report_failure(k, message: message) }
         end
 
         # The label keeps dropped pings and dropped failure reports distinguishable
         # in the host's logs.
         def dispatch(key, label:, &request)
-          url = url_for(key)
-          return unless url
-
-          @dispatcher.call(-> { deliver(url, label, &request) })
+          @dispatcher.call(-> { deliver(key, label, &request) })
         rescue StandardError => e
           # Guards the dispatch itself (e.g. Thread.new raising under thread
           # exhaustion) — nothing may propagate into the host job.
@@ -240,30 +254,14 @@ module Stablemate
         # public API and may raise; uncaught, that would escape the background thread
         # — spewing via report_on_exception and, under a host's
         # Thread.abort_on_exception, killing the worker.
-        def deliver(url, label)
-          # A :stale result means the cached URL was rejected (token rotated) — kick
-          # a bounded re-sync so the fresh URL is picked up, instead of silently
-          # pinging a dead URL until the next boot/manual sync.
-          trigger_resync if yield(url) == :stale
+        #
+        # The client's return value is deliberately ignored: every state it can
+        # report is either fine or already logged there (§6.5), and none of them is
+        # actionable from a job's thread.
+        def deliver(key, label)
+          yield(key)
         rescue StandardError => e
           log_warn("#{label} thread failed: #{e.class}: #{e.message}")
-        end
-
-        # At most once per @resync_interval seconds (monotonic clock), so a burst of
-        # stale pings collapses to one refresh. A resync failure is logged and
-        # swallowed — it must never break the ping thread.
-        def trigger_resync
-          return unless @resync
-
-          @resync_mutex.synchronize do
-            now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-            return if @last_resync_at && (now - @last_resync_at) < @resync_interval
-
-            @last_resync_at = now
-          end
-          @resync.call
-        rescue StandardError => e
-          log_warn("resync after stale ping failed: #{e.class}: #{e.message}")
         end
     end
   end
