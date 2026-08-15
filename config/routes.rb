@@ -29,11 +29,12 @@ Rails.application.routes.draw do
     resource :setup_command, only: :create, module: :projects
   end
 
-  # CRUD plus the sub-resource controllers that replace custom verbs.
-  resources :monitors do
+  # Read and delete, plus the sub-resource controllers that replace custom verbs.
+  # No `new`/`create`/`edit`/`update`: `bin/rails stablemate:sync` is the only
+  # writer of monitor config (v1-scope §3.1, §3.3), so the browser keeps the
+  # operational verbs and loses the configuring ones.
+  resources :monitors, only: %i[index show destroy] do
     resource :pause, only: %i[create destroy], module: :monitors
-    resource :ping_token, only: :update, module: :monitors
-    resource :project, only: :update, module: :monitors
   end
 
   get "up" => "rails/health#show", as: :rails_health_check
@@ -67,9 +68,6 @@ Rails.application.routes.draw do
         collection do
           post :sync, to: "monitors/syncs#create"
         end
-        member do
-          post :rotate, to: "monitors/ping_tokens#update"
-        end
       end
 
       # The V1 check-in endpoint, addressed by task key. DECLARED STANDALONE, not
@@ -94,10 +92,6 @@ Rails.application.routes.draw do
       get "verify", to: "verifications#show", as: :verify
     end
   end
-
-  # Public ping hot path — the token is the credential. Both verbs so a bare
-  # `curl` works.
-  match "/ping/:ping_token", to: "pings#create", via: %i[get post], as: :ping
 
   # Renders for everyone, signed in or not, regardless of the billing config-gate
   # — it's marketing, not a billing surface (unlike the Billing:: namespace, which

@@ -81,17 +81,23 @@ There is no special admin seed — the **first person to sign up** simply regist
 an account. Open `https://<your-host>/`, click **Sign up**, and create your login.
 You land on the dashboard.
 
-## 5 · Create a monitor and send a ping
+## 5 · Register a monitor and send a check-in
 
-1. **New monitor** → give it a name and an expected interval.
-2. On the monitor's page, copy the **Ping URL** (it contains a secret token).
-3. Hit it from anywhere — the monitor flips from **pending** to **up**:
+Monitors come from your app's config, not from a form — so this step runs the
+setup command the UI hands you.
+
+1. **Create a project**, then run its **setup command**. It installs the gem and
+   writes both keys (one to register, one to check in with).
+2. Declare a job — a Solid Queue entry in `recurring.yml`, or a plain one in
+   `c.monitors` — and deploy. `stablemate:sync` registers it as **pending**.
+3. Check in from anywhere; the monitor flips **pending → up**:
 
    ```sh
-   curl -fsS https://<your-host>/ping/<ping_token>
+   curl -fsS -X POST https://<your-host>/api/v1/monitors/<task_name>/pings \
+     -H "Authorization: Bearer $STABLEMATE_PING_KEY"
    ```
 
-Wire this into the end of your real jobs, or use the companion gem — see
+The gem does this for you on every successful Solid Queue run — see
 [`integrating.md`](integrating.md).
 
 ## 6 · Verify alert email

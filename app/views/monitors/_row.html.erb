@@ -13,7 +13,6 @@
         clicking anywhere on it opens the monitor. %>
     <%= link_to monitor.name, monitor_path(monitor),
           class: "font-mono text-[13px] text-ink truncate hover:text-brand before:absolute before:inset-0" %>
-    <%= render "shared/gem_chip", monitor: monitor, variant: :compact %>
   </div>
   <div class="flex items-center gap-4 text-[12px] text-muted shrink-0">
     <%# The index preloads ticks for all rows in one query (no N+1); a single-row

@@ -74,4 +74,69 @@ class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
     # redirects signed-in users on to /monitors (phase-4 landing page).
     assert_current_path monitors_path
   end
+
+  # Drive a REAL check-in from inside a system test.
+  #
+  # v1-scope §3.2 moved the check-in credential out of the URL and into an
+  # Authorization header, and Capybara cannot set request headers — so the
+  # `visit ping_path(monitor.ping_token)` these flows used to use has no direct
+  # translation. §8 names the choice: drop to `monitor.check_in!` and weaken the
+  # test from "the real endpoint drove this" to "we called the model", or keep
+  # the endpoint.
+  #
+  # We keep the endpoint. Capybara is already running a real Puma on a real
+  # port, so an ordinary HTTP POST at it exercises routing, the ping-key
+  # authentication, both rate-limit layers and the controller — everything the
+  # old `visit` did, plus the auth it could not. Dropping to the model here
+  # would have made "outage → down email → recovery" stop testing the path a
+  # deploy actually uses, which is the one thing CLAUDE.md's system-test rule
+  # exists to prevent.
+  #
+  # Raises on a non-2xx unless `expect:` says otherwise, and returns the
+  # Net::HTTPResponse. The raise is the point: a monitor built without a
+  # registration_key posts to `/api/v1/monitors//pings` and 404s on the route
+  # constraint, and a stale key 401s — either way the check-in silently does
+  # nothing and the test fails several lines later at `assert monitor.up?`, or
+  # worse at a Capybara `assert_selector` that waits out the full timeout and
+  # reports "expected Up", pointing the reader at Turbo broadcasting instead of
+  # at the request that never landed.
+  def browser_check_in(monitor, ping_key:, expect: Net::HTTPSuccess, **params)
+    uri = URI.join(
+      Capybara.current_session.server.base_url,
+      "/api/v1/monitors/#{ERB::Util.url_encode(monitor.registration_key.to_s)}/pings"
+    )
+    request = Net::HTTP::Post.new(uri)
+    request["Authorization"] = "Bearer #{ping_key}"
+    request.set_form_data(params) if params.any?
+
+    response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
+    unless expect.nil? || response.is_a?(expect)
+      raise "check-in to #{uri.path} returned #{response.code} #{response.body.to_s[0, 200]}"
+    end
+
+    response
+  end
+
+  # The credential for the above. Issued per test rather than fixtured, because
+  # a PingKey is stored hashed and the raw value exists only at issuance.
+  def issue_ping_key(project)
+    PingKey.issue(project: project, name: "System test").last
+  end
+
+  # Drive a REAL sync from inside a system test, for the same reason
+  # browser_check_in exists: Capybara cannot set the Authorization header the
+  # endpoint needs, and dropping to `project.sync_monitors` would stop testing
+  # SyncsController — its auth, its response envelope, its params filter.
+  def browser_sync(project, api_key:, app: "my-app", monitors: [], **extra)
+    uri = URI.join(Capybara.current_session.server.base_url, "/api/v1/monitors/sync")
+    request = Net::HTTP::Post.new(uri)
+    request["Authorization"] = "Bearer #{api_key}"
+    request["Content-Type"] = "application/json"
+    request.body = { app: app, monitors: monitors, **extra }.to_json
+
+    response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
+    raise "sync returned #{response.code} #{response.body.to_s[0, 200]}" unless response.is_a?(Net::HTTPSuccess)
+
+    JSON.parse(response.body)
+  end
 end

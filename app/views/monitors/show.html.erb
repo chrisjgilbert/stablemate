@@ -1,8 +1,5 @@
 <% content_for :title, @monitor.name %>
 <% open_incident = @monitor.open_incident %>
-<%# The one-shot flash reveal is a flash rather than an anchor — see
-    Monitors::PingTokensController#update. %>
-<% ping_setup_collapsed = !@monitor.awaiting_setup? && !flash[:reveal_ping_setup] %>
 
 <%= turbo_stream_from @monitor %>
 
@@ -12,7 +9,6 @@
       <%= link_to "← Monitors", monitors_path, class: "text-[13px] text-muted hover:text-ink" %>
       <h1 class="font-mono text-lg text-ink"><%= @monitor.name %></h1>
       <%= render "monitors/badge", monitor: @monitor %>
-      <%= render "shared/gem_chip", monitor: @monitor, variant: :full %>
     </div>
     <div class="flex items-center gap-2">
       <%# A `suspended` monitor gets no pause/resume affordance: pausing it would
@@ -30,8 +26,6 @@
                 class: "h-8 px-3 rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
         <% end %>
       <% end %>
-      <%= link_to "Edit", edit_monitor_path(@monitor),
-            class: "h-8 px-3 inline-flex items-center rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
       <%= button_to "Delete", monitor_path(@monitor), method: :delete,
             form: { data: { turbo_confirm: "Delete this monitor and all its data?" } },
             class: "h-8 px-3 rounded-lg text-[13px] font-semibold text-down-text hover:bg-down-bg/60" %>
@@ -65,28 +59,10 @@
     </div>
   <% end %>
 
-  <% unless ping_setup_collapsed %>
-    <%= render "monitors/ping_setup", monitor: @monitor %>
-  <% end %>
-
-  <div class="rounded-xl border border-border bg-surface p-6 shadow-sm">
-    <h2 class="text-[13px] font-semibold text-secondary mb-4">Settings</h2>
-    <dl class="grid grid-cols-2 gap-y-3 text-[13px]">
-      <dt class="text-muted">Status</dt><dd><%= render "shared/status_badge", status: @monitor.status %></dd>
-      <dt class="text-muted">Expected interval</dt><dd class="font-mono"><%= humanize_seconds(@monitor.expected_interval_seconds) %></dd>
-      <dt class="text-muted">Grace period</dt><dd class="font-mono"><%= humanize_seconds(@monitor.grace_period_seconds) %></dd>
-      <dt class="text-muted">Last ping</dt>
-      <dd class="font-mono"><%= mono_timestamp(@monitor.last_ping_at) %></dd>
-      <%= render "monitors/next_check", monitor: @monitor, variant: :dl %>
-    </dl>
-  </div>
+  <%= render "monitors/config", monitor: @monitor %>
 
   <%= render "monitors/move", monitor: @monitor %>
 
   <%= render "monitors/uptime_panel", monitor: @monitor %>
   <%= render "monitors/recent_events", monitor: @monitor %>
-
-  <% if ping_setup_collapsed %>
-    <%= render "monitors/ping_setup", monitor: @monitor, collapsed: true %>
-  <% end %>
 </div>

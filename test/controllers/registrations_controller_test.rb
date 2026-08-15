@@ -50,18 +50,28 @@ class RegistrationsControllerTest < ActionDispatch::IntegrationTest
     assert_match "Welcome to Stablemate.", response.body
   end
 
-  test "an unverified user can create a monitor right after signing up" do
+  # Verification must not gate getting monitored. It used to be asserted through
+  # the create form; with config-as-code (v1-scope §3.1) the only way to register
+  # a monitor is `stablemate:sync`, so the same property is asserted through the
+  # API key an unverified user must be able to issue and use.
+  test "an unverified user can register monitors right after signing up" do
     post sign_up_path, params: {
       email_address: "fresh@example.com", password: "password1234", password_confirmation: "password1234"
     }
     user = User.find_by(email_address: "fresh@example.com")
     assert_nil user.verified_at
-    user.projects.create!(name: "First app")
+    project = user.projects.create!(name: "First app")
+    raw = ApiKey.issue(project: project, name: "CI").last
 
     assert_difference -> { Monitoring::Monitor.count }, 1 do
-      post monitors_path, params: { monitor: { name: "First", expected_interval_seconds: 3600, grace_period_seconds: 300 } }
+      post sync_api_v1_monitors_path,
+           params: { app: "my-app", monitors: [ { registration_key: "nightly", name: "nightly",
+                                                  expected_interval_seconds: 3600,
+                                                  grace_period_seconds: 300 } ] }.to_json,
+           headers: { "Authorization" => "Bearer #{raw}", "Content-Type" => "application/json" }
     end
-    assert_nil user.reload.verified_at # still unverified after creating
+    assert_response :success
+    assert_nil user.reload.verified_at # still unverified after registering
   end
 
   test "invalid signup re-renders the form" do

@@ -12,8 +12,8 @@ class Project
   #   also reported as merely orphaned, so the CLI prints each list as-is.
   class MonitorSync
     # Guards against mass assignment: only these five attributes are ever read from
-    # the entry — project_id / status / source / ping_token / last_synced_app are
-    # controlled by this operation, never by the caller.
+    # the entry — project_id / status / source / last_synced_app are controlled by
+    # this operation, never by the caller.
     Entry = Struct.new(:registration_key, :name, :expected_interval_seconds,
                        :grace_period_seconds, :schedule) do
       def self.from(raw)
@@ -277,8 +277,20 @@ class Project
       def persist_update(monitor, entry)
         @conflicts << monitor.registration_key if diverging_app?(monitor)
 
-        attrs = gem_settings(monitor, entry)
-                  .merge({ last_synced_app: @app, schedule: entry.schedule }.compact)
+        # `schedule` is written THROUGH, nil included — the one field where absent
+        # does not mean untouched. The gem omits it precisely when there is no
+        # schedule (`Registrars::DeclaredMonitors` sends none for a `c.monitors`
+        # entry, and `Hash#slice` drops the absent key), so compacting it away
+        # would strand the old cron string on a task that moved from
+        # `recurring.yml` into `c.monitors` — and the show page's config panel
+        # renders that string as the authoritative source of the monitor's
+        # config, so a stale one is a false statement, not a stale cache.
+        #
+        # `last_synced_app` still compacts: a nil app is an old gem that sent
+        # none, and clearing it would blind the cross-app conflict guard.
+        attrs = declared_settings(entry)
+                  .merge({ last_synced_app: @app }.compact)
+                  .merge(schedule: entry.schedule)
         if monitor.update(attrs)
           @registered << monitor
           true
@@ -288,49 +300,22 @@ class Project
         end
       end
 
-      # The three settings the gem derives from recurring.yml, paired with the
-      # column remembering what it last SENT for each.
-      GEM_SETTINGS = { name: :last_synced_name,
-                       expected_interval_seconds: :last_synced_expected_interval_seconds,
-                       grace_period_seconds: :last_synced_grace_period_seconds }.freeze
+      # The three settings the gem derives from recurring.yml. The repo is the
+      # only writer of monitor config now (§3.1), so each is written whenever the
+      # payload carries it — there is no second party to arbitrate against, and
+      # no refusing branch that can strand a monitor on a value only the deleted
+      # edit form could correct.
+      #
+      # ABSENT still means untouched, and that is not a leftover of the old
+      # arbitration: old gems send partial payloads, so "write unconditionally"
+      # read literally would write a missing name as nil and fail validation.
+      DECLARED_SETTINGS = %i[name expected_interval_seconds grace_period_seconds].freeze
 
-      # The gem re-syncs on EVERY production boot, so writing these three
-      # unconditionally meant a user who tightened a monitor in the UI had it
-      # silently reverted at the next deploy. An absent value is still left alone —
-      # old gems don't send everything.
-      def gem_settings(monitor, entry)
-        GEM_SETTINGS.each_with_object({}) do |(setting, remembered), attrs|
+      def declared_settings(entry)
+        DECLARED_SETTINGS.each_with_object({}) do |setting, attrs|
           incoming = entry[setting]
-          next if incoming.nil?
-
-          attrs[setting] = incoming if gem_may_write?(monitor, setting, remembered, incoming)
-          attrs[remembered] = incoming
+          attrs[setting] = incoming unless incoming.nil?
         end
-      end
-
-      # May this sync write `setting`, or is the stored value the user's? We can
-      # tell the two apart by what the gem last sent: while the stored value still
-      # equals that, nobody has overridden it and the gem owns it.
-      #
-      # PRECEDENCE when BOTH have moved is the gem's. Once the schedule genuinely
-      # changes, an override derived from the old one is stale and would
-      # false-alarm, which is the failure this product exists to prevent.
-      #
-      # Nil remembered = a monitor registered before we started remembering. We
-      # can't tell an override from an untouched value, so we don't touch it, and
-      # we start remembering. KNOWN LIMIT (pinned by a test): if the stored and
-      # incoming values already differ at that point, a `recurring.yml` change
-      # already in flight is refused until the schedule changes AGAIN. Deliberately
-      # resolved toward never overwriting a setting the user may have chosen.
-      def gem_may_write?(monitor, setting, remembered, incoming)
-        last_sent = monitor.public_send(remembered)
-        return false if last_sent.nil?
-
-        # Compare through the column's own type: the payload is JSON, so the
-        # numbers arrive as strings, and "3600" != 3600 would read every boot as
-        # a schedule change and hand the clobber straight back.
-        monitor.public_send(setting) == last_sent ||
-          monitor.class.type_for_attribute(setting).cast(incoming) != last_sent
       end
 
       # Only meaningful when both apps are named (a nil/absent app can't diverge —
@@ -341,23 +326,16 @@ class Project
 
       def persist_create(entry)
         # The gem sends no name for most tasks, so the monitor is named after its
-        # registration key — and the REMEMBERED name has to be that same defaulted
-        # value, or the next sync would read our own default as a user rename and
-        # freeze the name forever.
-        name = entry.name.presence || entry.registration_key
-
+        # registration key.
         monitor = @project.monitors.new(
           registration_key: entry.registration_key,
-          name: name,
+          name: entry.name.presence || entry.registration_key,
           expected_interval_seconds: entry.expected_interval_seconds,
           grace_period_seconds: entry.grace_period_seconds,
           schedule: entry.schedule,
           source: "gem",
           status: "pending",
-          last_synced_app: @app,
-          last_synced_name: name,
-          last_synced_expected_interval_seconds: entry.expected_interval_seconds,
-          last_synced_grace_period_seconds: entry.grace_period_seconds
+          last_synced_app: @app
         )
 
         if save_isolated(monitor)

@@ -132,8 +132,25 @@ class Api::V1::Monitors::PingsControllerTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
     post sync_api_v1_monitors_path, params: { app: "x", monitors: [] }, as: :json, headers: auth
     assert_response :unauthorized
-    post rotate_api_v1_monitor_path(monitor), headers: auth
-    assert_response :unauthorized
+  end
+
+  # The list above is only meaningful if it is the WHOLE management surface — a
+  # new endpoint added without a line here would be untested and look covered.
+  # Asserted against the route table rather than a hand-kept list, so it fails
+  # loudly the day one is added rather than silently passing.
+  test "the management endpoints checked above are all of them" do
+    management = Rails.application.routes.routes.filter_map { |route|
+      controller = route.defaults[:controller].to_s
+      next unless controller.start_with?("api/v1/")
+      # The two ping-key surfaces are the deliberate exceptions (§5.5): the
+      # check-in endpoint and verify are what a ping key is FOR.
+      next if controller.in?(%w[api/v1/monitors/pings api/v1/verifications])
+
+      "#{controller}##{route.defaults[:action]}"
+    }.uniq.sort
+
+    assert_equal %w[api/v1/monitors#index api/v1/monitors#show api/v1/monitors/syncs#create],
+                 management
   end
 
   # --- Routing (§5.1) --------------------------------------------------------

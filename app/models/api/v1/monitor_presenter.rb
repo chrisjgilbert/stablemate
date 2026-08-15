@@ -7,13 +7,13 @@ module Api
     # unrelated reasons to change: the auth and rate-limiting policy, and the shape
     # of the API's payloads.
     #
-    # `ping_url` is injected because building it needs the request host, which only
-    # the controller has (BaseController#ping_url_for, also used by the sync and
-    # rotate endpoints for their own payloads).
+    # Nothing here is request-dependent any more: `ping_url` left with the
+    # token-in-the-URL check-in path (v1-scope §3.2), and a monitor is addressed
+    # by its own `registration_key` — which the payload already carries, and
+    # which the gem combines with the host it was configured with.
     class MonitorPresenter
-      def initialize(monitor, ping_url:)
+      def initialize(monitor)
         @monitor = monitor
-        @ping_url = ping_url
       end
 
       # Index view. (The sync endpoint publishes its own deliberately smaller
@@ -24,7 +24,6 @@ module Api
           name: @monitor.name,
           status: @monitor.status,
           registration_key: @monitor.registration_key,
-          ping_url: @ping_url,
           last_ping_at: @monitor.last_ping_at,
           next_due_at: @monitor.next_due_at
         }

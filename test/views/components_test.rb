@@ -21,14 +21,6 @@ class ComponentsTest < ActionView::TestCase
     refute_match "status-dot-pulse", up
   end
 
-  test "GemChip renders only when the monitor was synced from the gem" do
-    gem_monitor = Monitoring::Monitor.new(source: "gem")
-    manual_monitor = Monitoring::Monitor.new(source: "manual")
-
-    assert_match "gem", render(partial: "shared/gem_chip", locals: { monitor: gem_monitor })
-    assert_equal "", render(partial: "shared/gem_chip", locals: { monitor: manual_monitor }).strip
-  end
-
   test "UptimeBar renders one bar per day with today/Nd-ago tooltips" do
     days = %w[up up down] # oldest → newest
     html = render(partial: "shared/uptime_bar", locals: { days: days })

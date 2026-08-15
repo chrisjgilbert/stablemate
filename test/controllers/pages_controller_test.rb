@@ -230,7 +230,7 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
 
     report = css_select("li").find { |item| item.text.include?("Error reports") }
     assert report, "the policy must say what an error report can carry"
-    [ /Passwords/, /API keys/, /ping tokens/, /session cookies/ ].each do |stripped|
+    [ /Passwords/, /API keys/, /ping keys/, /session cookies/ ].each do |stripped|
       assert_match stripped, report.text, "what Honeybadger strips must be stated"
     end
   end

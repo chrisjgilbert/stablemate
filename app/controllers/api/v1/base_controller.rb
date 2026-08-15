@@ -78,14 +78,8 @@ module Api
           render json: { error: "not_found" }, status: :not_found
         end
 
-        def ping_url_for(monitor)
-          ping_url(monitor.ping_token)
-        end
-
-        # The shape lives on the presenter; this controller only supplies the
-        # request-dependent ping URL.
         def present(monitor)
-          MonitorPresenter.new(monitor, ping_url: ping_url_for(monitor))
+          MonitorPresenter.new(monitor)
         end
     end
   end

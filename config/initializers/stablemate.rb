@@ -32,6 +32,38 @@ module Stablemate
 
   PING_RETENTION = 90.days
 
+  # Both live credential shapes: `sm_live_` authenticates the management API,
+  # `sm_ping_` authenticates check-ins. Used to scrub anything bound for a third
+  # party (see the Honeybadger initializer). The alphabet and length mirror
+  # ApiKey/PingKey issuance, and it is `+` rather than an exact count so a future
+  # length change cannot silently stop it matching.
+  #
+  # No `\b` anchor, deliberately. A word boundary can only ever make this match
+  # LESS, and for a scrubber every direction of error is not equal: redacting a
+  # few extra characters of some string that merely looks like a key costs
+  # nothing, while missing one because it was concatenated onto a word character
+  # ships a live credential to a third party.
+  CREDENTIAL_PATTERN = /sm_(?:live|ping)_[A-Za-z0-9]+/
+
+  # Replace every credential in `string` with a fixed marker. Nil-tolerant
+  # because the callers hand over values they don't control.
+  def self.redact_credentials(string)
+    return string unless string.is_a?(String)
+
+    string.gsub(CREDENTIAL_PATTERN, "[FILTERED]")
+  end
+
+  # The same rule through a nested structure — request params are a Hash of
+  # Hashes and Arrays, and a credential is no less exposed for being one level
+  # down. Non-collection, non-String leaves fall through untouched.
+  def self.redact_deeply(value)
+    case value
+    when Hash  then value.transform_values { |v| redact_deeply(v) }
+    when Array then value.map { |v| redact_deeply(v) }
+    else redact_credentials(value)
+    end
+  end
+
   DEFAULT_GRACE_FRACTION = 0.15
 
   # Deliberately duplicated in the companion gem as

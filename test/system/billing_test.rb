@@ -43,7 +43,11 @@ class BillingTest < ApplicationSystemTestCase
       visit monitors_path
       assert_text "#{FREE} / #{PRO}"
       assert_no_selector "[data-testid='upgrade-button']"
-      assert_link "New monitor"
+      # Headroom is now visible as the at-limit treatment being GONE rather than
+      # as a create link (v1-scope §3.3): the next `stablemate:sync` is what
+      # takes up the new slots.
+      assert_no_selector "[data-testid='at-limit']"
+      assert_not @user.reload.at_monitor_cap?
     end
   end
 

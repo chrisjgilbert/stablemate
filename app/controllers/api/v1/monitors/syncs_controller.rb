@@ -13,10 +13,12 @@ module Api
           log_shared_key_conflicts(result[:conflicts])
 
           render json: {
+            # No `ping_url`: a monitor is addressed by the `registration_key` this
+            # payload already carries, combined with the host the gem is
+            # configured with (v1-scope §3.2). Nothing is fetched, so nothing is
+            # cached, so there is no stale-address failure mode left to have.
             monitors: result[:registered].map do |monitor|
-              { registration_key: monitor.registration_key,
-                ping_url: ping_url_for(monitor),
-                status: monitor.status }
+              { registration_key: monitor.registration_key, status: monitor.status }
             end,
             skipped: result[:skipped],
             # Monitors this project holds that matched no task in this run, and —

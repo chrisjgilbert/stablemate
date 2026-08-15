@@ -43,20 +43,18 @@ class LaunchHardeningTest < ApplicationSystemTestCase
     sign_in user
     limit = Stablemate::MAX_MONITORS_PER_USER
 
-    # Dashboard: the count and the at-limit treatment (no "New monitor" link).
+    # Dashboard: the count and the at-limit treatment. (The `refute_link "New
+    # monitor"` that used to sit here, and the "New monitor action" half of this
+    # test, are both DELETED rather than kept — v1-scope §8 flags them as
+    # assertions that stay green while proving nothing once §3.3 removes the
+    # create path everywhere. The cap itself is still asserted, below and on the
+    # sync path in monitor_sync_test.)
     assert_text "#{limit} / #{limit}"
     assert_selector "[data-testid='at-limit']"
     assert_selector "[data-testid='at-limit-note']"
-    refute_link "New monitor"
+    assert_text "You're at the #{limit}-monitor limit for the Free plan"
 
     # No pricing/upgrade UI anywhere on the dashboard.
-    assert_no_text(/upgrade/i)
-    assert_no_text(/pricing/i)
-
-    # The New-monitor action itself shows the matter-of-fact at-limit note (no form).
-    visit new_monitor_path
-    assert_selector "[data-testid='at-limit-note']"
-    assert_text "You're at the #{limit}-monitor limit for the Free plan"
     assert_no_text(/upgrade/i)
     assert_no_text(/pricing/i)
   end

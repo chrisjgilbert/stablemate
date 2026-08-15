@@ -118,14 +118,6 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "create after having no projects can return to new-monitor" do
-    sign_in @alice
-    @alice.projects.destroy_all
-
-    post projects_path, params: { project: { name: "First app" }, after: "new_monitor" }
-    assert_redirected_to new_monitor_path
-  end
-
   test "update renames the project" do
     sign_in @alice
     patch project_path(@alices_project), params: { project: { name: "Renamed app" } }

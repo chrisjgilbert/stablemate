@@ -93,10 +93,12 @@ class Api::V1::MonitorsControllerTest < ActionDispatch::IntegrationTest
     refute_includes keys, monitors(:bobs).name
   end
 
-  test "index includes ping_url and status fields" do
+  # No `ping_url`: a monitor is addressed by its own registration_key now
+  # (v1-scope §3.2), which the payload already carries.
+  test "index includes the registration key and status fields" do
     get api_v1_monitors_url, headers: auth
     monitor = JSON.parse(response.body)["monitors"].first
-    assert_includes monitor["ping_url"], "/ping/"
+    assert monitor.key?("registration_key")
     assert monitor.key?("status")
     assert monitor.key?("next_due_at")
   end

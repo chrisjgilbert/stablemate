@@ -14,23 +14,6 @@ module MonitorsHelper
     end
   end
 
-  def ping_url_for(monitor)
-    ping_url(monitor.ping_token)
-  end
-
-  def curl_snippet_for(monitor)
-    "curl -fsS #{ping_url_for(monitor)}"
-  end
-
-  # "Custom" is handled client-side by the preset_field Stimulus controller.
-  def interval_presets
-    [ [ "Every 5 minutes", 300 ], [ "Hourly", 3_600 ], [ "Daily", 86_400 ], [ "Weekly", 604_800 ] ]
-  end
-
-  def grace_presets
-    [ [ "1 minute", 60 ], [ "5 minutes", 300 ], [ "15 minutes", 900 ], [ "1 hour", 3_600 ] ]
-  end
-
   # Map the uptime concern's status symbols onto the UptimeBar partial's fill keys.
   def uptime_bar_days(series)
     series.map { |status| status == :no_data ? "no-data" : status.to_s }
@@ -42,8 +25,9 @@ module MonitorsHelper
     "#{number_with_precision(percent, precision: 2)}%"
   end
 
-  # Shared by the dashboard and the New-monitor action so the wording (and the
-  # "Free plan" label, the seam for paid tiers) lives in one place.
+  # Shared by the dashboard header chip and the at-limit note below it, so the
+  # wording (and the "Free plan" label, the seam for paid tiers) lives in one
+  # place.
   def monitor_limit_note(user)
     "You're at the #{user.monitor_limit}-monitor limit for the #{user.pro? ? "Pro" : "Free"} plan."
   end

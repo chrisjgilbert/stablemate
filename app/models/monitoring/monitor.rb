@@ -14,7 +14,22 @@ module Monitoring
       ActiveModel::Name.new(self, nil, "Monitor")
     end
 
-    include PingToken
+    # Retired by v1-scope §3.2 (ping_token: the check-in credential moved into a
+    # project-scoped PingKey in the Authorization header) and §3.1 (the three
+    # last_synced_* columns: settings arbitration has no second party now that
+    # `stablemate:sync` is the only writer of monitor config).
+    #
+    # Hidden here rather than dropped, because the DROP has to land on a LATER
+    # deploy than this code — see the AllowNullPingTokenOnMonitors migration for
+    # why dropping them in this one would 500 the deploy window. Once that
+    # follow-up migration ships, this line goes with it.
+    self.ignored_columns += %w[
+      ping_token
+      last_synced_name
+      last_synced_expected_interval_seconds
+      last_synced_grace_period_seconds
+    ]
+
     include HeartbeatStates
     include Pausing
     include Uptime
@@ -62,10 +77,20 @@ module Monitoring
       end
     end
 
+    # `source` and both predicates are kept by v1-scope §3.3, which deleted the
+    # provenance chip that used to be their most visible reader. What still
+    # reads them, precisely:
+    #
+    # - The COLUMN, in SQL: §6.1's orphan filter scopes `where(source: "gem")`
+    #   so §8's backfilled `manual-<id>` rows can never be reported as orphans
+    #   or pruned. That is the load-bearing use, and it is a scope, not a
+    #   predicate — no substitute discriminator exists (a `manual-` key prefix
+    #   is something a human can type into recurring.yml).
+    # - The PREDICATES, in the view: the show page's config panel branches on
+    #   both to avoid telling the owner of a pre-CLI monitor that a repo defines
+    #   it, and vice versa.
     def from_gem? = source == "gem"
     def manual?   = source == "manual"
-
-    def awaiting_setup? = manual? && !ever_pinged? && !suspended?
 
     # The open-incident invariant (the partial unique index on monitor_id WHERE
     # resolved_at IS NULL) guarantees at most one.
@@ -133,12 +158,6 @@ module Monitoring
     # brings it back.
     def retire! = Retirement.new(self).retire!
     def revive!(at: Time.current) = Retirement.new(self).revive!(at:)
-
-    # Returns a Transfer::Result — a gem monitor or a target collision is a clean
-    # `ok? == false`, not an exception.
-    def transfer_to(project)
-      Transfer.new(self).transfer_to(project)
-    end
 
     private
       # Skipped when the owner is going away too: closing an account cascades

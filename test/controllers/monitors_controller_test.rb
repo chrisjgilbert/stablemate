@@ -49,17 +49,34 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
-  test "a user cannot edit another user's monitor" do
-    sign_in @alice
-    get edit_monitor_path(@bobs)
-    assert_response :not_found
+  # The config-writing routes are gone, not merely unlinked (v1-scope §3.3).
+  # Asserted here rather than in the browser suite: there is nothing to look at,
+  # and CLAUDE.md keeps system tests for flows a user drives. `respond_to?` AND
+  # `recognize_path`, because a helper can be absent while the path still routes.
+  test "neither the create nor the edit route exists" do
+    assert_not respond_to?(:new_monitor_path)
+    assert_not respond_to?(:edit_monitor_path)
+
+    [ [ "/monitors", :post ],
+      [ "/monitors/#{@alices.id}/edit", :get ],
+      [ "/monitors/#{@alices.id}", :patch ],
+      [ "/monitors/#{@alices.id}", :put ] ].each do |path, verb|
+      assert_raises(ActionController::RoutingError, "#{verb.upcase} #{path} still routes") do
+        Rails.application.routes.recognize_path(path, method: verb)
+      end
+    end
   end
 
-  test "a user cannot update another user's monitor" do
+  # With the create path gone (v1-scope §3.3) the route narrows to
+  # `only: %i[index show destroy]` — which does NOT stop `/monitors/new` routing:
+  # it falls through to `show` with id="new". Worth pinning where a bookmarked
+  # create URL actually lands, because `set_monitor` scopes through
+  # current_user.monitors, so the find raises RecordNotFound. A 404, not a form
+  # and not a 500.
+  test "a bookmarked /monitors/new is an opaque 404, not a form or a crash" do
     sign_in @alice
-    patch monitor_path(@bobs), params: { monitor: { name: "hijacked" } }
+    get "/monitors/new"
     assert_response :not_found
-    assert_equal "Bobs job", @bobs.reload.name
   end
 
   test "a user cannot destroy another user's monitor" do
@@ -68,80 +85,6 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
       delete monitor_path(@bobs)
     end
     assert_response :not_found
-  end
-
-  test "create makes a manual, pending monitor with a token" do
-    sign_in @bob
-    @bobs_project.monitors.delete_all
-
-    assert_difference -> { @bob.monitors.count }, 1 do
-      post monitors_path, params: { monitor: { name: "API health", expected_interval_seconds: 300, grace_period_seconds: 60 } }
-    end
-
-    monitor = @bob.monitors.order(:created_at).last
-    assert_redirected_to monitor_path(monitor)
-    assert_equal "manual", monitor.source
-    assert_equal "pending", monitor.status
-    assert_equal 300, monitor.expected_interval_seconds
-    assert monitor.ping_token.present?
-  end
-
-  # projects.md §6 — create honours a chosen project_id, but only within the
-  # user's own projects.
-  test "create builds the monitor into the chosen project" do
-    sign_in @alice
-    other = @alice.projects.create!(name: "Second app")
-
-    post monitors_path, params: { monitor: {
-      name: "Into second", project_id: other.id,
-      expected_interval_seconds: 3600, grace_period_seconds: 300
-    } }
-
-    monitor = Monitoring::Monitor.find_by(name: "Into second")
-    assert_equal other, monitor.project
-    assert_redirected_to monitor_path(monitor)
-  end
-
-  # Tenant safety — a project_id the user doesn't own is rejected (404), never a
-  # cross-tenant assignment into someone else's project.
-  test "create rejects a foreign project_id (404, no monitor created)" do
-    sign_in @alice
-    foreign = @bobs_project
-
-    assert_no_difference -> { Monitoring::Monitor.count } do
-      post monitors_path, params: { monitor: {
-        name: "Sneaky", project_id: foreign.id,
-        expected_interval_seconds: 3600, grace_period_seconds: 300
-      } }
-    end
-    assert_response :not_found
-  end
-
-  # Scenario 8 (request) — creating past the cap re-renders with an error.
-  test "creating a monitor at the cap is rejected" do
-    sign_in @bob
-    @bobs_project.monitors.delete_all
-    Stablemate::MAX_MONITORS_PER_USER.times { |i| @bobs_project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
-
-    assert_no_difference -> { @bob.monitors.count } do
-      post monitors_path, params: { monitor: { name: "Over", expected_interval_seconds: 3600, grace_period_seconds: 300 } }
-    end
-    assert_response :unprocessable_entity
-  end
-
-  # Caps OFF (issue #16): with no cap configured, creating past the old limit is
-  # allowed through the UI create path.
-  test "with the cap OFF, creating past the old limit is allowed" do
-    stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
-      sign_in @bob
-      @bobs_project.monitors.delete_all
-      6.times { |i| @bobs_project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
-
-      assert_difference -> { @bob.monitors.count }, 1 do
-        post monitors_path, params: { monitor: { name: "Seventh", expected_interval_seconds: 3600, grace_period_seconds: 300 } }
-      end
-      assert_response :redirect
-    end
   end
 
   test "destroy removes the owner's monitor" do
@@ -242,39 +185,6 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_match "never seen", response.body
   end
 
-  # projects.md §4.4/§13-S6 — a zero-project user hitting "add a monitor" is
-  # routed into project creation first (and returned here afterward).
-  test "new redirects to project creation when the user has no project" do
-    sign_in @alice
-    @alice.projects.destroy_all
-    get new_monitor_path
-    assert_redirected_to new_project_path(after: "new_monitor")
-  end
-
-  test "new pre-selects the most-recent project by default" do
-    sign_in @alice
-    newer = @alice.projects.create!(name: "Newer app")
-    get new_monitor_path
-    assert_response :success
-    assert_select "select[name='monitor[project_id]'] option[selected][value='#{newer.id}']"
-  end
-
-  # projects.md §6 — a project's "New monitor" button pre-fills that project.
-  test "new pre-selects the project passed in the query" do
-    sign_in @alice
-    other = @alice.projects.create!(name: "Second app")
-    get new_monitor_path(monitor: { project_id: other.id })
-    assert_response :success
-    assert_select "select[name='monitor[project_id]'] option[selected][value='#{other.id}']"
-  end
-
-  # Tenant safety on the GET too — a foreign project_id never pre-fills, it 404s.
-  test "new rejects a foreign project_id (404)" do
-    sign_in @alice
-    get new_monitor_path(monitor: { project_id: @bobs_project.id })
-    assert_response :not_found
-  end
-
   # projects.md §6 — the dashboard groups monitor rows into per-project sections.
   test "index groups monitors into per-project sections" do
     sign_in @alice
@@ -304,26 +214,6 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     get monitors_path
     assert_response :success
     assert_select "[data-testid='cap-skip-banner']", false
-  end
-
-  # The ping-setup card renders full-size only while wiring up is genuinely the
-  # next step. A suspended monitor can't be revived by a ping (CheckIn swallows
-  # it), so even never-pinged it gets the collapsed disclosure — "wire it into
-  # your job" would be a false promise. Gem-registered monitors likewise (the
-  # gem gets its URL from the API sync, not this card).
-  test "show collapses ping setup for suspended and gem monitors even before any ping" do
-    sign_in @alice
-
-    suspended = create_monitor(status: "suspended", next_due_at: nil, last_ping_at: nil)
-    get monitor_path(suspended)
-    assert_response :success
-    assert_select "details[data-testid='ping-url-card']"
-    assert_select "div[data-testid='ping-url-card']", false
-
-    get monitor_path(monitors(:gem_synced))
-    assert_response :success
-    assert_select "details[data-testid='ping-url-card']"
-    assert_select "div[data-testid='ping-url-card']", false
   end
 
   # can_upgrade_to_pro? stopped being a plain plan check and now consults Pay's

@@ -8,10 +8,13 @@ require "test_helper"
 # Three things would otherwise escape, each through a different field:
 #   * API keys and tokens submitted as params (Rails filters `:token`/`:_key`/
 #     `:secret`; Honeybadger's own defaults do not).
-#   * The ping token, which is a CREDENTIAL and travels in the URL *path*
-#     (`/ping/:ping_token`). Param filtering can't help there — the path is
-#     reported both as its own `url` field and inside the breadcrumb trail — so
-#     it is redacted explicitly in both.
+#   * A check-in credential reaching a report through some field nobody
+#     enumerated. This used to be a narrow, known leak — the ping token sat in
+#     the path as `/ping/:ping_token`, and param filtering cannot reach a path —
+#     and v1-scope §3.2 closed it at the source by moving the credential into
+#     the Authorization header. The redaction is kept and retargeted at the
+#     credential SHAPE rather than deleted with the route, because "the one
+#     place a key can appear" is exactly the assumption that was wrong before.
 #   * The signed `session_id` cookie, which resumes a signed-in session for
 #     anyone holding it, and rides along in the raw `HTTP_COOKIE` header.
 #
@@ -27,10 +30,11 @@ class HoneybadgerFilteringTest < ActiveSupport::TestCase
   # before a single test has executed.
   RAILS_FILTER_PARAMETERS = Rails.application.config.filter_parameters.dup.freeze
 
-  PING_TOKEN = "pingtokenaaaabbbbccccddddeeee1111"
+  PING_KEY = "sm_ping_pingkeyaaaabbbbccccdddd1111"
   SESSION_COOKIE = "sessioncookieffff2222gggg3333hhhh"
   RAILS_SESSION_COOKIE = "railssessioniiii4444jjjj5555kkkk"
   API_KEY = "sm_live_apikeyllll6666mmmm7777nnnn"
+  REGISTRATION_KEY = "nightly_billing"
 
   test "Honeybadger filters everything Rails filters" do
     filtered = Honeybadger.config[:"request.filter_keys"].map(&:to_s)
@@ -57,23 +61,58 @@ class HoneybadgerFilteringTest < ActiveSupport::TestCase
       "our session cookie is a credential; the raw Cookie header must not be reported"
   end
 
-  test "no credential from a failed ping request survives into the report" do
-    payload = report_for_failed_ping_request
+  test "no credential from a failed check-in request survives into the report" do
+    payload = report_for_failed_check_in
 
-    assert_no_match(/#{PING_TOKEN}/, payload,
-      "the ping token is a credential and must never reach a third party")
+    assert_no_match(/#{PING_KEY}/, payload,
+      "the ping key is a credential and must never reach a third party")
     assert_no_match(/#{SESSION_COOKIE}/, payload,
       "the signed session_id cookie resumes a session — it must never leave")
     assert_no_match(/#{RAILS_SESSION_COOKIE}/, payload)
     assert_no_match(/#{API_KEY}/, payload)
   end
 
-  test "the redacted report still says enough to debug with" do
-    report = JSON.parse(report_for_failed_ping_request)
+  # The point of redacting a shape rather than a route: a key that reaches a
+  # report through a channel nobody enumerated is scrubbed anyway. Asserted from
+  # both directions — the URL and the breadcrumb trail — because they are
+  # populated by different code and the old rule only ever covered one of them by
+  # accident of where the credential happened to sit.
+  test "a credential leaked into a URL or a breadcrumb is redacted wherever it lands" do
+    report = JSON.parse(report_for_failed_check_in)
 
-    assert_equal "https://stablemate.dev/ping/[FILTERED]?duration_ms=12", report.dig("request", "url")
-    assert_equal "/ping/[FILTERED]", report.dig("breadcrumbs", "trail", 0, "metadata", "path")
-    assert_equal "PingsController", report.dig("breadcrumbs", "trail", 0, "metadata", "controller")
+    assert_no_match(/#{PING_KEY}/, report.dig("request", "url").to_s)
+    assert_no_match(/#{PING_KEY}/, report.dig("breadcrumbs", "trail", 0, "metadata").to_s)
+  end
+
+  # The two channels no filter list reaches. Asserted separately from the
+  # payload-wide sweep above so a regression names which one broke.
+  test "a credential in the exception message is redacted" do
+    report = JSON.parse(report_for_failed_check_in)
+
+    message = report.dig("error", "message").to_s
+    assert_no_match(/#{PING_KEY}/, message)
+    assert_includes message, "check-in failed using [FILTERED]"
+  end
+
+  test "a credential in an unfiltered param name is redacted, at any depth" do
+    report = JSON.parse(report_for_failed_check_in)
+
+    params = report.dig("request", "params")
+    assert_equal "[FILTERED]", params["debug"]
+    assert_equal [ "[FILTERED]" ], params.dig("retry", "with")
+  end
+
+  # Redaction that took the diagnostic value with it would be its own bug. The
+  # registration key is the TASK NAME, not a secret — it is the single most
+  # useful field in a check-in error report, and it has to survive.
+  test "the redacted report still says enough to debug with" do
+    report = JSON.parse(report_for_failed_check_in)
+
+    assert_includes report.dig("request", "url").to_s, REGISTRATION_KEY
+    assert_equal "/api/v1/monitors/#{REGISTRATION_KEY}/pings",
+                 report.dig("breadcrumbs", "trail", 0, "metadata", "path")
+    assert_equal "Api::V1::Monitors::PingsController",
+                 report.dig("breadcrumbs", "trail", 0, "metadata", "controller")
   end
 
   test "redaction leaves an unrelated URL alone" do
@@ -102,24 +141,37 @@ class HoneybadgerFilteringTest < ActiveSupport::TestCase
     end
 
     # The whole JSON body Honeybadger would POST for an exception raised while
-    # serving a ping, with every credential the request actually carries present
-    # in the Rack env and in the breadcrumb Rails' instrumentation would leave.
-    def report_for_failed_ping_request
+    # serving a check-in, with every credential the request actually carries
+    # present in the Rack env and in the breadcrumb Rails' instrumentation leaves.
+    #
+    # The query string deliberately carries the ping key even though nothing in
+    # the app would ever put it there: that is the "some field nobody
+    # enumerated" case, and it is what the shape-based rule exists to survive.
+    def report_for_failed_check_in
       notice = Honeybadger::Notice.new(
         Honeybadger.config,
-        exception: RuntimeError.new("boom"),
-        rack_env: ping_rack_env,
+        # The message carries a credential too: an exception raised while using a
+        # key routinely interpolates it, and NO filter list reaches a message.
+        exception: RuntimeError.new("check-in failed using #{PING_KEY}"),
+        rack_env: check_in_rack_env,
         breadcrumbs: action_controller_breadcrumbs
       )
       run_before_notify_hooks(notice)
       notice.as_json.to_json
     end
 
-    def ping_rack_env
-      Rack::MockRequest.env_for("https://stablemate.dev/ping/#{PING_TOKEN}?duration_ms=12", method: "POST").merge(
+    def check_in_rack_env
+      url = "https://stablemate.dev/api/v1/monitors/#{REGISTRATION_KEY}/pings?debug=#{PING_KEY}"
+      Rack::MockRequest.env_for(url, method: "POST").merge(
         "action_dispatch.parameter_filter" => Rails.application.config.filter_parameters,
         "action_dispatch.request.parameters" => {
-          "ping_token" => PING_TOKEN, "controller" => "pings", "action" => "create"
+          "registration_key" => REGISTRATION_KEY,
+          "controller" => "api/v1/monitors/pings", "action" => "create",
+          # Filtered BY NAME, and "debug" is not a filtered name — so the value
+          # ships raw unless the shape rule catches it. Nested, because params
+          # are a tree and a credential is no less exposed one level down.
+          "debug" => PING_KEY,
+          "retry" => { "with" => [ PING_KEY ] }
         },
         "HTTP_COOKIE" => "session_id=#{SESSION_COOKIE}; _stablemate_session=#{RAILS_SESSION_COOKIE}",
         "HTTP_AUTHORIZATION" => "Bearer #{API_KEY}"
@@ -128,7 +180,7 @@ class HoneybadgerFilteringTest < ActiveSupport::TestCase
 
     # What Honeybadger records from `start_processing.action_controller`: the
     # payload keys it selects include `:path`, which is `request.filtered_path` —
-    # and that filters the query string only, so a path-segment credential is
+    # and that filters the query string only, so anything in a path segment is
     # still raw when it gets here.
     def action_controller_breadcrumbs
       Honeybadger::Breadcrumbs::Collector.new(Honeybadger.config).tap do |collector|
@@ -136,7 +188,9 @@ class HoneybadgerFilteringTest < ActiveSupport::TestCase
           Honeybadger::Breadcrumbs::Breadcrumb.new(
             category: "request",
             message: "Action Controller Start Process",
-            metadata: { controller: "PingsController", action: "create", path: "/ping/#{PING_TOKEN}" }
+            metadata: { controller: "Api::V1::Monitors::PingsController", action: "create",
+                        path: "/api/v1/monitors/#{REGISTRATION_KEY}/pings",
+                        leaked: "retrying with #{PING_KEY}" }
           )
         )
       end

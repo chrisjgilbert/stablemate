@@ -4,26 +4,31 @@
 # Honeybadger is a third party, so filtering is a privacy decision. Its defaults
 # cover only `password`, `password_confirmation` and `HTTP_AUTHORIZATION`, and it
 # picks up Rails' filter_parameters only for notices raised inside a request — not
-# in a job. Four fields leak separately, so each is closed separately:
+# in a job. Two mechanisms, because the leaks come in two kinds:
 #
+# BY NAME — the gem's own filter list, extended at the bottom of this file:
 #   1. PARAMS — reuse Rails' list verbatim so the two can't drift.
 #   2. HTTP_COOKIE — reported raw, and carries the signed session_id cookie.
 #      Honeybadger's per-cookie filter matches NAMES, and neither of ours looks
 #      like a secret to a keyword match, so the whole header goes.
-#   3. THE URL — the ping token is a credential in the path (/ping/:ping_token),
-#      which no param filtering reaches. A before_notify hook rewrites it.
-#   4. THE BREADCRUMB TRAIL — the same path arrives again via Rails'
-#      process_action payload, which filters the query string only.
+#
+# BY SHAPE — the before_notify hook, for everything a name-based list cannot
+# reach: the URL, the breadcrumb trail, the exception message, and a param whose
+# NAME is innocuous while its value is a key.
+#
+# The shape rule replaced a narrower one, and why is the whole point. It used to
+# rewrite `/ping/:ping_token` out of the URL, because that endpoint carried its
+# credential in the path. v1-scope §3.2 deletes that endpoint — but the lesson of
+# it is that enumerating the places a key can appear is what failed, so the rule
+# is retargeted rather than retired: it now matches the credential shape wherever
+# it lands. Adding a channel to the hook is cheap; discovering one you missed is
+# not.
 #
 # The privacy policy describes this behaviour; change it there too.
 
 # Initializers load alphabetically, so `stablemate.rb` hasn't run yet — load it
 # now for honeybadger_api_key below. stablemate.rb self-guards the second load.
 require_relative "stablemate"
-
-# One rule, applied everywhere a path can surface, so the two can't drift.
-ping_token_in_path = %r{/ping/[^/?#]+}
-redacted_ping_path = "/ping/[FILTERED]"
 
 Honeybadger.configure do |config|
   # Not in config/honeybadger.yml: that file is git-tracked and self-hosters clone
@@ -40,14 +45,25 @@ Honeybadger.configure do |config|
   end
 
   config.before_notify do |notice|
-    notice.url = notice.url.sub(ping_token_in_path, redacted_ping_path) if notice.url
+    notice.url = Stablemate.redact_credentials(notice.url) if notice.url
+
+    # The exception MESSAGE, which no filtering reaches: Honeybadger's filter
+    # keys act on params and headers, and a credential interpolated into a raised
+    # message ("check-in failed for sm_ping_…") sails past all of them.
+    notice.error_message = Stablemate.redact_credentials(notice.error_message) if notice.error_message
+
+    # PARAMS, which are filtered only BY NAME. `?debug=sm_ping_…` is not a
+    # filtered key, so the value ships raw — and the whole reason this rule
+    # matches a shape rather than a location is that "the one place a key can
+    # appear" was the assumption that produced the leak it replaces.
+    notice.params = Stablemate.redact_deeply(notice.params) if notice.params.present?
 
     # Scrub every string in the trail rather than the `:path` key alone: the
     # metadata Rails hands over is instrumentation payloads we don't control, and
     # a substitution that matches nothing is free.
     notice.breadcrumbs&.each do |breadcrumb|
       breadcrumb.metadata = breadcrumb.metadata.transform_values do |value|
-        value.is_a?(String) ? value.sub(ping_token_in_path, redacted_ping_path) : value
+        Stablemate.redact_credentials(value)
       end
     end
   end

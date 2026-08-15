@@ -289,11 +289,23 @@ class Project::MonitorSyncPruneTest < ActiveSupport::TestCase
     end
   end
 
-  test "an absent schedule leaves a stored one alone, as every other setting does" do
+  # REVERSED in phase 3, deliberately. This used to assert that an absent
+  # `schedule` leaves a stored one alone "as every other setting does" — the
+  # rule that protects name/interval/grace from a partial old-gem payload.
+  # `schedule` is not like them: the gem omits it EXACTLY when there is no
+  # schedule (`Registrars::DeclaredMonitors` sends none for a `c.monitors`
+  # entry), so absent means "none", not "unknown".
+  #
+  # What made the difference matter is that v1-scope §3.3's config panel renders
+  # the string as where the monitor's config lives. Keeping a stale one puts a
+  # false sentence — "derived from `0 9 * * *`" — on the one panel whose whole
+  # job is answering "where does this setting live?", for a task that now lives
+  # in `c.monitors` with a bare interval.
+  test "a task that drops its schedule clears the stored string" do
     @project.sync_monitors(app: "my-app", entries: [ entry("reports.daily", schedule: "0 9 * * *") ])
     @project.sync_monitors(app: "my-app", entries: [ entry("reports.daily") ])
 
-    assert_equal "0 9 * * *", monitor("reports.daily").schedule
+    assert_nil monitor("reports.daily").schedule
   end
 
   # --- Reviving out of the other not-monitored states -------------------------

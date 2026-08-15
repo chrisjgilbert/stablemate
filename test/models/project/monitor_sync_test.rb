@@ -21,7 +21,6 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     assert_equal "gem", monitor.source
     assert_equal "pending", monitor.status
     assert_equal "daily_digest", monitor.registration_key
-    assert monitor.ping_token.present?
     assert_empty result[:skipped]
   end
 
@@ -170,9 +169,7 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     # two-connection race can't be staged under transactional fixtures.
     @project.monitors.create!(
       registration_key: "racey", name: "Original", expected_interval_seconds: 3600,
-      grace_period_seconds: 300, source: "gem", status: "pending",
-      last_synced_name: "Original", last_synced_expected_interval_seconds: 3600,
-      last_synced_grace_period_seconds: 300
+      grace_period_seconds: 300, source: "gem", status: "pending"
     )
 
     # Only the racing key's FIRST lookup is blind. That's the shape of the race:
@@ -290,91 +287,25 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     result = @project.sync_monitors(entries: [
       { registration_key: "evil", name: "Evil", expected_interval_seconds: 60,
         grace_period_seconds: 5, source: "manual", status: "up",
-        ping_token: "attacker_chosen_token", project_id: other.id, user_id: users(:alice).id }
+        project_id: other.id, user_id: users(:alice).id }
     ])
     monitor = result[:registered].first
 
     assert_equal "gem", monitor.source
     assert_equal "pending", monitor.status
-    assert_not_equal "attacker_chosen_token", monitor.ping_token
     # The operation controls scope, not the payload: the monitor lands in the
     # syncing project (and thus the syncing user), never the injected ones.
     assert_equal @project, monitor.project
     assert_equal @user, monitor.user
   end
 
-  # --- F2: user overrides survive a re-sync ---------------------------------
+  # --- F2: the repo owns monitor config -------------------------------------
 
-  # The gem re-syncs on every production boot, and the update path used to
-  # overwrite name/interval/grace unconditionally — so a user who tightened a
-  # monitor in the UI (which locked decision #5 and docs/integrating.md
-  # explicitly invite) had all three silently reverted at the next deploy.
-  test "a re-sync preserves the settings the user changed in the UI" do
-    @project.sync_monitors(entries: [ entry("digest", name: "digest", interval: 3600, grace: 300) ])
-    monitor = @project.monitors.find_by(registration_key: "digest")
-    monitor.update!(name: "Nightly digest", expected_interval_seconds: 900, grace_period_seconds: 60)
-
-    # The next deploy: same recurring.yml, so the gem sends exactly what it sent
-    # before. Nothing about the schedule has changed, so nothing may be reverted.
-    result = @project.sync_monitors(entries: [ entry("digest", name: "digest", interval: 3600, grace: 300) ])
-
-    assert_equal [ "digest" ], result[:registered].map(&:registration_key)
-    monitor.reload
-    assert_equal "Nightly digest", monitor.name
-    assert_equal 900, monitor.expected_interval_seconds
-    assert_equal 60, monitor.grace_period_seconds
-  end
-
-  # The payload arrives from JSON, where the numbers are strings. Comparing a
-  # string against the stored integer would make every boot look like a schedule
-  # change and hand the gem back its clobber.
-  test "a re-sync sending its numbers as strings is not a schedule change" do
-    @project.sync_monitors(entries: [ entry("digest", interval: 3600, grace: 300) ])
-    @project.monitors.find_by(registration_key: "digest").update!(expected_interval_seconds: 900)
-
-    @project.sync_monitors(entries: [
-      { registration_key: "digest", name: "digest",
-        expected_interval_seconds: "3600", grace_period_seconds: "300" }
-    ])
-
-    assert_equal 900, @project.monitors.find_by(registration_key: "digest").expected_interval_seconds
-  end
-
-  # PRECEDENCE (the deliberate call): when the user has overridden a value AND
-  # recurring.yml genuinely changes it, the gem wins. The interval describes how
-  # often the job actually runs; once that changes, an override derived from the
-  # old schedule is stale and would false-alarm — the failure this product exists
-  # to prevent. The user's override is only protected from being undone by a
-  # re-sync that says nothing new. See #gem_may_write?.
-  test "a genuine recurring.yml change overrides the user's own value" do
-    @project.sync_monitors(entries: [ entry("digest", name: "digest", interval: 3600, grace: 300) ])
-    monitor = @project.monitors.find_by(registration_key: "digest")
-    monitor.update!(name: "Nightly digest", expected_interval_seconds: 900, grace_period_seconds: 60)
-
-    # recurring.yml now says hourly -> every two hours (and renames the task).
-    @project.sync_monitors(entries: [ entry("digest", name: "Two-hourly digest", interval: 7200, grace: 600) ])
-
-    monitor.reload
-    assert_equal "Two-hourly digest", monitor.name
-    assert_equal 7200, monitor.expected_interval_seconds
-    assert_equal 600, monitor.grace_period_seconds
-  end
-
-  # Each setting is judged on its own: a schedule change to the interval must not
-  # drag a name the user rewrote along with it.
-  test "an overridden setting survives a change to a different one" do
-    @project.sync_monitors(entries: [ entry("digest", name: "digest", interval: 3600, grace: 300) ])
-    monitor = @project.monitors.find_by(registration_key: "digest")
-    monitor.update!(name: "Nightly digest")
-
-    @project.sync_monitors(entries: [ entry("digest", name: "digest", interval: 7200, grace: 300) ])
-
-    monitor.reload
-    assert_equal "Nightly digest", monitor.name
-    assert_equal 7200, monitor.expected_interval_seconds
-  end
-
-  # No override: the gem still owns the values, and a schedule change lands.
+  # The one survivor of the ten arbitration tests that used to live here
+  # (v1-scope §3.1): it asserts exactly what always-write does, so it reads the
+  # same before and after. Its nine siblings asserted a refusal or the
+  # `last_synced_*` columns and went with them — the round trip and the recovery
+  # property that replace them live in monitor_sync_always_write_test.rb.
   test "an untouched monitor still tracks recurring.yml" do
     @project.sync_monitors(entries: [ entry("digest", name: "digest", interval: 3600, grace: 300) ])
 
@@ -386,92 +317,22 @@ class Project::MonitorSyncTest < ActiveSupport::TestCase
     assert_equal 600, monitor.grace_period_seconds
   end
 
-  # A monitor registered before this shipped remembers nothing, and "we don't
-  # know what the gem last sent" must mean "leave the user's values alone" — the
-  # first sync after the deploy is exactly when the clobber used to happen. It
-  # starts remembering, so genuine schedule changes propagate from then on.
-  test "a monitor with nothing remembered is not reverted on the first re-sync" do
-    monitor = @project.monitors.create!(
-      registration_key: "legacy", name: "Renamed by hand", expected_interval_seconds: 900,
-      grace_period_seconds: 60, source: "gem", status: "pending"
-    )
-    assert_nil monitor.last_synced_expected_interval_seconds
-
-    @project.sync_monitors(entries: [ entry("legacy", name: "legacy", interval: 3600, grace: 300) ])
-
-    monitor.reload
-    assert_equal "Renamed by hand", monitor.name
-    assert_equal 900, monitor.expected_interval_seconds
-    assert_equal 60, monitor.grace_period_seconds
-    assert_equal 3600, monitor.last_synced_expected_interval_seconds
-
-    # ...and from here on a real schedule change is applied as normal.
-    @project.sync_monitors(entries: [ entry("legacy", name: "legacy", interval: 10_800, grace: 300) ])
-    assert_equal 10_800, monitor.reload.expected_interval_seconds
-  end
-
-  # The known limit of that rule, pinned so it can't drift unnoticed: a schedule
-  # change already IN FLIGHT when we started remembering is refused for as long as
-  # the payload keeps repeating it. On the first sync a divergence is equally
-  # consistent with "the user tightened this" and "the schedule changed", and we
-  # resolve it toward never overwriting a setting the user may have chosen — so
-  # this monitor keeps its old cadence until the schedule changes again.
-  test "a schedule change in flight when we start remembering waits for the next change" do
-    monitor = @project.monitors.create!(
-      registration_key: "legacy", name: "legacy", expected_interval_seconds: 3600,
-      grace_period_seconds: 300, source: "gem", status: "pending"
-    )
-    assert_nil monitor.last_synced_expected_interval_seconds
-
-    # The same, unchanged payload arriving repeatedly never lands.
-    3.times do
-      @project.sync_monitors(entries: [ entry("legacy", name: "legacy", interval: 7200, grace: 300) ])
-    end
-    assert_equal 3600, monitor.reload.expected_interval_seconds,
-      "an in-flight change is refused while the payload keeps repeating it"
-    assert_equal 7200, monitor.last_synced_expected_interval_seconds
-
-    # A genuinely NEW schedule change does land, which is how it recovers.
-    @project.sync_monitors(entries: [ entry("legacy", name: "legacy", interval: 1800, grace: 300) ])
-    assert_equal 1800, monitor.reload.expected_interval_seconds
-  end
-
-  test "a newly created monitor remembers what the gem sent" do
-    result = @project.sync_monitors(entries: [ entry("fresh", name: "Fresh", interval: 3600, grace: 300) ])
-    monitor = result[:registered].first
-
-    assert_equal "Fresh", monitor.last_synced_name
-    assert_equal 3600, monitor.last_synced_expected_interval_seconds
-    assert_equal 300, monitor.last_synced_grace_period_seconds
-  end
-
-  # A gem that sends no name at all leaves the monitor named after its key; the
-  # remembered name has to be that same defaulted value, or the next sync would
-  # read the default as a user rename.
-  test "a monitor named after its key is not mistaken for a rename" do
-    @project.sync_monitors(entries: [
-      { registration_key: "cleanup", expected_interval_seconds: 3600, grace_period_seconds: 300 }
-    ])
-
-    monitor = @project.monitors.find_by(registration_key: "cleanup")
-    assert_equal "cleanup", monitor.last_synced_name
-  end
-
-  # F2 x F7: next_due_at is re-derived whenever the interval changes, so a sync
-  # that leaves the user's interval alone must leave the due time alone too —
-  # otherwise the revert would come back through the back door as a detection
-  # window the user never asked for.
-  test "a preserved interval leaves next_due_at on the user's cadence" do
+  # F2 x F7: next_due_at is re-derived whenever the interval changes. Under
+  # arbitration this test asserted the opposite — that a REFUSED interval left
+  # the due time alone — which was the same property read from the other side:
+  # the detection window must never drift away from the interval actually in
+  # force. Always-write keeps that invariant and inverts the case, because now
+  # the sync's interval is always the one in force.
+  test "a synced interval change re-derives the detection window" do
     @project.sync_monitors(entries: [ entry("digest", interval: 3600, grace: 300) ])
     monitor = @project.monitors.find_by(registration_key: "digest")
     monitor.register_contact(Time.current)
     monitor.save!
-    monitor.update!(expected_interval_seconds: 900)
-    user_due_at = monitor.reload.next_due_at
 
-    @project.sync_monitors(entries: [ entry("digest", interval: 3600, grace: 300) ])
+    @project.sync_monitors(entries: [ entry("digest", interval: 900, grace: 300) ])
 
-    assert_equal user_due_at, monitor.reload.next_due_at
+    monitor.reload
+    assert_equal 900, monitor.expected_interval_seconds
     assert_equal monitor.last_ping_at + 900.seconds, monitor.next_due_at
   end
 
