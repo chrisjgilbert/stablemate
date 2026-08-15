@@ -25,7 +25,7 @@ class ProjectsController < ApplicationController
   def create
     @project = current_user.projects.new(project_params)
     if @project.save
-      redirect_to after_create_path, notice: "Project created."
+      redirect_to @project, notice: "Project created."
     else
       render :new, status: :unprocessable_entity
     end
@@ -67,14 +67,5 @@ class ProjectsController < ApplicationController
 
     def project_params
       params.require(:project).permit(:name)
-    end
-
-    # After creating the first project from the "add a monitor" flow, return the
-    # user to monitor creation. Kept as a stateless, explicitly-whitelisted param
-    # (no open-redirect surface, no stale session) for this single origin. If a
-    # second "create a project first" entry point appears, unify this with
-    # Authentication#after_authentication_url instead of growing a branch per caller.
-    def after_create_path
-      params[:after] == "new_monitor" ? new_monitor_path : @project
     end
 end

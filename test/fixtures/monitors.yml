@@ -1,13 +1,12 @@
 # Fixtures are inserted via raw SQL (callbacks/validations are skipped), so every
-# NOT NULL column — including ping_token, which the model normally auto-fills —
-# must be set explicitly here. Monitors belong to a project now (projects.md §10):
+# NOT NULL column must be set explicitly here.
+# Monitors belong to a project now (projects.md §10):
 # each references a fixture project (project: alices_default) and no longer sets
 # `user:` — the column is gone.
 pending:
   project: alices_default
   monitor_type: heartbeat
   name: Nightly backup
-  ping_token: fixture_pending_token_aaaaaaaaaaaaaaaa
   expected_interval_seconds: 3600
   grace_period_seconds: 300
   status: pending
@@ -17,7 +16,6 @@ up:
   project: alices_default
   monitor_type: heartbeat
   name: Hourly sync
-  ping_token: fixture_up_token_bbbbbbbbbbbbbbbbbbbb
   expected_interval_seconds: 3600
   grace_period_seconds: 300
   status: up
@@ -30,7 +28,6 @@ gem_synced:
   project: alices_default
   monitor_type: heartbeat
   name: daily_digest
-  ping_token: fixture_gem_token_dddddddddddddddddd
   expected_interval_seconds: 86400
   grace_period_seconds: 3600
   status: pending
@@ -42,7 +39,6 @@ bobs:
   project: bobs_default
   monitor_type: heartbeat
   name: Bobs job
-  ping_token: fixture_bobs_token_cccccccccccccccc
   expected_interval_seconds: 3600
   grace_period_seconds: 300
   status: up

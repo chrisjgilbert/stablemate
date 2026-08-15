@@ -18,24 +18,23 @@ class Api::V1::MonitorPresenterTest < ActiveSupport::TestCase
   end
 
   test "summary publishes exactly the index fields" do
-    assert_equal %i[id name status registration_key ping_url last_ping_at next_due_at].sort,
+    assert_equal %i[id name status registration_key last_ping_at next_due_at].sort,
       present.summary.keys.sort
   end
 
-  test "summary carries the monitor's values and the ping url it was given" do
+  test "summary carries the monitor's values" do
     summary = present.summary
 
     assert_equal @monitor.id, summary[:id]
     assert_equal "Nightly billing", summary[:name]
     assert_equal "up", summary[:status]
     assert_equal "nightly_billing", summary[:registration_key]
-    assert_equal "https://example.test/ping/tok", summary[:ping_url]
     assert_equal Time.utc(2026, 1, 1, 9, 0, 0), summary[:last_ping_at]
     assert_equal Time.utc(2026, 1, 2, 9, 0, 0), summary[:next_due_at]
   end
 
   test "detail publishes the summary fields plus the configuration and uptime" do
-    assert_equal (%i[id name status registration_key ping_url last_ping_at next_due_at] +
+    assert_equal (%i[id name status registration_key last_ping_at next_due_at] +
       %i[source expected_interval_seconds grace_period_seconds uptime_percent]).sort,
       present.detail.keys.sort
   end
@@ -54,6 +53,6 @@ class Api::V1::MonitorPresenterTest < ActiveSupport::TestCase
 
   private
     def present
-      Api::V1::MonitorPresenter.new(@monitor, ping_url: "https://example.test/ping/tok")
+      Api::V1::MonitorPresenter.new(@monitor)
     end
 end

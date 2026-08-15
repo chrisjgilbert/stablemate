@@ -10,6 +10,7 @@ class UptimeHistoryTest < ApplicationSystemTestCase
     Monitoring::Monitor.delete_all
     @alice = users(:alice)
     @project = @alice.projects.sole
+    @ping_key = issue_ping_key(@project)
   end
 
   # S8 — Detail uptime panel: 90-bar UptimeBar, overall % matching a fixture, and
@@ -85,13 +86,14 @@ class UptimeHistoryTest < ApplicationSystemTestCase
   # "down for …", NO Acknowledge button; clears + badge returns to Up on recovery.
   test "S10: a down monitor shows the incident banner with no Acknowledge, clearing on recovery" do
     monitor = @project.monitors.create!(
-      name: "Down watch",
+      name: "Down watch", registration_key: "down_watch", source: "gem",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300
     )
 
-    # Ping it Up, then drive it Down via real detection under travel_to.
-    Capybara.using_session(:pinger) { visit ping_path(monitor.ping_token) }
+    # Check in Up over the real endpoint, then drive it Down via real detection
+    # under travel_to.
+    browser_check_in(monitor, ping_key: @ping_key)
     assert monitor.reload.up?
 
     travel_to monitor.due_with_grace_at + 1.minute do
@@ -112,9 +114,9 @@ class UptimeHistoryTest < ApplicationSystemTestCase
     assert_no_text "Acknowledge"
     assert_selector "##{dom_id(monitor, :badge)}", text: "Down"
 
-    # A recovering ping clears the banner and flips the badge back to Up (Turbo).
+    # A recovering check-in clears the banner and flips the badge back (Turbo).
     perform_enqueued_jobs do
-      Capybara.using_session(:pinger) { visit ping_path(monitor.ping_token) }
+      browser_check_in(monitor, ping_key: @ping_key)
     end
 
     assert_selector "##{dom_id(monitor, :badge)}", text: "Up"

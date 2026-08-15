@@ -36,7 +36,7 @@ module ActiveSupport
     # The rate-limit stores persist across tests within a worker; clear them so
     # ordinary per-test requests never accumulate into a spurious throttle.
     setup do
-      [ PingsController, RegistrationsController, Api::V1::BaseController, AccountCredentials,
+      [ RegistrationsController, Api::V1::BaseController, AccountCredentials,
         PingKeyAuthentication ].each do |limiter|
         limiter::RATE_LIMIT_STORE.clear
       end
@@ -53,13 +53,15 @@ module RequestSignInHelper
 end
 
 module RateLimitingTestHelper
-  # Clear the ping limiter's store around a block so a test starts from a clean
-  # count and leaves no residue for the next one.
+  # Clear the check-in limiter's stores around a block so a test starts from a
+  # clean count and leaves no residue for the next one. Both layers, because
+  # §5.3 stacks a per-monitor limit on a per-IP one and a test that exhausts
+  # either would otherwise poison the next.
   def with_rate_limiting
-    PingsController::RATE_LIMIT_STORE.clear
+    PingKeyAuthentication::RATE_LIMIT_STORE.clear
     yield
   ensure
-    PingsController::RATE_LIMIT_STORE.clear
+    PingKeyAuthentication::RATE_LIMIT_STORE.clear
   end
 end
 

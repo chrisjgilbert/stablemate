@@ -1,0 +1,63 @@
+<%#
+  Read-only monitor config, with its source named (v1-scope §3.3). There is no
+  edit form any more — `bin/rails stablemate:sync` is the only writer of monitor
+  config — so this panel must answer the question the vanished Edit button
+  raises: where does this setting live, and how do I change it?
+
+  The copy branches on `source` because §8's backfill leaves a permanent
+  `manual` population that no repo defines, for which every sentence about the
+  gem is false. Locals: monitor.
+%>
+<div class="rounded-xl border border-border bg-surface p-6 shadow-sm" data-testid="config-panel">
+  <h2 class="text-[13px] font-semibold text-secondary mb-4">Settings</h2>
+  <dl class="grid grid-cols-2 gap-y-3 text-[13px]">
+    <dt class="text-muted">Status</dt><dd><%= render "shared/status_badge", status: monitor.status %></dd>
+    <dt class="text-muted">Expected interval</dt><dd class="font-mono"><%= humanize_seconds(monitor.expected_interval_seconds) %></dd>
+    <dt class="text-muted">Grace period</dt><dd class="font-mono"><%= humanize_seconds(monitor.grace_period_seconds) %></dd>
+    <dt class="text-muted">Last ping</dt>
+    <dd class="font-mono"><%= mono_timestamp(monitor.last_ping_at) %></dd>
+    <%= render "monitors/next_check", monitor: monitor, variant: :dl %>
+  </dl>
+
+  <div class="mt-4 border-t border-hairline pt-3 text-[12px] text-muted leading-relaxed" data-testid="config-source">
+    <% if monitor.from_gem? %>
+      <p>
+        <span class="font-medium text-secondary">Defined in your repo.</span>
+        <%# §11: the schedule string may be SHOWN when present, but nothing may be
+            PROMISED from it — detection is interval-based in V1, so this panel
+            never claims a cron-derived next run. When the column is NULL (a
+            `c.monitors` interval declaration) we fall back to the mechanism
+            line, which is true of every synced row. %>
+        <% if monitor.schedule.present? %>
+          Checked every <%= humanize_seconds(monitor.expected_interval_seconds) %>,
+          derived from <code class="font-mono text-secondary"><%= monitor.schedule %></code>
+          <% if monitor.last_synced_app.present? %>in <%= monitor.last_synced_app %><% end %>.
+        <% else %>
+          Registered by <code class="font-mono text-secondary">stablemate:sync</code><%
+            %><% if monitor.last_synced_app.present? %> from <%= monitor.last_synced_app %><% end %>.
+        <% end %>
+        Edit it where it lives and deploy — the next sync applies the change.
+      </p>
+      <% if monitor.schedule.present? %>
+        <p class="mt-1">
+          Stablemate watches the gap between runs, not the calendar, so the
+          interval above is what it actually enforces.
+        </p>
+      <% end %>
+    <% else %>
+      <%# §11: the backfilled population has no config writer at all — no form,
+          no sync entry (their keys sit outside the gem's namespace), and no
+          transfer. Say so here rather than leave the owner of a pre-CLI monitor
+          to work it out from a missing button. %>
+      <p>
+        <span class="font-medium text-secondary">Created before Stablemate moved to config-as-code</span>,
+        so no repo defines it and its settings can no longer be changed.
+      </p>
+      <p class="mt-1">
+        To change them, delete this monitor and declare the same job in
+        <code class="font-mono text-secondary">c.monitors</code> — that also moves
+        it onto a key your repo owns.
+      </p>
+    <% end %>
+  </div>
+</div>

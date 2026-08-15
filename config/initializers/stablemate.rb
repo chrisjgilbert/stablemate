@@ -32,6 +32,21 @@ module Stablemate
 
   PING_RETENTION = 90.days
 
+  # Both live credential shapes: `sm_live_` authenticates the management API,
+  # `sm_ping_` authenticates check-ins. Used to scrub anything bound for a third
+  # party (see the Honeybadger initializer). The alphabet and length mirror
+  # ApiKey/PingKey issuance, and it is `+` rather than an exact count so a future
+  # length change cannot silently stop it matching.
+  CREDENTIAL_PATTERN = /\bsm_(?:live|ping)_[A-Za-z0-9]+/
+
+  # Replace every credential in `string` with a fixed marker. Nil-tolerant
+  # because the callers hand over values they don't control.
+  def self.redact_credentials(string)
+    return string unless string.is_a?(String)
+
+    string.gsub(CREDENTIAL_PATTERN, "[FILTERED]")
+  end
+
   DEFAULT_GRACE_FRACTION = 0.15
 
   # Deliberately duplicated in the companion gem as

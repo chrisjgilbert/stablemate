@@ -1,26 +1,35 @@
 require "application_system_test_case"
 
-# Error notices (job-failure-details.md §11) — the manual-path flow: an up
-# monitor receives a failure ping (`status=1&message=…`), flips down live on the
-# dashboard, the down email carries the reported error, and the next successful
-# ping recovers it with a recovery email.
+# Error notices (job-failure-details.md §11): an up monitor receives a failure
+# check-in (`status=1&message=…`), flips down live on the dashboard, the down
+# email carries the reported error, and the next successful check-in recovers it
+# with a recovery email.
+#
+# Driven over the real endpoint via browser_check_in rather than monitor.check_in!
+# — v1-scope §8 flags this file as one of the three that lose end-to-end coverage
+# if they drop to the model when the credential moves into a header (§3.2).
 class ErrorNoticesTest < ApplicationSystemTestCase
   include ActiveJob::TestHelper
 
   # Detection sweeps every monitor, so clear them all and create exactly one.
-  setup { Monitoring::Monitor.delete_all; @alice = users(:alice) }
+  setup do
+    Monitoring::Monitor.delete_all
+    @alice = users(:alice)
+    @project = @alice.projects.sole
+    @ping_key = issue_ping_key(@project)
+  end
 
   test "a failure ping flips the monitor down live, emails the error, then a success recovers it" do
-    monitor = @alice.projects.sole.monitors.create!(
-      name: "Nightly backup",
+    monitor = @project.monitors.create!(
+      name: "Nightly backup", registration_key: "nightly_backup", source: "gem",
       expected_interval_seconds: 3600,
       grace_period_seconds: 300
     )
 
     sign_in @alice
 
-    # Ping it so it's Up.
-    Capybara.using_session(:pinger) { visit ping_path(monitor.ping_token) }
+    # Check in so it's Up — over the real endpoint, header auth and all.
+    browser_check_in(monitor, ping_key: @ping_key)
     assert monitor.reload.up?
 
     # Watching the dashboard, the row is Up.
@@ -32,9 +41,8 @@ class ErrorNoticesTest < ApplicationSystemTestCase
     # The job reports a failure on an otherwise on-time ping. Run the enqueued
     # jobs so the mailer sends and the Turbo Stream broadcast reaches the page.
     perform_enqueued_jobs do
-      Capybara.using_session(:pinger) do
-        visit ping_path(monitor.ping_token, status: 1, message: "RuntimeError: backup disk full")
-      end
+      browser_check_in(monitor, ping_key: @ping_key,
+                       status: 1, message: "RuntimeError: backup disk full")
     end
 
     # The badge flips to Down on the already-loaded page (Turbo Stream) —
@@ -65,7 +73,7 @@ class ErrorNoticesTest < ApplicationSystemTestCase
 
     # The next successful ping recovers it → one recovery email, badge flips back.
     perform_enqueued_jobs do
-      Capybara.using_session(:pinger) { visit ping_path(monitor.ping_token) }
+      browser_check_in(monitor, ping_key: @ping_key)
     end
 
     assert_selector "##{dom_id(monitor, :row)}", text: "Up"

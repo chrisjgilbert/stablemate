@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_07_112619) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_15_074304) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -58,7 +58,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_07_112619) do
     t.string "monitor_type", default: "heartbeat", null: false
     t.string "name", null: false
     t.datetime "next_due_at"
-    t.string "ping_token", null: false
+    t.string "ping_token"
     t.bigint "project_id", null: false
     t.string "registration_key"
     t.string "schedule"

@@ -1,31 +1,16 @@
 require "application_system_test_case"
 
-# S3 (create), S4 (pause/resume), S5 (rotate token), S7 (cap reached).
+# S4 (pause/resume), S7 (cap reached), S8 (row -> detail).
+#
+# S3 (create), S5 (rotate token) and S9 (the ping-URL card) went with the
+# surfaces they drove: creation is `stablemate:sync`'s job now (v1-scope §3.1)
+# and the token-in-the-URL credential is deleted (§3.2). The create flow's
+# successor is the setup panel — see setup_panel_test.rb.
 class MonitorsTest < ApplicationSystemTestCase
   setup do
     # carol owns no monitors, so this file's counts are only what it creates.
     @user = users(:carol)
     @project = @user.projects.sole
-  end
-
-  test "S3: create a monitor and reveal the ping-URL card and curl snippet" do
-    sign_in @user
-    click_on "New monitor", match: :first
-
-    fill_in "Name", with: "Nightly export"
-    select "Hourly", from: "Expected interval preset"
-    select "5 minutes", from: "Grace period preset"
-    click_on "Create monitor"
-
-    # Post-create detail state reveals the ping-URL card + curl snippet.
-    assert_text "Nightly export"
-    assert_selector "[data-testid='ping-url-card']"
-    assert_selector "input[aria-label='Ping URL'][value*='/ping/']"
-    assert_selector "input[aria-label='curl snippet'][value*='curl -fsS']"
-
-    monitor = @user.monitors.order(:created_at).last
-    assert_equal 3600, monitor.expected_interval_seconds
-    assert_equal 300, monitor.grace_period_seconds
   end
 
   # S4 — pause then resume; the badge tracks the status.
@@ -39,18 +24,6 @@ class MonitorsTest < ApplicationSystemTestCase
 
     click_on "Resume"
     refute_text "Paused"
-  end
-
-  test "S5: rotate the ping token changes the displayed ping URL" do
-    monitor = @project.monitors.create!(name: "Rotatable", expected_interval_seconds: 3600, grace_period_seconds: 300)
-    sign_in @user
-    visit monitor_path(monitor)
-
-    original = find("input[aria-label='Ping URL']").value
-    accept_confirm { click_on "Rotate token" }
-
-    assert_no_selector "input[aria-label='Ping URL'][value='#{original}']"
-    assert_selector "input[aria-label='Ping URL'][value*='/ping/']"
   end
 
   # S8 — the dashboard rows link into the monitor's detail page (the only way to
@@ -68,46 +41,15 @@ class MonitorsTest < ApplicationSystemTestCase
     end
 
     assert_current_path monitor_path(monitor)
-    assert_selector "[data-testid='ping-url-card']"
+    # The detail page's own content, now that the ping-URL card is gone: the
+    # read-only config panel §3.3 renders in the edit form's place.
+    assert_selector "[data-testid='config-panel']"
   end
 
-  # S9 — once a monitor has pinged, the ping-URL setup collapses into a closed
-  # disclosure at the bottom of the page: it's a one-time wiring concern and
-  # shouldn't crowd the triage view on every visit. Rotating the token brings
-  # the full card back to the top for one render (the old URL just died — that's
-  # the moment the user most needs the new one), then it collapses again.
-  test "S9: a live monitor collapses the ping-URL setup, rotating reveals it once" do
-    monitor = @project.monitors.create!(name: "Live job", expected_interval_seconds: 3600,
-      grace_period_seconds: 300, status: "up", last_ping_at: 5.minutes.ago)
-    sign_in @user
-    visit monitor_path(monitor)
-
-    # Collapsed by default — present, but not open (visibility inside <details>
-    # isn't reliably reported by the driver, so assert on the `open` attribute).
-    assert_selector "details[data-testid='ping-url-card']"
-    assert_no_selector "details[data-testid='ping-url-card'][open]"
-
-    find("summary", text: "Ping URL & setup").click
-    assert_selector "details[data-testid='ping-url-card'][open] input[aria-label='Ping URL'][value*='/ping/']"
-    assert_selector "details[data-testid='ping-url-card'][open] input[aria-label='curl snippet'][value*='curl -fsS']"
-
-    accept_confirm { click_on "Rotate token" }
-
-    # After rotating, setup renders as the full top card (not the disclosure)
-    # with the fresh URL in view — see PingTokensController#update for why a
-    # flash reveal, not an anchor. (Rotation changing the URL value is S5's
-    # job; here we pin the reveal.)
-    assert_text "Ping URL rotated"
-    assert_no_selector "details[data-testid='ping-url-card']"
-    assert_selector "div[data-testid='ping-url-card'] input[aria-label='Ping URL'][value*='/ping/']"
-
-    # The reveal is one-shot: an ordinary next visit collapses setup again.
-    visit monitor_path(monitor)
-    assert_selector "details[data-testid='ping-url-card']"
-    assert_no_selector "details[data-testid='ping-url-card'][open]"
-  end
-
-  # S7 — at the cap, the New-monitor action shows the at-limit state and "5 / 5".
+  # S7 — at the cap the dashboard shows the at-limit state and "5 / 5". The
+  # `refute_link "New monitor"` this test used to end on is deleted rather than
+  # kept: with no create affordance anywhere (§3.3), it would stay green while
+  # proving nothing (§8).
   test "S7: at the cap the dashboard shows the count and the at-limit state" do
     Stablemate::MAX_MONITORS_PER_USER.times do |i|
       @project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300)
@@ -116,6 +58,5 @@ class MonitorsTest < ApplicationSystemTestCase
 
     assert_text "#{Stablemate::MAX_MONITORS_PER_USER} / #{Stablemate::MAX_MONITORS_PER_USER}"
     assert_selector "[data-testid='at-limit']"
-    refute_link "New monitor"
   end
 end

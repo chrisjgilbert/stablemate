@@ -1,29 +1,28 @@
 <%#
-  A gem monitor shows a note instead of the control: it belongs to whichever
-  project its API key syncs into, so moving it here would just be undone on the
-  next sync. Locals: monitor.
+  Which project a monitor belongs to. The move CONTROL is gone with the rest of
+  the manual path (v1-scope §3.3) — it was `manual?`-only, and §11 accepts the
+  capability loss for the frozen backfilled population rather than keep a second
+  writer alive for it.
+
+  The heading and the "In <project>" link stay: this is the only place the detail
+  page names the monitor's project.
+
+  The retained note is branched on `source` rather than shown to everyone (§11).
+  "Managed by the gem — re-point its API key" is true of a synced monitor and
+  false in both halves for a backfilled `manual-<id>` row: no gem manages it and
+  no API key syncs it. Such a row gets no note here — the config panel above
+  already tells it its settings are frozen and what the remedy is.
+
+  Locals: monitor.
 %>
 <div class="rounded-xl border border-border bg-surface p-6 shadow-sm" data-testid="monitor-project-card">
   <h2 class="text-[13px] font-semibold text-secondary mb-3">Project</h2>
-  <p class="text-[13px] text-muted mb-3">
+  <p class="text-[13px] text-muted">
     In <%= link_to monitor.project.name, project_path(monitor.project), class: "font-medium text-ink hover:text-brand" %>.
   </p>
 
-  <% if monitor.manual? %>
-    <% others = current_user.projects.where.not(id: monitor.project_id).order(:created_at).to_a %>
-    <% if others.any? %>
-      <%= form_with url: monitor_project_path(monitor), method: :patch, class: "flex items-center gap-2" do |f| %>
-        <%= f.collection_select :project_id, others, :id, :name, {},
-              "aria-label": "Move to project",
-              class: "h-9 px-3 rounded-lg border border-border text-[13px] focus:outline-brand" %>
-        <%= f.submit "Move",
-              class: "h-9 px-3 inline-flex items-center rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline cursor-pointer" %>
-      <% end %>
-    <% else %>
-      <p class="text-[12px] text-muted" data-testid="move-no-targets">Create another project to move this monitor into.</p>
-    <% end %>
-  <% else %>
-    <p class="text-[12px] text-muted" data-testid="move-gem-note">
+  <% if monitor.from_gem? %>
+    <p class="mt-3 text-[12px] text-muted" data-testid="move-gem-note">
       Managed by the gem — re-point its API key to move it to another project.
     </p>
   <% end %>

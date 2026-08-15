@@ -7,8 +7,8 @@
   <div class="flex justify-center mb-4"><%= render "shared/logo", size: 44 %></div>
   <h2 class="font-display text-lg font-bold tracking-tight">Create your first project</h2>
   <p class="mt-1 text-[13px] text-muted">
-    A project groups the monitors for one app. Create one, then add monitors or
-    connect the gem with the project's API key.
+    A project groups the monitors for one app. Create one, then run its setup
+    command — your app's recurring jobs register themselves on the next deploy.
   </p>
 
   <%# Inline create; validation errors still fall back to projects#new. %>
@@ -26,9 +26,10 @@
     <p class="text-[11px] font-semibold uppercase tracking-wide text-gem mb-2">Connect the gem</p>
     <%= render "shared/recurring_yml_snippet" %>
     <p class="mt-2 text-[12px] text-muted">
-      Create a project, then copy its API key into your app — the gem uses that
-      key to register the project's jobs. A key is required before the gem does
-      anything. <%= link_to "Read the gem guide →", stablemate_docs_url("integrating"), class: "text-brand font-medium" %>
+      Create a project and its setup panel hands you a one-line install command
+      carrying both keys — one to register your jobs, one for them to check in
+      with. Nothing registers until you run it.
+      <%= link_to "Read the gem guide →", stablemate_docs_url("integrating"), class: "text-brand font-medium" %>
     </p>
   </div>
 </div>

@@ -28,25 +28,10 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     end
   end
 
-  test "creating a monitor into a chosen project via the selector" do
-    @alice.projects.sole.monitors.delete_all
-    target = @alice.projects.create!(name: "Target service")
-
-    sign_in @alice
-    click_on "New monitor", match: :first
-
-    select "Target service", from: "Project"
-    fill_in "Name", with: "Chosen job"
-    select "Hourly", from: "Expected interval preset"
-    select "5 minutes", from: "Grace period preset"
-    click_on "Create monitor"
-
-    assert_text "Chosen job"
-    assert_equal target, Monitoring::Monitor.find_by(name: "Chosen job").project
-  end
-
   # (e) a brand-new user with no project sees the create-first-project empty state
-  # and is routed into project creation, then returned to monitor creation.
+  # and is routed into project creation, then on to that project's setup panel —
+  # which is where §12's "browser: onboarding" bullet says a new user must reach
+  # real instructions from the page they land on.
   test "a zero-project user is onboarded through project creation" do
     bob = users(:bob)
     bob.projects.destroy_all
@@ -55,16 +40,17 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     assert_selector "[data-testid='first-project-empty-state']"
     assert_text "Create your first project"
 
-    # "Add a monitor" must route through project creation first.
-    visit new_monitor_path
-    assert_current_path new_project_path, ignore_query: true
+    within "[data-testid='create-first-project']" do
+      fill_in "Project name", with: "Fresh app"
+      click_on "Create project"
+    end
 
-    fill_in "Project name", with: "Fresh app"
-    click_on "Create project"
-
-    # Returned to monitor creation, with the new project available to pick.
-    assert_current_path new_monitor_path
+    # A project is where setup happens now: creation lands on the project page,
+    # whose setup panel hands over the install command (v1-scope §7). It used to
+    # bounce on to the monitor form, which §3.3 deletes.
     assert_text "Fresh app"
+    assert_current_path project_path(bob.projects.reload.sole)
+    assert_selector "[data-testid='setup-panel']"
   end
 
   test "the first-run card creates the first project inline" do
@@ -94,22 +80,6 @@ class DashboardProjectsTest < ApplicationSystemTestCase
     end
     # No doubled account-wide empty state — the per-group hint covers it.
     assert_no_selector "[data-testid='empty-state']"
-  end
-
-  test "a project group header links to new monitor pre-selecting that project" do
-    first = @alice.projects.sole
-    first.monitors.delete_all
-    first.monitors.create!(name: "Alpha job", **ATTRS)
-    target = @alice.projects.create!(name: "Second service")
-    target.monitors.create!(name: "Beta job", **ATTRS)
-
-    sign_in @alice
-    within "section[data-testid='project-group']", text: "Second service" do
-      click_on "New monitor"
-    end
-
-    # The new-monitor form pre-selects the project we launched from.
-    assert_selector "option[selected]", text: "Second service"
   end
 
   test "the cap-skip banner links to upgrade when at the monitor cap" do

@@ -4,10 +4,17 @@
 > the Docker / docker-compose self-hosting guide. This page is about wiring your
 > *jobs* to a Stablemate instance (managed or self-hosted).
 
-Stablemate watches your scheduled jobs by **heartbeat**: each job pings a URL when
-it finishes. If a ping is late by more than the grace period, Stablemate emails
-you. There are two ways to wire it up — the **gem** (recommended; zero per-job
-code) and the **manual** path (a plain HTTP call from any job, in any language).
+Stablemate watches your scheduled jobs by **heartbeat**: each job checks in when
+it finishes. If a check-in is late by more than the grace period, Stablemate
+emails you.
+
+**Your repo is the source of truth.** Jobs are declared in your app's config and
+registered by `bin/rails stablemate:sync` — there is no "create a monitor" form,
+because a monitor that outlives the job it watched is the failure this design
+exists to prevent. §1 covers Rails + Solid Queue, where the gem derives
+everything from `recurring.yml` with zero per-job code; §2 covers work that
+isn't a Solid Queue task, which is declared the same way and checks in with a
+plain HTTP call from any language.
 
 ---
 
@@ -167,27 +174,41 @@ hourly_sync:
 ```
 
 The interval is parsed from `schedule:` (via Fugit). For irregular crons the
-**largest** gap between runs is used as the expected interval; tighten it later in
-the monitor's settings if you want a snugger window.
+**largest** gap between runs is used as the expected interval — correct by
+construction, because anything tighter would false-alarm. Want a snugger window?
+Declare an override (see below); there is no per-monitor setting in the UI.
 
-> **Who wins when you edit a synced monitor.** The gem re-registers on every
-> production boot, and remembers what it last sent for the **name**, **interval**
-> and **grace**. While the stored value still matches that, the gem owns it and
-> keeps it current — so a `recurring.yml` change lands on the next boot without
-> you touching anything.
+> **Your repo owns monitor config.** There is no edit form: `stablemate:sync`
+> is the only writer of a monitor's name, interval and grace, and it writes
+> whatever your config says on every run. That is the whole point — one source
+> of truth, and `bin/rails stablemate:sync` restores it whenever something has
+> drifted.
 >
-> Edit one of those three in the UI and the gem leaves it alone: your override
-> survives every re-sync that has nothing new to say. But if `recurring.yml`
-> itself later changes that setting, **the schedule wins** and your override is
-> replaced. That is deliberate — the interval and grace describe how often the
-> job *actually* runs, so an override derived from the old schedule is stale and
-> would false-alarm, which is the failure this product exists to prevent. Re-apply
-> your override after a schedule change if you still want the snugger window.
->
-> Monitors registered by a gem version older than this rule have nothing
-> remembered yet, so their **first** sync writes nothing and only records what it
-> sent. If `recurring.yml` had already changed for one of them, that change lands
-> on the following change rather than that first sync.
+> It also means a change to `recurring.yml` lands on the next deploy with
+> nothing else to do, and that removing an override puts the derived value back.
+
+**Overriding a derived interval.** A weekday-only cron (`0 9 * * 1-5`) derives a
+**72-hour** interval, because Friday 09:00 → Monday 09:00 is the largest gap.
+Correct, and useless if you want to know on Tuesday. Override it beside your
+declarations:
+
+```ruby
+Stablemate.configure do |c|
+  c.overrides = { "weekday_report" => { interval: 26.hours } }
+end
+```
+
+Be clear-eyed about the trade: 26 hours closes the Tuesday blind spot **by
+trading it for a false alarm every Saturday morning** (Friday 09:00 + 26h). V1
+detection is interval-based, and no single interval can express "weekdays at
+9am" — so a weekday-only job means choosing between the blind window and the
+weekly cry-wolf. Stablemate stores your cron string from day one, so
+cron-aware detection can fix this properly later without a gem release.
+
+Overrides take `interval:` and `grace:`. An unknown key inside the hash, or an
+override naming a task the registrar never derived, **fails the whole run before
+any request is made** — a silently-ignored typo would leave the weekday job on
+its 72-hour window, which is the exact failure overrides exist to close.
 
 > **`command:`-only tasks are skipped** (with a logged notice). Solid Queue runs
 > them as `SolidQueue::RecurringJob`, so the gem can't attribute a run back to the
@@ -298,42 +319,62 @@ ping is overdue past the grace period.
 
 ---
 
-## 2 · The manual path (any language, any scheduler)
+## 2 · Non-Rails work (any language, any scheduler)
 
-Every monitor has a **ping URL** containing a secret token. Hit it from the end of
-your job. Find the URL on the monitor's detail page — shown up top while the
-monitor awaits its first ping, and inside the **"Ping URL & setup"** section at
-the bottom once it's live (it includes a ready-to-paste `curl` snippet).
+A shell cron, a Python script, a job on another box — anything that isn't a
+Solid Queue task — is monitored the same way as everything else: **declare it in
+your Rails app's config**, then have it check in.
 
-### curl (cron, shell)
+There is no "create a monitor in the UI" path. Declaring the work in your repo
+is what makes the monitor exist, which is what stops a monitor outliving the job
+it was watching.
+
+### Declare it
+
+```ruby
+Stablemate.configure do |c|
+  c.monitors = { "pg_backup" => { interval: 1.day, grace: 2.hours } }
+end
+```
+
+Deploy, and `stablemate:sync` registers `pg_backup` alongside your Solid Queue
+tasks. The hash key is the **registration key** — the address the job checks in
+at.
+
+### Check in (curl, cron, shell)
 
 ```sh
 # at the end of your job
-curl -fsS https://stablemate.dev/ping/<ping_token>
+curl -fsS -X POST https://stablemate.dev/api/v1/monitors/pg_backup/pings \
+  -H "Authorization: Bearer $STABLEMATE_PING_KEY"
 ```
 
-A bare `GET` works; `POST` is identical. Optionally report run latency:
+`POST` only — a check-in has side effects, so nothing that merely follows a link
+may fire one. Optionally report run latency:
 
 ```sh
-curl -fsS "https://stablemate.dev/ping/<ping_token>?duration_ms=842"
+curl -fsS -X POST https://stablemate.dev/api/v1/monitors/pg_backup/pings \
+  -H "Authorization: Bearer $STABLEMATE_PING_KEY" \
+  --data-urlencode "duration_ms=842"
 ```
 
 ### Report failures too (`status` / `message`)
 
-The same URL accepts an **error notice**: pass the job's exit code as `status`
-(`0`, blank, or absent = success; anything else = failure) and the error text as
-`message`. One snippet always fires and `$?` decides the polarity — no
+The same endpoint accepts an **error notice**: pass the job's exit code as
+`status` (`0`, blank, or absent = success; anything else = failure) and the error
+text as `message`. One snippet always fires and `$?` decides the polarity — no
 conditional logic in the shell:
 
 ```sh
 # end of any cron job — success and failure ride the same line
 run_backup 2>/tmp/backup.err
-curl -fsS "https://stablemate.dev/ping/<ping_token>" \
+curl -fsS -X POST https://stablemate.dev/api/v1/monitors/pg_backup/pings \
+  -H "Authorization: Bearer $STABLEMATE_PING_KEY" \
   --data-urlencode "status=$?" \
   --data-urlencode "message=$(tail -c 500 /tmp/backup.err)"
 ```
 
-A failure ping flips the monitor **down immediately** — no waiting out the
+A failure check-in flips the monitor **down immediately** — no waiting out the
 grace window — and the alert email includes your `message` (or
 `exited with status <n>` if you send none). `s` and `m` work as short aliases;
 messages are truncated to 1,000 chars server-side.
@@ -342,20 +383,33 @@ messages are truncated to 1,000 chars server-side.
 
 ```ruby
 require "net/http"
-Net::HTTP.get_response(URI("https://stablemate.dev/ping/#{ping_token}"))
+
+uri = URI("https://stablemate.dev/api/v1/monitors/pg_backup/pings")
+request = Net::HTTP::Post.new(uri)
+request["Authorization"] = "Bearer #{ENV['STABLEMATE_PING_KEY']}"
+Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) { |http| http.request(request) }
 rescue StandardError
-  # best-effort: never let a failed ping break the job
+  # best-effort: never let a failed check-in break the job
 end
 ```
 
 ### Notes
 
-- The **ping token is the only credential** on this path — no API key, no headers.
-  Treat the URL as a secret. Rotate it from the **"Ping URL & setup"** section of
-  the monitor's detail page if it leaks (the old URL stops working immediately).
-- The endpoint always returns `{"ok":true}` on a known token and an opaque `404`
-  on an unknown one. It is rate-limited (see [`api.md`](api.md)) generously enough
-  for any real cron cadence.
+- **The ping key is the credential**, and it is the *only* thing here that is
+  secret. The task name in the path is not — which is why it can sit in your
+  logs. `stablemate:install` puts the key in your `.env` or credentials; the
+  same key works for every task in the project.
+- A ping key can **only check in**. It cannot read your monitors or register new
+  ones, so the key you ship to every container is not the key that can change
+  your account.
+- URL-encode the task name if it contains dots or spaces (`reports.daily` works
+  as-is in a path segment; a space needs `%20`).
+- Responses: `{"ok":true}` on success, an opaque `401` for a bad key and an
+  opaque `404` for an unknown task. Rate-limited (see [`api.md`](api.md))
+  generously enough for any real cron cadence.
+- **Rotating the key** is a project-level operation: issue a new ping key from
+  the project page, roll it out, then revoke the old one. Both work in the
+  meantime.
 
 ---
 

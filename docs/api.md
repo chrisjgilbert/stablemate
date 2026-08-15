@@ -1,34 +1,51 @@
 # Stablemate API reference
 
-Two surfaces:
+Two surfaces, and two credentials:
 
-- **The ping endpoint** — public, token-authenticated, the hot path your jobs hit.
-- **`/api/v1`** — a small JSON API (Bearer-authed with an API key) the companion
-  gem uses to register and read monitors.
+- **The check-in endpoint** — `POST /api/v1/monitors/:registration_key/pings`,
+  authenticated with a **ping key**, the hot path your jobs hit.
+- **`/api/v1` management** — a small JSON API authenticated with an **API key**,
+  which the companion gem uses to register and read monitors.
+
+The two keys are separate on purpose: a ping key can only check in, so a key
+sitting in every one of your app's containers cannot read your monitors or
+register new ones. See [`integrating.md`](integrating.md) for how to issue both.
 
 Base URL in production: `https://stablemate.dev`.
 
 ---
 
-## 1 · Ping endpoint (public)
+## 1 · Check-in endpoint
 
 ```
-GET  /ping/:ping_token
-POST /ping/:ping_token
+POST /api/v1/monitors/:registration_key/pings
+Authorization: Bearer sm_ping_...
 ```
 
-The `ping_token` **is** the credential — there is no API key or header on this
-path. `GET` and `POST` behave identically (a bare `curl` works).
+The `registration_key` is your task's own name — the key from `recurring.yml` or
+`c.monitors`. It is **not** a secret: the credential is the ping key in the
+`Authorization` header, which keeps it out of request logs (Rails logs paths
+verbatim and filters only query strings).
 
-### Query params
+**`POST` only.** A check-in advances the monitor's clock and, on a monitor that
+is down, resolves the incident and sends a "recovered" email — so anything that
+merely follows a link (chat previews, mail prefetch, scanners) must not be able
+to fire one.
+
+Task names containing dots (`reports.daily`) and spaces are supported; URL-encode
+the segment.
+
+### Body params
+
+Form-encoded or JSON.
 
 | Param | Type | Meaning |
 |---|---|---|
 | `status` (alias `s`) | string | Optional exit code. Blank/absent/`0` = success; **anything else = failure**. `status` wins if both spellings are sent. |
-| `message` (alias `m`) | string | Optional error text. Recorded only on failures; truncated to 1,000 chars. Ignored on success pings. |
-| `duration_ms` | integer | Optional run latency, recorded on the ping. Non-numeric values are ignored. |
+| `message` (alias `m`) | string | Optional error text. Recorded only on failures; truncated to 1,000 chars. Ignored on success check-ins. |
+| `duration_ms` | integer | Optional run latency, recorded on the check-in. Non-numeric and out-of-range values are ignored. |
 
-A failure ping (`status` non-zero) is an **error notice**: it flips a live
+A failure check-in (`status` non-zero) is an **error notice**: it flips a live
 monitor `down` immediately — no grace wait — and the down email carries the
 `message` (or `exited with status <n>` when no message is sent). A failure
 while the monitor is already down is recorded but never re-alerts. See
@@ -38,21 +55,35 @@ while the monitor is already down is recorded but never re-alerts. See
 
 | Status | Body | When |
 |---|---|---|
-| `200` | `{"ok":true}` | Known token. Records the ping; transitions `pending→up` / `down→up`, or `→down` on a failure ping. |
-| `404` | — | Unknown token. **Opaque** — never reveals whether a token/monitor exists. |
-| `429` | — | Over the rate limit (see below). |
+| `200` | `{"ok":true}` | Known key and task. Records the check-in; transitions `pending→up` / `down→up`, or `→down` on a failure. |
+| `401` | `{"error":"unauthorized"}` | Missing, unknown or revoked ping key. **Opaque** — identical for all three. |
+| `404` | `{"error":"not_found"}` | Authenticated, but no such task in that key's project. **Opaque** — never reveals whether a monitor exists. |
+| `429` | `{"error":"rate_limited"}` | Over the rate limit (see below). |
 
 ### Rate limiting
 
-The endpoint is rate-limited so a misconfigured tight loop or a token scan can't
-overwhelm it — but generously enough that **no real cron cadence is ever
-throttled** (the tightest sane schedule is once a minute):
+Two layers, so one noisy task cannot consume another's budget — generous enough
+that **no real cron cadence is ever throttled** (the tightest sane schedule is
+once a minute):
 
-- **Per token:** 30 pings / minute. Over-limit → `429`.
-- **Per IP:** 300 requests / minute, applied to all ping attempts (including
-  unknown tokens). This bounds token-enumeration scanning. It is silent: an
-  unknown token always returns the opaque `404`, never a signal that distinguishes
-  a real token from a fake one.
+- **Per monitor:** 30 check-ins / minute, counted per key *and* task.
+- **Per IP:** 300 requests / minute, applied to every attempt including
+  unauthenticated ones. This bounds scanning, and is silent: an unknown key
+  always returns the opaque `401`.
+
+---
+
+## 1a · Verify endpoint
+
+```
+GET /api/v1/verify
+Authorization: Bearer sm_ping_...
+```
+
+Proves a ping key works without recording a check-in — what `stablemate:install`
+uses to fail fast on a bad credential. `200 {"ok":true}` for a valid ping key;
+an opaque `401` for an API key, a bad key, or no key. Bounded by its own per-IP
+limit.
 
 ---
 
@@ -110,7 +141,6 @@ GET /api/v1/monitors
       "name": "daily_digest",
       "status": "up",
       "registration_key": "daily_digest",
-      "ping_url": "https://stablemate.dev/ping/<token>",
       "last_ping_at": "2026-06-28T09:00:01Z",
       "next_due_at": "2026-06-29T09:00:00Z"
     }
@@ -164,9 +194,7 @@ Response:
 ```json
 {
   "monitors": [
-    { "registration_key": "daily_digest",
-      "ping_url": "https://stablemate.dev/ping/<token>",
-      "status": "pending" }
+    { "registration_key": "daily_digest", "status": "pending" }
   ],
   "skipped": [
     { "registration_key": "nightly_report", "reason": "limit_reached" }
@@ -198,13 +226,13 @@ Three more informational keys ride along, all safe to ignore:
 | `retired` | The subset actually retired, on a request carrying `prune: true` **and** a `declared_keys` list. Retiring is reversible: state and history are kept, and the next sync that includes the key revives the monitor. A prune request without `declared_keys` retires nothing. |
 | `ping_key_last4` | The last four characters of every **live** ping key in this project. A client holding both credentials can compare its configured ping key against this set and warn when the two keys name different projects — an array, because rotation keeps two keys live at once. Empty means the project has no ping key at all. |
 
-### Rotate a ping token
+### Rotating the check-in credential
 
-```
-POST /api/v1/monitors/:id/rotate
-```
-
-Generates a new `ping_token` and invalidates the old ping URL immediately.
+There is no per-monitor rotation endpoint. The check-in credential is a
+**project-scoped ping key**, not a per-monitor token, so rotation happens on the
+project's page: issue a new ping key, roll it out, then revoke the old one.
+Both stay live in the meantime, which is what makes a zero-downtime rotation
+possible — and why `ping_key_last4` above is an array.
 
 ---
 

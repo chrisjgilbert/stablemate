@@ -17,24 +17,29 @@ class ConfigGatedCapsTest < ApplicationSystemTestCase
     @project = @user.projects.sole
   end
 
-  test "caps OFF: a sixth monitor creates successfully with no at-limit UI" do
+  # Was "a sixth monitor CREATES successfully": with config-as-code (v1-scope
+  # §3.1) the only registrar is `stablemate:sync`, so the same property — no cap
+  # means no refusal — is asserted through the sync path and read back off the
+  # rendered dashboard. Driven server-side because Capybara cannot set the
+  # Authorization header the sync endpoint needs.
+  test "caps OFF: a seventh monitor registers with no at-limit UI" do
     stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
       6.times { |i| @project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
       sign_in @user
 
-      # No at-limit treatment, and the "New monitor" affordance is present.
       assert_no_selector "[data-testid='at-limit']"
       assert_no_selector "[data-testid='at-limit-note']"
-      assert_link "New monitor"
 
-      click_on "New monitor", match: :first
-      fill_in "Name", with: "Seventh monitor"
-      select "Hourly", from: "Expected interval preset"
-      select "5 minutes", from: "Grace period preset"
-      click_on "Create monitor"
+      result = @project.sync_monitors(app: "my-app", entries: [
+        { "registration_key" => "seventh", "name" => "Seventh monitor",
+          "expected_interval_seconds" => 3600, "grace_period_seconds" => 300 }
+      ])
+      assert_empty result[:skipped], "no cap is configured, so nothing may be refused"
 
+      visit monitors_path
       assert_text "Seventh monitor"
       assert_equal 7, @user.monitors.count
+      assert_no_selector "[data-testid='at-limit']"
     end
   end
 
@@ -67,7 +72,6 @@ class ConfigGatedCapsTest < ApplicationSystemTestCase
 
       assert_text "5 / 5"
       assert_selector "[data-testid='at-limit']"
-      refute_link "New monitor"
     end
   end
 

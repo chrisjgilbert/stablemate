@@ -6,19 +6,28 @@ class OutageRecoveryTest < ApplicationSystemTestCase
   include ActiveJob::TestHelper
 
   # Detection sweeps every monitor, so clear them all and create exactly one.
-  setup { Monitoring::Monitor.delete_all; @alice = users(:alice); @project = @alice.projects.sole }
+  setup do
+    Monitoring::Monitor.delete_all
+    @alice = users(:alice)
+    @project = @alice.projects.sole
+    @ping_key = issue_ping_key(@project)
+  end
+
+  # A registration_key is required now: it IS the address (v1-scope §3.2).
+  def heartbeat(name)
+    @project.monitors.create!(
+      name: name, registration_key: name.parameterize.underscore, source: "gem",
+      expected_interval_seconds: 3600, grace_period_seconds: 300
+    )
+  end
 
   test "S6: a monitor goes down (live) with a down email, then recovers with a recovery email" do
-    monitor = @project.monitors.create!(
-      name: "Heartbeat job",
-      expected_interval_seconds: 3600,
-      grace_period_seconds: 300
-    )
+    monitor = heartbeat("Heartbeat job")
 
     sign_in @alice
 
-    # Ping it so it's Up.
-    Capybara.using_session(:pinger) { visit ping_path(monitor.ping_token) }
+    # Check in so it's Up — over the real endpoint, header auth and all.
+    browser_check_in(monitor, ping_key: @ping_key)
     monitor.reload
     assert monitor.up?
 
@@ -47,7 +56,7 @@ class OutageRecoveryTest < ApplicationSystemTestCase
 
     # Ping again → recovery. Run the broadcast + mailer jobs.
     perform_enqueued_jobs do
-      Capybara.using_session(:pinger) { visit ping_path(monitor.ping_token) }
+      browser_check_in(monitor, ping_key: @ping_key)
     end
 
     assert_selector "##{dom_id(monitor, :row)}", text: "Up"
@@ -58,12 +67,8 @@ class OutageRecoveryTest < ApplicationSystemTestCase
   # S6 (detail page) — the monitor-detail header badge flips live too (spec §3.8:
   # the detail header subscribes and updates over Solid Cable, no full reload).
   test "S6 detail: the detail-page badge flips to Down live when detection runs" do
-    monitor = @project.monitors.create!(
-      name: "Detail watch",
-      expected_interval_seconds: 3600,
-      grace_period_seconds: 300
-    )
-    Capybara.using_session(:pinger) { visit ping_path(monitor.ping_token) }
+    monitor = heartbeat("Detail watch")
+    browser_check_in(monitor, ping_key: @ping_key)
     assert monitor.reload.up?
 
     sign_in @alice

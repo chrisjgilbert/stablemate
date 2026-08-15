@@ -258,14 +258,16 @@ bin/kamal deploy
    registers normally. Open `https://<your-host>/`, **Sign up**, land on the
    dashboard. (Note: `STABLEMATE_SIGNUP_ACCOUNT_CAP: 1` in `deploy.yml` caps total
    accounts at 1 while validating demand — raise or remove it to open signups.)
-2. **Create a monitor**, copy its **Ping URL** (contains a secret token), and hit
-   it:
+2. **Create a project**, run its setup command against a test app, and deploy so
+   `stablemate:sync` registers a monitor. Then check in — the task name is the
+   address, the ping key is the credential:
    ```sh
-   curl -fsS https://<your-host>/ping/<ping_token>
+   curl -fsS -X POST https://<your-host>/api/v1/monitors/<task_name>/pings \
+     -H "Authorization: Bearer $STABLEMATE_PING_KEY"
    ```
    The monitor flips **pending → up**.
-3. **Verify alerts.** Stop pinging past the grace period → expect a **down**
-   email; the next ping sends a **recovered** email. No email? Check
+3. **Verify alerts.** Stop checking in past the grace period → expect a **down**
+   email; the next check-in sends a **recovered** email. No email? Check
    `bin/kamal logs -f` for SMTP errors and confirm `STABLEMATE_MAIL_FROM` is an
    authorised sender. Run a real domain through
    [mail-tester.com](https://www.mail-tester.com) and confirm SPF/DKIM/DMARC pass

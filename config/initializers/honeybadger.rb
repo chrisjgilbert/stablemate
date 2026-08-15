@@ -10,10 +10,18 @@
 #   2. HTTP_COOKIE — reported raw, and carries the signed session_id cookie.
 #      Honeybadger's per-cookie filter matches NAMES, and neither of ours looks
 #      like a secret to a keyword match, so the whole header goes.
-#   3. THE URL — the ping token is a credential in the path (/ping/:ping_token),
-#      which no param filtering reaches. A before_notify hook rewrites it.
-#   4. THE BREADCRUMB TRAIL — the same path arrives again via Rails'
-#      process_action payload, which filters the query string only.
+#   3. THE URL and THE BREADCRUMB TRAIL — no param filtering reaches either, and
+#      the trail arrives again via Rails' process_action payload, which filters
+#      the query string only. A before_notify hook rewrites both.
+#
+# What (3) defends changed in v1-scope §3.2. It used to be the ping token, which
+# sat in the path as `/ping/:ping_token`; that endpoint is deleted, and a check-in
+# is now `/api/v1/monitors/:registration_key/pings` — a task name, not a secret —
+# with the credential in the Authorization header, which Honeybadger's own
+# defaults filter. The hook is kept rather than deleted with the path it was
+# written for, and retargeted at the credential SHAPE: that covers any channel a
+# key could reach a notice through (an exception message, a breadcrumb, a URL),
+# not just the one route that no longer exists.
 #
 # The privacy policy describes this behaviour; change it there too.
 
@@ -21,9 +29,8 @@
 # now for honeybadger_api_key below. stablemate.rb self-guards the second load.
 require_relative "stablemate"
 
-# One rule, applied everywhere a path can surface, so the two can't drift.
-ping_token_in_path = %r{/ping/[^/?#]+}
-redacted_ping_path = "/ping/[FILTERED]"
+# One rule for both surfaces below, defined on Stablemate so it is testable and
+# so the two can't drift.
 
 Honeybadger.configure do |config|
   # Not in config/honeybadger.yml: that file is git-tracked and self-hosters clone
@@ -40,14 +47,14 @@ Honeybadger.configure do |config|
   end
 
   config.before_notify do |notice|
-    notice.url = notice.url.sub(ping_token_in_path, redacted_ping_path) if notice.url
+    notice.url = Stablemate.redact_credentials(notice.url) if notice.url
 
     # Scrub every string in the trail rather than the `:path` key alone: the
     # metadata Rails hands over is instrumentation payloads we don't control, and
     # a substitution that matches nothing is free.
     notice.breadcrumbs&.each do |breadcrumb|
       breadcrumb.metadata = breadcrumb.metadata.transform_values do |value|
-        value.is_a?(String) ? value.sub(ping_token_in_path, redacted_ping_path) : value
+        Stablemate.redact_credentials(value)
       end
     end
   end

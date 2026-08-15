@@ -7,8 +7,6 @@
     <h1 class="font-display text-xl font-bold tracking-tight truncate"><%= @project.name %></h1>
   </div>
   <div class="flex items-center gap-2 shrink-0">
-    <%= link_to "New monitor", new_monitor_path(monitor: { project_id: @project.id }),
-          class: "inline-flex items-center h-8 px-3 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover" %>
     <%= link_to "Settings", edit_project_path(@project),
           class: "inline-flex items-center h-8 px-3 rounded-lg border border-border text-[13px] font-semibold text-secondary hover:bg-hairline" %>
   </div>

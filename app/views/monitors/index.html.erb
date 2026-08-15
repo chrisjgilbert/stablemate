@@ -16,13 +16,13 @@
       </span>
     </div>
 
+    <%# No create affordance: monitors come from `stablemate:sync` (§3.1). The
+        at-cap chip stays, because the cap still bites — it now decides whether
+        the NEXT sync registers a job or skips it. %>
     <% if at_cap %>
       <span class="inline-flex items-center h-8 px-3 rounded-lg bg-hairline text-[13px] font-semibold text-muted cursor-not-allowed"
             title="<%= monitor_limit_note(current_user) %>"
             data-testid="at-limit">At monitor limit</span>
-    <% else %>
-      <%= link_to "New monitor", new_monitor_path,
-            class: "inline-flex items-center h-8 px-3 rounded-lg bg-brand text-white text-[13px] font-semibold hover:bg-brand-hover" %>
     <% end %>
   </div>
 
@@ -41,7 +41,7 @@
       <%# No upgrade this account can actually buy right now. The past_due case
           has its own route out — the nav's Billing link, where the portal is. %>
       <p class="mb-6 text-[13px] text-muted" data-testid="at-limit-note">
-        <%= monitor_limit_note(current_user) %> Delete a monitor to add another.
+        <%= monitor_limit_note(current_user) %> Delete a monitor to free a slot for the next sync.
       </p>
     <% end %>
   <% end %>
@@ -59,10 +59,6 @@
           </h2>
           <span class="font-mono text-[12px] text-muted"><%= rows.size %></span>
         </div>
-        <% unless at_cap %>
-          <%= link_to "New monitor →", new_monitor_path(monitor: { project_id: project.id }),
-                class: "font-mono text-[12px] text-brand hover:text-brand-hover" %>
-        <% end %>
       </div>
       <% if at_cap %>
         <%# The account is at cap, so new gem jobs into this project are skipped (§13-S5). %>
@@ -72,12 +68,14 @@
         <%= render "monitors/list", monitors: rows, mini_ticks: @mini_ticks %>
       <% else %>
         <%# Zero active monitors: show the group with a next-step hint instead of
-            hiding it — this replaces the account-wide add-your-first CTA (§2). %>
+            hiding it. The next step is no longer a form — it is the project's
+            setup panel, which hands over the install command (§7). %>
         <div class="rounded-xl border border-dashed border-border bg-surface-subtle px-4 py-6 text-center text-[13px] text-muted"
              data-testid="project-empty-hint">
           No monitors yet —
-          <%= link_to "connect the gem or add one", new_monitor_path(monitor: { project_id: project.id }),
-                class: "text-brand font-medium hover:text-brand-hover" %>.
+          <%= link_to "set up the gem", project_path(project),
+                class: "text-brand font-medium hover:text-brand-hover" %>
+          and your next deploy registers them.
         </div>
       <% end %>
     </section>

@@ -18,7 +18,7 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
       expected_interval_seconds: interval, grace_period_seconds: grace }
   end
 
-  test "new registration keys create gem/pending monitors and return ping_url" do
+  test "new registration keys create gem/pending monitors and echo the key back" do
     sync([ entry("daily_digest") ])
     assert_response :success
 
@@ -26,7 +26,7 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
     entry = body["monitors"].first
     assert_equal "daily_digest", entry["registration_key"]
     assert_equal "pending", entry["status"]
-    assert_includes entry["ping_url"], "/ping/"
+    assert_not entry.key?("ping_url"), "the address is derived locally now (v1-scope §3.2)"
 
     monitor = @user.monitors.find_by(registration_key: "daily_digest")
     assert_equal "gem", monitor.source
@@ -68,13 +68,19 @@ class Api::V1::Monitors::SyncsControllerTest < ActionDispatch::IntegrationTest
     assert @user.monitors.exists?(registration_key: "keep")
   end
 
-  test "the returned ping_url records a PingEvent when hit" do
+  # The loop the whole redesign is for: register, then check in at the key the
+  # registration echoed back — with no address fetched, cached or invalidated in
+  # between (v1-scope §3.2). This is the successor to "the returned ping_url
+  # records a PingEvent when hit"; it asserts the same end-to-end property
+  # through the credential and the address that actually exist now.
+  test "the echoed registration key addresses a real check-in" do
     sync([ entry("daily_digest") ])
-    url = JSON.parse(response.body)["monitors"].first["ping_url"]
+    key = JSON.parse(response.body)["monitors"].first["registration_key"]
     monitor = @user.monitors.find_by(registration_key: "daily_digest")
+    _ping_key, raw = PingKey.issue(project: @project, name: "Production")
 
     assert_difference -> { monitor.ping_events.count }, 1 do
-      post URI(url).path
+      post api_v1_monitor_pings_path(key), headers: { "Authorization" => "Bearer #{raw}" }
     end
     assert_response :success
     assert_equal "up", monitor.reload.status
