@@ -2,8 +2,8 @@ require "application_system_test_case"
 
 # Issue #16 — caps are config-gated and default to OFF (the self-host default).
 # These browser-driven tests prove both modes end to end:
-#   - caps OFF: a 6th monitor creates with no at-limit UI; sign-up is always open
-#     with no waitlist mode.
+#   - caps OFF: a 7th monitor registers past the old limit with no at-limit UI;
+#     sign-up is always open with no waitlist mode.
 #   - caps ON: the at-limit monitor UI and the at-capacity → waitlist sign-up mode
 #     still work (the managed-instance behaviour).
 #
@@ -20,21 +20,27 @@ class ConfigGatedCapsTest < ApplicationSystemTestCase
   # Was "a sixth monitor CREATES successfully": with config-as-code (v1-scope
   # §3.1) the only registrar is `stablemate:sync`, so the same property — no cap
   # means no refusal — is asserted through the sync path and read back off the
-  # rendered dashboard. Driven server-side because Capybara cannot set the
-  # Authorization header the sync endpoint needs.
+  # rendered dashboard.
+  #
+  # Driven over the real endpoint via browser_sync, not `project.sync_monitors`.
+  # Capybara cannot set an Authorization header, but the Capybara server is a
+  # real Puma on a real port — so the cap gate is asserted against
+  # SyncsController, auth and response envelope included, rather than against
+  # the model underneath it.
   test "caps OFF: a seventh monitor registers with no at-limit UI" do
     stub_const(Stablemate, :MAX_MONITORS_PER_USER, 0) do
       6.times { |i| @project.monitors.create!(name: "M#{i}", expected_interval_seconds: 3600, grace_period_seconds: 300) }
+      api_key = ApiKey.issue(project: @project, name: "System test").last
       sign_in @user
 
       assert_no_selector "[data-testid='at-limit']"
       assert_no_selector "[data-testid='at-limit-note']"
 
-      result = @project.sync_monitors(app: "my-app", entries: [
-        { "registration_key" => "seventh", "name" => "Seventh monitor",
-          "expected_interval_seconds" => 3600, "grace_period_seconds" => 300 }
+      body = browser_sync(@project, api_key: api_key, monitors: [
+        { registration_key: "seventh", name: "Seventh monitor",
+          expected_interval_seconds: 3600, grace_period_seconds: 300 }
       ])
-      assert_empty result[:skipped], "no cap is configured, so nothing may be refused"
+      assert_empty body["skipped"], "no cap is configured, so nothing may be refused"
 
       visit monitors_path
       assert_text "Seventh monitor"

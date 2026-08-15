@@ -28,7 +28,7 @@ Rails.application.configure do
 
   # SSL handling. By default we assume a TLS-terminating reverse proxy in front
   # (the Kamal proxy — see config/deploy.yml) and force HTTPS, so the signed
-  # session cookie and the ping_token are never sent without the Secure flag
+  # session cookie is never sent without the Secure flag
   # (no MITM session hijack). A self-hoster terminating TLS elsewhere keeps this;
   # one running plain HTTP behind their own proxy (or for a quick local trial)
   # can set STABLEMATE_FORCE_SSL=false. Defaults to ON, and a blank value

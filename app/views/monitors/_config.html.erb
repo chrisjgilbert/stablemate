@@ -20,7 +20,19 @@
   </dl>
 
   <div class="mt-4 border-t border-hairline pt-3 text-[12px] text-muted leading-relaxed" data-testid="config-source">
-    <% if monitor.from_gem? %>
+    <% if monitor.retired? %>
+      <%# A retired monitor's task is NOT in the repo — that absence is why it
+          was pruned. Telling its owner to "edit it where it lives and deploy"
+          points at a file that no longer contains the task, and contradicts the
+          dashboard, which correctly says to restore it. %>
+      <p>
+        <span class="font-medium text-secondary">No longer declared in your app's config.</span>
+        Its settings are the ones it had when
+        <code class="font-mono text-secondary">stablemate:sync</code> last saw it.
+        Restore the task and the next sync brings the monitor back with its
+        history intact.
+      </p>
+    <% elsif monitor.from_gem? %>
       <p>
         <span class="font-medium text-secondary">Defined in your repo.</span>
         <%# §11: the schedule string may be SHOWN when present, but nothing may be
@@ -44,19 +56,31 @@
           interval above is what it actually enforces.
         </p>
       <% end %>
-    <% else %>
-      <%# §11: the backfilled population has no config writer at all — no form,
-          no sync entry (their keys sit outside the gem's namespace), and no
-          transfer. Say so here rather than leave the owner of a pre-CLI monitor
-          to work it out from a missing button. %>
+    <% elsif monitor.manual? %>
+      <%# §11: the backfilled population has no config writer BY DEFAULT — no
+          form, no derived sync entry (the gem never derives a `manual-<id>` key
+          from a job class), and no transfer. Say so here rather than leave the
+          owner of a pre-CLI monitor to work it out from a missing button.
+
+          Deliberately NOT "its settings can no longer be changed", which is
+          false: nothing filters the sync's upsert by `source`, so declaring this
+          row's key in `c.monitors` adopts it and writes its settings in place.
+          Claiming otherwise would push the owner into the destructive remedy —
+          delete-and-redeclare throws away every ping event, incident and uptime
+          day the monitor has — for a change that adoption makes without losing
+          any of it. Both routes are offered, cheapest first. %>
       <p>
         <span class="font-medium text-secondary">Created before Stablemate moved to config-as-code</span>,
-        so no repo defines it and its settings can no longer be changed.
+        so nothing in a repo declares it and
+        <code class="font-mono text-secondary">stablemate:sync</code> leaves it alone.
       </p>
       <p class="mt-1">
-        To change them, delete this monitor and declare the same job in
-        <code class="font-mono text-secondary">c.monitors</code> — that also moves
-        it onto a key your repo owns.
+        To bring it under your repo, declare
+        <code class="font-mono text-secondary"><%= monitor.registration_key %></code>
+        in <code class="font-mono text-secondary">c.monitors</code> — the next sync
+        adopts this monitor and keeps its history. To move it onto a name you
+        choose instead, delete it and declare the work afresh; that starts its
+        history over.
       </p>
     <% end %>
   </div>

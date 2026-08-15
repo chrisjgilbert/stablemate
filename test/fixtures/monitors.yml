@@ -23,7 +23,8 @@ up:
   next_due_at: <%= 50.minutes.from_now.utc.iso8601 %>
   source: manual
 
-# Registered from the gem (source: gem) — drives the gem-chip system test (S14).
+# Registered from the gem (source: gem) — drives the config panel's repo-owned
+# branch (v1-scope §3.3).
 gem_synced:
   project: alices_default
   monitor_type: heartbeat

@@ -1,11 +1,6 @@
 <%= form_with model: project, class: "space-y-6" do |form| %>
   <%= render "shared/form_errors", record: project %>
 
-  <%# Carry the "then send me back to new-monitor" intent through creation (§4.4). %>
-  <% if params[:after].present? %>
-    <%= hidden_field_tag :after, params[:after] %>
-  <% end %>
-
   <div>
     <%= form.label :name, "Project name", class: "block text-[13px] font-medium text-secondary mb-1" %>
     <%= form.text_field :name, required: true, autofocus: true,

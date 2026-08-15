@@ -6,10 +6,10 @@ require "application_system_test_case"
 # editing both left for `stablemate:sync` (§3.1, §3.3).
 #
 # This replaces the edit half of the old monitor_edit_delete_test.rb. The delete
-# half survives verbatim, because delete is still a browser flow — and under §11
-# it is now load-bearing, being half of the only remedy a frozen `manual-<id>`
-# row has. (Pause/resume, the other surviving operational verb, stays where it
-# already was: monitors_test.rb's S4.)
+# half survives verbatim, because delete is still a browser flow. Pause/resume,
+# the other surviving operational verb, stays where it already was:
+# monitors_test.rb's S4; and the assertions that the config ROUTES are gone live
+# in monitors_controller_test.rb, since there is nothing to look at.
 class MonitorLifecycleTest < ApplicationSystemTestCase
   setup do
     @alice = users(:alice)
@@ -18,9 +18,9 @@ class MonitorLifecycleTest < ApplicationSystemTestCase
 
   # --- What the browser may still do -----------------------------------------
 
-  # Delete is the surviving write, and §11 makes it load-bearing: for a frozen
-  # `manual-<id>` row, delete-and-redeclare is the ONLY way to change settings.
-  test "a monitor can be deleted, which is half the remedy for a frozen row" do
+  # Delete is the surviving write, and §11 leans on it: delete-and-redeclare is
+  # how a pre-CLI `manual-<id>` row moves onto a name the repo chooses.
+  test "a monitor can be deleted" do
     @alice.monitors.where.not(id: @monitor.id).delete_all
     sign_in @alice
     visit monitor_path(@monitor)
@@ -32,36 +32,6 @@ class MonitorLifecycleTest < ApplicationSystemTestCase
   end
 
   # --- What it may no longer do ----------------------------------------------
-
-  # NOT `assert_no_link "Edit"` — §8 flags exactly that shape as an assertion
-  # that stays green while proving nothing once the surface is gone. The route
-  # not existing is the fact; the missing affordance is a consequence of it.
-  test "the edit route does not exist" do
-    # The helper is gone entirely, not merely un-generatable — `only:` never
-    # defines it. Asserting on recognize_path too, because a helper can be absent
-    # while the path still routes.
-    assert_not respond_to?(:edit_monitor_path)
-    assert_raises(ActionController::RoutingError) do
-      Rails.application.routes.recognize_path("/monitors/#{@monitor.id}/edit", method: :get)
-    end
-    assert_raises(ActionController::RoutingError) do
-      Rails.application.routes.recognize_path("/monitors/#{@monitor.id}", method: :patch)
-    end
-  end
-
-  test "the create route does not exist" do
-    assert_not respond_to?(:new_monitor_path)
-    assert_raises(ActionController::RoutingError) do
-      Rails.application.routes.recognize_path("/monitors", method: :post)
-    end
-
-    # `/monitors/new` still RECOGNISES — with `only:`, it falls through to `show`
-    # with id="new" — so the fact worth pinning is where it lands. `set_monitor`
-    # scopes through current_user.monitors, so the find raises RecordNotFound and
-    # a bookmarked create URL is an opaque 404, not a form and not a 500.
-    assert_equal({ controller: "monitors", action: "show", id: "new" },
-                 Rails.application.routes.recognize_path("/monitors/new", method: :get))
-  end
 
   # §12's "browser: onboarding" bullet, second half: no surface offers monitor
   # creation. Asserted by walking the pages a user actually lands on rather than
@@ -122,10 +92,10 @@ class MonitorLifecycleTest < ApplicationSystemTestCase
     end
   end
 
-  # The backfilled population has no config writer at all — no form, no sync
-  # entry, and (after §3.3) no transfer. §11 requires the panel to SAY so rather
-  # than leave the owner of a pre-CLI monitor to discover it.
-  test "a backfilled monitor is told its config is frozen and how to unfreeze it" do
+  # The backfilled population has no config writer BY DEFAULT — no form, no
+  # DERIVED sync entry, and (after §3.3) no transfer. §11 requires the panel to
+  # say so rather than leave the owner of a pre-CLI monitor to discover it.
+  test "a backfilled monitor is told nothing declares it, and how to change that" do
     @monitor.update!(registration_key: "manual-#{@monitor.id}", source: "manual")
     sign_in @alice
     visit monitor_path(@monitor)
@@ -135,8 +105,30 @@ class MonitorLifecycleTest < ApplicationSystemTestCase
       # The gem sentence is a lie for this row — nothing in a repo defines it and
       # no API key syncs it — so the panel must not claim it.
       assert_no_text "Defined in your repo"
-      # The remedy, stated: delete it and declare the same work in c.monitors.
+      # The route out, stated, and naming the key the user has to declare.
       assert_text "c.monitors"
+      assert_text "manual-#{@monitor.id}"
+      # NOT "can no longer be changed": a sync entry naming this key adopts the
+      # row and updates it in place, so the panel must not push the owner into
+      # deleting a monitor — and its whole history — to change an interval.
+      assert_no_text "can no longer be changed"
+    end
+  end
+
+  # A retired monitor's task is absent from the repo BY DEFINITION — that is why
+  # it was pruned — so the gem panel's "edit it where it lives and deploy" would
+  # point at a file that no longer contains it, and contradict the dashboard.
+  test "a retired monitor is told to restore the task, not to edit it in the repo" do
+    retired = monitors(:gem_synced)
+    retired.update!(last_synced_app: "my-app")
+    retired.retire!
+    sign_in @alice
+    visit monitor_path(retired)
+
+    within "[data-testid='config-panel']" do
+      assert_text "No longer declared"
+      assert_text "Restore the task"
+      assert_no_text "the next sync applies the change"
     end
   end
 end

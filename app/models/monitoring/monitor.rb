@@ -77,11 +77,18 @@ module Monitoring
       end
     end
 
-    # Kept after v1-scope §3.3 deleted the provenance chip that was their most
-    # visible reader: §6.1's orphan filter uses `source == "gem"` to keep §8's
-    # backfilled `manual-<id>` rows out of orphan reports permanently, and the
-    # show page's config panel branches on it to avoid telling the owner of a
-    # pre-CLI monitor that a repo defines it.
+    # `source` and both predicates are kept by v1-scope §3.3, which deleted the
+    # provenance chip that used to be their most visible reader. What still
+    # reads them, precisely:
+    #
+    # - The COLUMN, in SQL: §6.1's orphan filter scopes `where(source: "gem")`
+    #   so §8's backfilled `manual-<id>` rows can never be reported as orphans
+    #   or pruned. That is the load-bearing use, and it is a scope, not a
+    #   predicate — no substitute discriminator exists (a `manual-` key prefix
+    #   is something a human can type into recurring.yml).
+    # - The PREDICATES, in the view: the show page's config panel branches on
+    #   both to avoid telling the owner of a pre-CLI monitor that a repo defines
+    #   it, and vice versa.
     def from_gem? = source == "gem"
     def manual?   = source == "manual"
 

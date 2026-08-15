@@ -84,6 +84,24 @@ class HoneybadgerFilteringTest < ActiveSupport::TestCase
     assert_no_match(/#{PING_KEY}/, report.dig("breadcrumbs", "trail", 0, "metadata").to_s)
   end
 
+  # The two channels no filter list reaches. Asserted separately from the
+  # payload-wide sweep above so a regression names which one broke.
+  test "a credential in the exception message is redacted" do
+    report = JSON.parse(report_for_failed_check_in)
+
+    message = report.dig("error", "message").to_s
+    assert_no_match(/#{PING_KEY}/, message)
+    assert_includes message, "check-in failed using [FILTERED]"
+  end
+
+  test "a credential in an unfiltered param name is redacted, at any depth" do
+    report = JSON.parse(report_for_failed_check_in)
+
+    params = report.dig("request", "params")
+    assert_equal "[FILTERED]", params["debug"]
+    assert_equal [ "[FILTERED]" ], params.dig("retry", "with")
+  end
+
   # Redaction that took the diagnostic value with it would be its own bug. The
   # registration key is the TASK NAME, not a secret — it is the single most
   # useful field in a check-in error report, and it has to survive.
@@ -132,7 +150,9 @@ class HoneybadgerFilteringTest < ActiveSupport::TestCase
     def report_for_failed_check_in
       notice = Honeybadger::Notice.new(
         Honeybadger.config,
-        exception: RuntimeError.new("boom"),
+        # The message carries a credential too: an exception raised while using a
+        # key routinely interpolates it, and NO filter list reaches a message.
+        exception: RuntimeError.new("check-in failed using #{PING_KEY}"),
         rack_env: check_in_rack_env,
         breadcrumbs: action_controller_breadcrumbs
       )
@@ -146,7 +166,12 @@ class HoneybadgerFilteringTest < ActiveSupport::TestCase
         "action_dispatch.parameter_filter" => Rails.application.config.filter_parameters,
         "action_dispatch.request.parameters" => {
           "registration_key" => REGISTRATION_KEY,
-          "controller" => "api/v1/monitors/pings", "action" => "create"
+          "controller" => "api/v1/monitors/pings", "action" => "create",
+          # Filtered BY NAME, and "debug" is not a filtered name — so the value
+          # ships raw unless the shape rule catches it. Nested, because params
+          # are a tree and a credential is no less exposed one level down.
+          "debug" => PING_KEY,
+          "retry" => { "with" => [ PING_KEY ] }
         },
         "HTTP_COOKIE" => "session_id=#{SESSION_COOKIE}; _stablemate_session=#{RAILS_SESSION_COOKIE}",
         "HTTP_AUTHORIZATION" => "Bearer #{API_KEY}"

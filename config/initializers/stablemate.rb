@@ -47,6 +47,17 @@ module Stablemate
     string.gsub(CREDENTIAL_PATTERN, "[FILTERED]")
   end
 
+  # The same rule through a nested structure — request params are a Hash of
+  # Hashes and Arrays, and a credential is no less exposed for being one level
+  # down. Non-collection, non-String leaves fall through untouched.
+  def self.redact_deeply(value)
+    case value
+    when Hash  then value.transform_values { |v| redact_deeply(v) }
+    when Array then value.map { |v| redact_deeply(v) }
+    else redact_credentials(value)
+    end
+  end
+
   DEFAULT_GRACE_FRACTION = 0.15
 
   # Deliberately duplicated in the companion gem as

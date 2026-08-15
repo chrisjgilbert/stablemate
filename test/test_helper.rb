@@ -52,20 +52,6 @@ module RequestSignInHelper
   end
 end
 
-module RateLimitingTestHelper
-  # Clear the check-in limiter's stores around a block so a test starts from a
-  # clean count and leaves no residue for the next one. Both layers, because
-  # §5.3 stacks a per-monitor limit on a per-IP one and a test that exhausts
-  # either would otherwise poison the next.
-  def with_rate_limiting
-    PingKeyAuthentication::RATE_LIMIT_STORE.clear
-    yield
-  ensure
-    PingKeyAuthentication::RATE_LIMIT_STORE.clear
-  end
-end
-
 class ActionDispatch::IntegrationTest
   include RequestSignInHelper
-  include RateLimitingTestHelper
 end

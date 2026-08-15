@@ -25,8 +25,9 @@ module MonitorsHelper
     "#{number_with_precision(percent, precision: 2)}%"
   end
 
-  # Shared by the dashboard and the New-monitor action so the wording (and the
-  # "Free plan" label, the seam for paid tiers) lives in one place.
+  # Shared by the dashboard header chip and the at-limit note below it, so the
+  # wording (and the "Free plan" label, the seam for paid tiers) lives in one
+  # place.
   def monitor_limit_note(user)
     "You're at the #{user.monitor_limit}-monitor limit for the #{user.pro? ? "Pro" : "Free"} plan."
   end

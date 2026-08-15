@@ -106,7 +106,7 @@
     <li>
       <strong>Error reports.</strong> When the application raises an unexpected error, a report is sent to our
       error-tracking provider. It can include the failing request&rsquo;s URL and parameters, the IP address and
-      browser, and a stack trace. Passwords, API keys, ping tokens and your session cookies are stripped out
+      browser, and a stack trace. Passwords, API keys, ping keys and your session cookies are stripped out
       before it is sent.
     </li>
   </ul>
@@ -220,9 +220,9 @@
   <h2>7. Security</h2>
   <ul>
     <li>Everything is served over HTTPS.</li>
-    <li>Passwords are bcrypt-hashed; API keys are stored only as SHA-256 digests; ping tokens are random secrets.</li>
+    <li>Passwords are bcrypt-hashed; API keys and ping keys are random secrets stored only as SHA-256 digests, shown to you once at creation and never recoverable afterwards.</li>
     <li>Session cookies are signed and HTTP-only, so page scripts can&rsquo;t read them.</li>
-    <li>Sign-in, sign-up, password reset and the public ping endpoint are all rate-limited, and an unknown token gets the same blank answer as a wrong one.</li>
+    <li>Sign-in, sign-up, password reset and the check-in endpoint are all rate-limited, and an unknown key gets the same blank answer as a wrong one.</li>
     <li>Access to the production database is limited to the people who operate the service.</li>
   </ul>
   <p>

@@ -58,7 +58,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_15_074304) do
     t.string "monitor_type", default: "heartbeat", null: false
     t.string "name", null: false
     t.datetime "next_due_at"
-    t.string "ping_token"
+    t.string "ping_token", default: -> { "replace((gen_random_uuid())::text, '-'::text, ''::text)" }
     t.bigint "project_id", null: false
     t.string "registration_key"
     t.string "schedule"

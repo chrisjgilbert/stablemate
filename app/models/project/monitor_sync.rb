@@ -12,8 +12,8 @@ class Project
   #   also reported as merely orphaned, so the CLI prints each list as-is.
   class MonitorSync
     # Guards against mass assignment: only these five attributes are ever read from
-    # the entry — project_id / status / source / ping_token / last_synced_app are
-    # controlled by this operation, never by the caller.
+    # the entry — project_id / status / source / last_synced_app are controlled by
+    # this operation, never by the caller.
     Entry = Struct.new(:registration_key, :name, :expected_interval_seconds,
                        :grace_period_seconds, :schedule) do
       def self.from(raw)
@@ -277,8 +277,20 @@ class Project
       def persist_update(monitor, entry)
         @conflicts << monitor.registration_key if diverging_app?(monitor)
 
+        # `schedule` is written THROUGH, nil included — the one field where absent
+        # does not mean untouched. The gem omits it precisely when there is no
+        # schedule (`Registrars::DeclaredMonitors` sends none for a `c.monitors`
+        # entry, and `Hash#slice` drops the absent key), so compacting it away
+        # would strand the old cron string on a task that moved from
+        # `recurring.yml` into `c.monitors` — and the show page's config panel
+        # renders that string as the authoritative source of the monitor's
+        # config, so a stale one is a false statement, not a stale cache.
+        #
+        # `last_synced_app` still compacts: a nil app is an old gem that sent
+        # none, and clearing it would blind the cross-app conflict guard.
         attrs = declared_settings(entry)
-                  .merge({ last_synced_app: @app, schedule: entry.schedule }.compact)
+                  .merge({ last_synced_app: @app }.compact)
+                  .merge(schedule: entry.schedule)
         if monitor.update(attrs)
           @registered << monitor
           true

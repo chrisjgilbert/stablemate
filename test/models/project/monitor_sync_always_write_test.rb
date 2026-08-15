@@ -77,6 +77,27 @@ class Project::MonitorSyncAlwaysWriteTest < ActiveSupport::TestCase
     assert_equal 300, @monitor.grace_period_seconds
   end
 
+  # `schedule` is the ONE field where absent does not mean untouched. The gem
+  # omits it exactly when there is no schedule — `c.monitors` entries send none
+  # — so a task moved out of `recurring.yml` into `c.monitors` must lose its old
+  # cron string. Leaving it would put a false sentence on the config panel,
+  # which renders that string as where the config lives.
+  test "a task that moves from a cron schedule to a bare interval loses the stale string" do
+    sync(BASE.merge(schedule: "0 9 * * 1-5"))
+    assert_equal "0 9 * * 1-5", @monitor.reload.schedule
+
+    sync(BASE) # now declared in c.monitors: no schedule sent
+
+    assert_nil @monitor.reload.schedule
+  end
+
+  test "a cron task that keeps its schedule keeps the string" do
+    sync(BASE.merge(schedule: "0 9 * * 1-5"))
+    sync(BASE.merge(schedule: "0 9 * * 1-5"))
+
+    assert_equal "0 9 * * 1-5", @monitor.reload.schedule
+  end
+
   # The arbitration is gone; the CROSS-APP guard that lived next to it is not.
   # `last_synced_app` looks like a fourth arbitration column and is a different
   # concept — dropping it with the other three would silently un-break two apps

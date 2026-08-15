@@ -49,6 +49,24 @@ class MonitorsControllerTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
+  # The config-writing routes are gone, not merely unlinked (v1-scope §3.3).
+  # Asserted here rather than in the browser suite: there is nothing to look at,
+  # and CLAUDE.md keeps system tests for flows a user drives. `respond_to?` AND
+  # `recognize_path`, because a helper can be absent while the path still routes.
+  test "neither the create nor the edit route exists" do
+    assert_not respond_to?(:new_monitor_path)
+    assert_not respond_to?(:edit_monitor_path)
+
+    [ [ "/monitors", :post ],
+      [ "/monitors/#{@alices.id}/edit", :get ],
+      [ "/monitors/#{@alices.id}", :patch ],
+      [ "/monitors/#{@alices.id}", :put ] ].each do |path, verb|
+      assert_raises(ActionController::RoutingError, "#{verb.upcase} #{path} still routes") do
+        Rails.application.routes.recognize_path(path, method: verb)
+      end
+    end
+  end
+
   # With the create path gone (v1-scope §3.3) the route narrows to
   # `only: %i[index show destroy]` — which does NOT stop `/monitors/new` routing:
   # it falls through to `show` with id="new". Worth pinning where a bookmarked
