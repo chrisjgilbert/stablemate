@@ -37,7 +37,13 @@ module Stablemate
   # party (see the Honeybadger initializer). The alphabet and length mirror
   # ApiKey/PingKey issuance, and it is `+` rather than an exact count so a future
   # length change cannot silently stop it matching.
-  CREDENTIAL_PATTERN = /\bsm_(?:live|ping)_[A-Za-z0-9]+/
+  #
+  # No `\b` anchor, deliberately. A word boundary can only ever make this match
+  # LESS, and for a scrubber every direction of error is not equal: redacting a
+  # few extra characters of some string that merely looks like a key costs
+  # nothing, while missing one because it was concatenated onto a word character
+  # ships a live credential to a third party.
+  CREDENTIAL_PATTERN = /sm_(?:live|ping)_[A-Za-z0-9]+/
 
   # Replace every credential in `string` with a fixed marker. Nil-tolerant
   # because the callers hand over values they don't control.

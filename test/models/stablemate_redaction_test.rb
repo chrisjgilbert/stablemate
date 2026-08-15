@@ -45,6 +45,15 @@ class StablemateRedactionTest < ActiveSupport::TestCase
     assert_equal({ a: 1 }, Stablemate.redact_credentials({ a: 1 }))
   end
 
+  # A credential concatenated onto a word character has no word boundary before
+  # it. A `\b`-anchored rule would sail straight past this and ship the key.
+  test "a credential with no separator before it is still redacted" do
+    assert_equal "id[FILTERED]",
+                 Stablemate.redact_credentials("idsm_ping_dddddddddddddddddddddddddddddddd")
+    assert_equal "9[FILTERED]",
+                 Stablemate.redact_credentials("9sm_live_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+  end
+
   test "ordinary text is left alone" do
     assert_equal "no credential here", Stablemate.redact_credentials("no credential here")
     # A registration key is NOT a secret and must survive: it is the task name,
