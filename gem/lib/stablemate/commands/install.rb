@@ -67,18 +67,21 @@ module Stablemate
         return failed(MISSING_KEYS) unless keys?
 
         write_initializer
-        preview!
 
-        # Keys are persisted BEFORE the verification gate, and the ordering is
+        # Keys are persisted before ANYTHING that can fail, and the ordering is
         # the whole point. Both keys are shown exactly once — the setup panel
         # renders them and nothing can ever re-display them — so a run that
-        # exits without writing them costs the user the pair. The most likely
-        # verification failure is the endpoint being briefly unreachable or
-        # c.endpoint being wrong, which says nothing about the keys themselves;
-        # discarding them there is the one outcome that is expensive to undo,
-        # and the failure message already promised nothing depending on the
-        # server had been written.
+        # exits without writing them costs the user the pair.
+        #
+        # Everything below here can fail for a reason that has nothing to do
+        # with the keys: `preview!` raises ConfigurationError on a malformed
+        # recurring.yml or a typo'd c.overrides key, and verification fails when
+        # the endpoint is briefly unreachable or c.endpoint is wrong. Neither is
+        # a reason to make the user regenerate a pair they have already pasted,
+        # and both used to do exactly that.
         persist_keys
+
+        preview!
         return failed(*verification.failure_messages) unless verify!
 
         install_deploy_hook

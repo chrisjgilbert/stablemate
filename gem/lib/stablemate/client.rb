@@ -210,7 +210,7 @@ module Stablemate
           # Net::HTTP does not follow redirects, so nothing was recorded — and an
           # endpoint that redirects redirects every request, forever (the usual
           # cause is an `http://` endpoint against an https-only server).
-          log_once([ :refused, registration_key ]) do
+          log_once([ :redirected, registration_key ]) do
             "check-in for '#{registration_key}' was redirected #{response.code} to " \
             "#{response['location'].inspect} and NOT recorded — check c.endpoint; redirects are " \
             "not followed."

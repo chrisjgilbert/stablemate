@@ -27,11 +27,8 @@ class Project
     # been used may be deployed somewhere, so revoking it here would be the one
     # thing this panel must never do — take a working install offline.
     def issue_setup_pair!
-      superseded = 0
-      kept = 0
-
       @project.transaction do
-        superseded, kept = revoke_unused
+        superseded, kept = revoke_superseded
         api_key_token = ApiKey.issue(project: @project, name: DEFAULT_NAME).last
         ping_key_token = PingKey.issue(project: @project, name: DEFAULT_NAME).last
 
@@ -42,8 +39,17 @@ class Project
     DEFAULT_NAME = "Setup".freeze
 
     private
-      def revoke_unused
+      # Only the pairs THIS panel issued, which is what "the pair it supersedes"
+      # means. Sweeping every unused key in the project would reach ones it never
+      # minted: a second ping key generated from the Ping keys panel for §4's
+      # add-before-remove rotation, or a pair pasted straight into .kamal/secrets
+      # without running install locally, both still have a NULL last_used_at
+      # because nothing has exercised them YET. Destroying those is the same harm
+      # the never-used rule exists to avoid, arriving from the other direction —
+      # last_used_at nil means "not used yet", never "safe to delete".
+      def revoke_superseded
         unused, used = (@project.api_keys.to_a + @project.ping_keys.to_a)
+                         .select { |key| key.name == DEFAULT_NAME }
                          .partition { |key| key.last_used_at.nil? }
         unused.each(&:destroy)
         [ unused.size, used.size ]

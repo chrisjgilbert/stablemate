@@ -27,7 +27,13 @@
     from the repo now, so an empty project is not missing a button — it is
     waiting for a deploy. It stays visible while the project is still waiting on
     its first check-in, because that is exactly when the user needs the ladder. %>
-<% if @project.awaiting_first_sync? || @project.awaiting_first_check_in? %>
+<%# @setup_pair FIRST, and it is not a nicety: it is the only render that will
+    ever show these keys. A check-in landing between the page load and the
+    regenerate click flips both ladder predicates false, and without this the
+    panel would be omitted from the very response that carries the pair — after
+    the superseded one had already been destroyed. Live credentials nobody has
+    ever seen. %>
+<% if @setup_pair || @project.awaiting_first_sync? || @project.awaiting_first_check_in? %>
   <div class="<%= "mt-6" if @monitors.any? %>">
     <%= render "projects/setup_panel", project: @project, setup_pair: @setup_pair,
           api_keys: @api_keys, ping_keys: @ping_keys %>

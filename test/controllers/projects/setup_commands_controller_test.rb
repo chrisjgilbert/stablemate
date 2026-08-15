@@ -68,6 +68,36 @@ class Projects::SetupCommandsControllerTest < ActionDispatch::IntegrationTest
     assert_select "[data-testid='setup-keys-kept']"
   end
 
+  # The panel is hidden once a project is live, and a check-in can land between
+  # the page load and the click. Without the setup_pair branch in the view, the
+  # response that carries the ONLY readable copy of both keys omits the panel —
+  # after the superseded pair has already been destroyed. Live credentials that
+  # nobody has ever seen.
+  test "the command renders even if the project goes live between load and click" do
+    monitor = @project.monitors.create!(name: "daily_digest", registration_key: "daily_digest",
+                                        source: "gem", expected_interval_seconds: 3600,
+                                        grace_period_seconds: 300)
+    monitor.check_in! # the project is no longer waiting for anything
+    assert_not @project.awaiting_first_sync?
+    assert_not @project.awaiting_first_check_in?
+
+    generate
+
+    assert_response :created
+    assert_match(/sm_live_[A-Za-z0-9]{32}/, response.body)
+    assert_match(/sm_ping_[A-Za-z0-9]{32}/, response.body)
+  end
+
+  # last_used_at nil means "not used YET", never "safe to delete": a key minted
+  # for §4's rotation, or pasted into .kamal/secrets before a deploy, is unused
+  # and must survive.
+  test "regenerating leaves keys this panel did not issue alone" do
+    rotation, = PingKey.issue(project: @project, name: "Rotation")
+    generate
+
+    assert PingKey.exists?(rotation.id), "a key the setup panel never issued is not its to revoke"
+  end
+
   test "cannot generate a setup command for another user's project" do
     bobs = users(:bob).projects.sole
     assert_no_difference -> { ApiKey.count } do

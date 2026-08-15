@@ -8,7 +8,12 @@
   follows generation), api_keys, ping_keys.
 %>
 <% pair = local_assigns[:setup_pair] %>
-<% has_keys = api_keys.any? || ping_keys.any? %>
+<%# Only the keys THIS panel issued. A project can hold others — a rotation key
+    from the Ping keys table, say — and showing a masked "setup command" built
+    from one of those would claim a command exists that was never generated. %>
+<% setup_api = api_keys.find { |key| key.name == Project::SetupPair::DEFAULT_NAME } %>
+<% setup_ping = ping_keys.find { |key| key.name == Project::SetupPair::DEFAULT_NAME } %>
+<% has_keys = setup_api || setup_ping %>
 
 <section class="rounded-xl border border-border bg-surface p-8 shadow-sm" data-testid="setup-panel">
   <h2 class="font-display text-base font-bold tracking-tight">Connect this app</h2>
@@ -51,7 +56,7 @@
       <% elsif has_keys %>
         <%# A reload. Nothing can re-display a hashed key, so the command is shown
             masked and the only way forward is a fresh pair. %>
-        <%= render "shared/copyable", value: masked_setup_command(api_keys, ping_keys),
+        <%= render "shared/copyable", value: masked_setup_command(setup_api, setup_ping),
               dark: true, label: "Setup command" %>
         <p class="text-[12px] text-muted mt-2" data-testid="setup-masked-note">
           Keys are stored hashed, so they can't be shown again. Lost them?

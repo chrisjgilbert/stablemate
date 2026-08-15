@@ -19,9 +19,13 @@ class Project < ApplicationRecord
   # is WAITING for, never as a claim that a job ran — §11 rejects the preview
   # ping precisely because a green row for a job that has never reported is the
   # one thing this product must not fake.
-  def awaiting_first_sync? = monitors.none?
+  # Both read the association ONCE. Spelled `monitors.load.to_a` rather than
+  # `monitors.none?` / `monitors.any?`, which issue a COUNT and an EXISTS and
+  # then load the rows anyway — three round trips per render, plus a second full
+  # materialisation of every row, on a page that already has them in hand.
+  def awaiting_first_sync? = registered_monitors.empty?
 
-  def awaiting_first_check_in? = monitors.any? && monitors.none?(&:ever_pinged?)
+  def awaiting_first_check_in? = registered_monitors.any? && registered_monitors.none?(&:ever_pinged?)
 
   # Project::MonitorSync does not broadcast on its own, so newly-registered
   # monitors appeared only on reload — the user watching this page while their
@@ -45,4 +49,9 @@ class Project < ApplicationRecord
   def sync_monitors(app: nil, entries:, declared_keys: nil, prune: false)
     MonitorSync.new(self).sync_monitors(app:, entries:, declared_keys:, prune:)
   end
+
+  private
+    # `load` populates the association, so the second predicate and every
+    # ever_pinged? below it read the same rows rather than going back for them.
+    def registered_monitors = monitors.load.to_a
 end

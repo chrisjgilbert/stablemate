@@ -59,16 +59,30 @@ class SetupPanelTest < ApplicationSystemTestCase
   end
 
   # A key already in use may be deployed somewhere; revoking it from under a
-  # running install is the one thing this panel must never do.
+  # running install is the one thing this panel must never do. The pair has to
+  # come from the panel itself — it reports only on what it issued.
   test "a key already in use survives a regenerate, and the panel says so" do
-    _key, = PingKey.issue(project: @project, name: "Production")
-    @project.ping_keys.sole.update!(last_used_at: Time.current)
+    visit project_path(@project)
+    click_on "Generate setup command"
+    @project.ping_keys.sole.update!(last_used_at: Time.current) # deployed somewhere
 
     visit project_path(@project)
     click_on "Regenerate setup command"
 
     assert_selector "[data-testid='setup-keys-kept']", text: "left working"
     assert_equal 2, @project.ping_keys.count
+  end
+
+  # ...and a key the panel never minted is not its to revoke at all: last_used_at
+  # nil means "not used yet", which is exactly the state of a rotation key pasted
+  # into secrets but not yet deployed.
+  test "a key the panel never issued is left alone entirely" do
+    rotation, = PingKey.issue(project: @project, name: "Rotation")
+
+    visit project_path(@project)
+    click_on "Generate setup command"
+
+    assert PingKey.exists?(rotation.id)
   end
 
   # The milestone the user is actually watching. Capybara cannot set an
