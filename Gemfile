@@ -60,7 +60,7 @@ gem "thruster", require: false
 # subscription state via the pay_* tables — we don't hand-roll it. Dormant unless
 # Stripe keys are configured. [https://github.com/pay-rails/pay]
 gem "pay", "~> 11.6"
-gem "stripe", "~> 19.3"
+gem "stripe", "~> 19.5"
 
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
