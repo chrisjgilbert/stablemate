@@ -59,7 +59,7 @@ gem "thruster", require: false
 # Hosted-tier billing (issue #19, hosted-only / config-gated). Pay wraps Stripe
 # subscription state via the pay_* tables — we don't hand-roll it. Dormant unless
 # Stripe keys are configured. [https://github.com/pay-rails/pay]
-gem "pay", "~> 11.6"
+gem "pay", "~> 11.7"
 gem "stripe", "~> 19.3"
 
 group :development, :test do
